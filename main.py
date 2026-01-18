@@ -1,5 +1,5 @@
 """
-Sentinel Signals v2 - Now with PumpPortal for pre-graduation signals
+Sentinel Signals v2 - Now with Performance Tracking & Daily Reports
 """
 import asyncio
 from typing import Dict
@@ -17,7 +17,9 @@ logger.add(
 
 # Import existing modules
 import config
+from database import Database
 from pumpportal_monitor import PumpPortalMonitor
+from performance_tracker import PerformanceTracker
 from trackers.smart_wallets import SmartWalletTracker
 from trackers.narrative_detector import NarrativeDetector
 from scoring.conviction_engine import ConvictionEngine
@@ -34,6 +36,7 @@ db = None
 
 # Monitors
 pumpportal_monitor = None
+performance_tracker = None
 
 # Trackers
 smart_wallet_tracker = SmartWalletTracker()
@@ -78,8 +81,27 @@ async def handle_pumpportal_signal(token_data: Dict, signal_type: str):
             conviction_data['signal_type'] = signal_type
             conviction_data['bonding_curve_pct'] = bonding_pct
             
+            # Save to database BEFORE posting (so we can track it)
+            if db:
+                await db.insert_signal({
+                    'token_address': token_address,
+                    'token_name': token_data.get('token_name'),
+                    'token_symbol': symbol,
+                    'signal_type': signal_type,
+                    'bonding_curve_pct': bonding_pct,
+                    'conviction_score': conviction_score,
+                    'entry_price': token_data.get('price_usd', 0),
+                    'liquidity': token_data.get('liquidity', 0),
+                    'volume_24h': token_data.get('volume_24h', 0),
+                    'market_cap': token_data.get('market_cap', 0),
+                })
+            
             # Post to Telegram using your existing publisher
-            await telegram_publisher.post_signal(conviction_data)
+            message_id = await telegram_publisher.post_signal(conviction_data)
+            
+            # Mark as posted in database
+            if db and message_id:
+                await db.mark_signal_posted(token_address, message_id)
             
         else:
             logger.info(f"⏭️  Low conviction ({conviction_score}/100) - skipping")
@@ -94,7 +116,7 @@ async def handle_pumpportal_signal(token_data: Dict, signal_type: str):
 @app.on_event("startup")
 async def startup():
     """Initialize all components"""
-    global conviction_engine, pumpportal_monitor, db
+    global conviction_engine, pumpportal_monitor, db, performance_tracker
     
     logger.info("=" * 70)
     logger.info("🚀 SENTINEL SIGNALS V2 STARTING")
@@ -102,7 +124,6 @@ async def startup():
     
     # Initialize database FIRST
     logger.info("📊 Initializing database...")
-    from database import Database
     db = Database()
     await db.connect()
     logger.info("✅ Database connected and tables created")
@@ -131,6 +152,12 @@ async def startup():
     if telegram_initialized:
         await telegram_publisher.post_test_message()
     
+    # Initialize Performance Tracker
+    logger.info("📊 Initializing performance tracker...")
+    performance_tracker = PerformanceTracker(db=db, telegram_publisher=telegram_publisher)
+    await performance_tracker.start()
+    logger.info("✅ Performance tracker started")
+    
     # Initialize PumpPortal monitor
     logger.info("🔌 Initializing PumpPortal monitor...")
     pumpportal_monitor = PumpPortalMonitor(on_signal_callback=handle_pumpportal_signal)
@@ -147,6 +174,9 @@ async def startup():
     logger.info(f"Post-Graduation Threshold: 75/100 (graduated tokens)")
     logger.info(f"Min Conviction Score: {config.MIN_CONVICTION_SCORE}/100")
     logger.info(f"Smart Wallets: {len(smart_wallet_tracker.tracked_wallets)} tracked")
+    logger.info(f"Performance Tracking: ✅ Enabled")
+    logger.info(f"Milestones: {', '.join(f'{m}x' for m in config.MILESTONES)}")
+    logger.info(f"Daily Reports: ✅ Midnight UTC")
     logger.info("=" * 70)
     
     logger.info("✅ SENTINEL SIGNALS V2 READY")
@@ -154,6 +184,7 @@ async def startup():
     logger.info("🔍 Monitoring PumpPortal for signals...")
     logger.info("⚡ Pre-graduation signals: 40-60% bonding curve (80+ conviction)")
     logger.info("🎓 Post-graduation signals: 100% bonding curve (75+ conviction)")
+    logger.info("📊 Performance tracking: Active")
     logger.info("=" * 70)
     
     # Start background tasks
@@ -225,6 +256,9 @@ async def status():
     
     trending = narrative_detector.get_trending_narratives(24) if narrative_detector else []
     
+    # Get performance stats
+    perf_stats = await performance_tracker.get_stats() if performance_tracker else {}
+    
     return {
         "status": "operational",
         "config": {
@@ -236,6 +270,7 @@ async def status():
             "smart_wallets": len(smart_wallet_tracker.tracked_wallets) if smart_wallet_tracker else 0,
             "pumpportal_tracked": len(pumpportal_monitor.tracked_tokens) if pumpportal_monitor else 0,
         },
+        "performance": perf_stats,
         "trending_narratives": trending[:5],
         "timestamp": datetime.utcnow().isoformat()
     }
@@ -251,6 +286,9 @@ async def shutdown():
     
     if pumpportal_monitor:
         await pumpportal_monitor.stop()
+    
+    if performance_tracker:
+        await performance_tracker.stop()
     
     if db:
         await db.close()
