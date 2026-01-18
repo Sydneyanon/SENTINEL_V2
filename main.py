@@ -110,6 +110,21 @@ async def handle_pumpportal_signal(token_data: Dict, signal_type: str):
         logger.error(f"❌ Error handling PumpPortal signal: {e}", exc_info=True)
 
 # ============================================================================
+# BACKGROUND TASK WRAPPERS
+# ============================================================================
+
+async def start_pumpportal_task():
+    """Wrapper for PumpPortal task with error handling"""
+    try:
+        logger.info("🚨 Starting PumpPortal background task...")
+        await pumpportal_monitor.start()
+    except Exception as e:
+        logger.error(f"❌ PumpPortal task crashed: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        # Don't exit - let other tasks continue
+
+# ============================================================================
 # STARTUP
 # ============================================================================
 
@@ -162,9 +177,10 @@ async def startup():
     logger.info("🔌 Initializing PumpPortal monitor...")
     pumpportal_monitor = PumpPortalMonitor(on_signal_callback=handle_pumpportal_signal)
     
-    # Start monitoring in background
-    asyncio.create_task(pumpportal_monitor.start())
-    logger.info("✅ PumpPortal monitor started")
+    # Start monitoring in background with error handling
+    logger.info("🚨 Creating PumpPortal background task...")
+    asyncio.create_task(start_pumpportal_task())
+    logger.info("✅ PumpPortal monitor task created")
     
     # Log configuration
     logger.info("=" * 70)
@@ -283,6 +299,8 @@ async def pumpportal_diagnostic():
         "is_running": pumpportal_monitor.running if pumpportal_monitor else False,
         "tracked_tokens": len(pumpportal_monitor.tracked_tokens) if pumpportal_monitor else 0,
         "websocket_connected": pumpportal_monitor.ws is not None if pumpportal_monitor else False,
+        "connection_attempts": pumpportal_monitor.connection_attempts if pumpportal_monitor else 0,
+        "messages_received": pumpportal_monitor.messages_received if pumpportal_monitor else 0,
     }
 
 # ============================================================================
