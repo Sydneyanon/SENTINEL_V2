@@ -29,6 +29,9 @@ from publishers.telegram import TelegramPublisher
 
 app = FastAPI(title="Sentinel Signals v2")
 
+# Database
+db = None
+
 # Monitors
 pumpportal_monitor = None
 
@@ -91,11 +94,21 @@ async def handle_pumpportal_signal(token_data: Dict, signal_type: str):
 @app.on_event("startup")
 async def startup():
     """Initialize all components"""
-    global conviction_engine, pumpportal_monitor
+    global conviction_engine, pumpportal_monitor, db
     
     logger.info("=" * 70)
     logger.info("🚀 SENTINEL SIGNALS V2 STARTING")
     logger.info("=" * 70)
+    
+    # Initialize database FIRST
+    logger.info("📊 Initializing database...")
+    from database import Database
+    db = Database()
+    await db.connect()
+    logger.info("✅ Database connected and tables created")
+    
+    # Pass database to smart wallet tracker
+    smart_wallet_tracker.db = db
     
     # Initialize trackers
     logger.info("🔍 Starting trackers...")
@@ -238,6 +251,9 @@ async def shutdown():
     
     if pumpportal_monitor:
         await pumpportal_monitor.stop()
+    
+    if db:
+        await db.close()
     
     logger.info("✅ Shutdown complete")
 
