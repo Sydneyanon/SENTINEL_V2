@@ -177,6 +177,10 @@ async def startup():
     logger.info("🔌 Initializing PumpPortal monitor...")
     pumpportal_monitor = PumpPortalMonitor(on_signal_callback=handle_pumpportal_signal)
     
+    # Wait a bit for everything to stabilize before starting background task
+    logger.info("⏳ Waiting 2 seconds before starting PumpPortal task...")
+    await asyncio.sleep(2)
+    
     # Start monitoring in background with error handling
     logger.info("🚨 Creating PumpPortal background task...")
     asyncio.create_task(start_pumpportal_task())
