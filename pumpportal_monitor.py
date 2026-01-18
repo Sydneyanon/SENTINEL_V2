@@ -1,12 +1,13 @@
 """
 PumpPortal Monitor - Real-time pump.fun bonding curve tracking
-Replaces Helius graduation webhooks with WebSocket monitoring
+UPDATED: Now fetches holder count and enhanced volume metrics
 """
 import asyncio
 import json
 import logging
 from typing import Callable, Dict, Optional
 import websockets
+import aiohttp
 
 logger = logging.getLogger(__name__)
 
@@ -128,8 +129,8 @@ class PumpPortalMonitor:
             if token_address not in self.tracked_tokens:
                 logger.info(f"⚡ Token in range: {data.get('symbol')} at {bonding_pct:.1f}%")
                 
-                # Extract token data and signal
-                token_data = self._extract_token_data(data)
+                # Extract token data and enrich with holder count
+                token_data = await self._extract_and_enrich_token_data(data)
                 await self.on_signal_callback(token_data, 'PRE_GRADUATION')
                 
                 # Mark as tracked
@@ -147,8 +148,8 @@ class PumpPortalMonitor:
         if token_address:
             logger.info(f"🎓 Graduation: ${symbol} ({token_address[:8]}...)")
             
-            # Extract token data and signal
-            token_data = self._extract_token_data(data)
+            # Extract token data and enrich with holder count
+            token_data = await self._extract_and_enrich_token_data(data)
             token_data['bonding_curve_pct'] = 100
             
             await self.on_signal_callback(token_data, 'POST_GRADUATION')
@@ -156,10 +157,21 @@ class PumpPortalMonitor:
             # Remove from tracking (no longer on pump.fun)
             self.tracked_tokens.pop(token_address, None)
     
-    def _extract_token_data(self, data: Dict) -> Dict:
-        """Extract relevant token data from PumpPortal message"""
-        return {
-            'token_address': data.get('mint'),
+    async def _extract_and_enrich_token_data(self, data: Dict) -> Dict:
+        """
+        Extract token data from PumpPortal and enrich with holder count
+        
+        Args:
+            data: Raw PumpPortal message
+            
+        Returns:
+            Enriched token data with holder count and volume metrics
+        """
+        token_address = data.get('mint')
+        
+        # Base data from PumpPortal
+        token_data = {
+            'token_address': token_address,
             'token_name': data.get('name'),
             'token_symbol': data.get('symbol'),
             'description': data.get('description', ''),
@@ -176,6 +188,10 @@ class PumpPortalMonitor:
             'price_change_5m': data.get('priceChange5mPercent', 0),
             'price_change_1h': data.get('priceChange1hPercent', 0),
             
+            # Volume metrics (NEW - for velocity scoring)
+            'volume_5m': data.get('volume5m', 0),
+            'volume_1h': data.get('volume1h', 0),
+            
             # Transaction data
             'tx_signature': data.get('signature'),
             'trader_wallet': data.get('traderPublicKey'),
@@ -183,7 +199,59 @@ class PumpPortalMonitor:
             # Metadata
             'image_uri': data.get('uri', ''),
             'created_timestamp': data.get('timestamp'),
+            
+            # Holder count (will be enriched)
+            'holder_count': 0  # Default, will fetch
         }
+        
+        # Enrich with holder count from DexScreener
+        holder_count = await self._fetch_holder_count(token_address)
+        token_data['holder_count'] = holder_count
+        
+        return token_data
+    
+    async def _fetch_holder_count(self, token_address: str) -> int:
+        """
+        Fetch holder count from DexScreener API
+        
+        Args:
+            token_address: Token mint address
+            
+        Returns:
+            Number of holders (0 if unavailable)
+        """
+        try:
+            url = f"https://api.dexscreener.com/latest/dex/tokens/{token_address}"
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as resp:
+                    if resp.status != 200:
+                        logger.debug(f"⚠️ DexScreener returned {resp.status} for holder count")
+                        return 0
+                    
+                    data = await resp.json()
+                    pairs = data.get('pairs', [])
+                    
+                    if not pairs:
+                        return 0
+                    
+                    # Get holder count from first pair
+                    pair = pairs[0]
+                    holder_count = pair.get('txns', {}).get('h24', {}).get('unique', 0)
+                    
+                    # If not available, try alternative field
+                    if holder_count == 0:
+                        holder_count = pair.get('holderCount', 0)
+                    
+                    logger.debug(f"   👥 Fetched holder count: {holder_count}")
+                    return holder_count
+                    
+        except asyncio.TimeoutError:
+            logger.debug(f"⚠️ Timeout fetching holder count for {token_address[:8]}")
+            return 0
+        except Exception as e:
+            logger.debug(f"⚠️ Error fetching holder count: {e}")
+            return 0
     
     async def stop(self):
         """Stop monitoring"""
