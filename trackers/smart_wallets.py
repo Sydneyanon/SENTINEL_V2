@@ -35,31 +35,6 @@ class SmartWalletTracker:
         logger.info(f"   📊 Total tracked: {len(self.tracked_wallets)}")
         logger.info(f"   💾 Database: {'enabled' if self.db else 'NOT SET (memory-only)'}")
         
-        # Test database if available
-        if self.db:
-            try:
-                # Test the connection
-                result = await self.db.execute_query("SELECT 1 as test")
-                logger.info(f"   ✅ Database connection verified")
-                
-                # Check if table exists
-                table_check = await self.db.execute_query("""
-                    SELECT EXISTS (
-                        SELECT FROM information_schema.tables 
-                        WHERE table_name = 'kol_buys'
-                    )
-                """)
-                
-                if table_check and table_check[0].get('exists'):
-                    logger.info(f"   ✅ Table 'kol_buys' exists")
-                else:
-                    logger.error(f"   ❌ Table 'kol_buys' does NOT exist!")
-                    logger.error(f"   🔧 Run this SQL in Railway to create it:")
-                    logger.error(f"   CREATE TABLE kol_buys (...")
-                    
-            except Exception as e:
-                logger.error(f"   ❌ Database test FAILED: {e}")
-        
         return True
     
     async def process_webhook(self, webhook_data: List[Dict]) -> None:
