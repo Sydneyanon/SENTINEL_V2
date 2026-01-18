@@ -239,9 +239,9 @@ class Database:
             rows = await conn.fetch('''
                 SELECT * FROM smart_wallet_activity
                 WHERE token_address = $1
-                AND timestamp > NOW() - INTERVAL '%s hours'
+                AND timestamp > NOW() - INTERVAL '{} hours'
                 ORDER BY timestamp DESC
-            ''', token_address, hours)
+            '''.format(hours), token_address)  # FIXED: Use .format() for interval
             return [dict(row) for row in rows]
     
     async def get_wallet_performance(
@@ -254,8 +254,8 @@ class Database:
             total_trades = await conn.fetchval('''
                 SELECT COUNT(*) FROM smart_wallet_activity
                 WHERE wallet_address = $1
-                AND timestamp > NOW() - INTERVAL '%s days'
-            ''', wallet_address, days)
+                AND timestamp > NOW() - INTERVAL '{} days'
+            '''.format(days), wallet_address)  # FIXED: Use .format() for interval
             
             return {
                 'wallet_address': wallet_address,
