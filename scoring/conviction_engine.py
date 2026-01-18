@@ -1,168 +1,200 @@
 """
-Conviction Engine - Calculate conviction scores for tokens
+Conviction Engine - Scores tokens based on multiple signals
+UPDATED: Added holder count and volume velocity scoring
 """
-from typing import Dict, Optional
+from typing import Dict
 from datetime import datetime
 from loguru import logger
 import config
 
 
 class ConvictionEngine:
-    """Calculates conviction scores based on multiple signals"""
+    """
+    Analyzes tokens and calculates conviction scores (0-100)
+    
+    Scoring breakdown:
+    - Smart Wallet Activity: 0-40 points
+    - Narrative Detection: 0-25 points
+    - Holder Distribution: 0-15 points (NEW)
+    - Volume Velocity: 0-10 points (NEW)
+    - Price Momentum: 0-10 points
+    Total: 0-100 points
+    """
     
     def __init__(self, smart_wallet_tracker, narrative_detector):
         self.smart_wallet_tracker = smart_wallet_tracker
         self.narrative_detector = narrative_detector
         
-    def calculate_conviction(
-        self,
-        token_address: str,
-        symbol: str,
-        name: str = '',
-        description: str = '',
-        age_minutes: int = 0,
-        liquidity: float = 0,
-        holders: int = 0,
-        **kwargs
-    ) -> Dict:
+    async def analyze_token(self, token_address: str, token_data: Dict) -> Dict:
         """
-        Calculate conviction score for a token
-        Returns score breakdown and decision
+        Analyze a token and return conviction score with breakdown
+        
+        Args:
+            token_address: Token mint address
+            token_data: Token data from PumpPortal or DexScreener
+            
+        Returns:
+            Dict with score and detailed breakdown
         """
-        
-        # Start with base score
-        score = 50
-        breakdown = {
-            'base': 50,
-            'smart_wallets': 0,
-            'narrative': 0,
-            'timing': 0
-        }
-        reasons = []
-        
-        # ================================================================
-        # 1. SMART WALLET ACTIVITY (Max +40 points)
-        # ================================================================
-        if config.ENABLE_SMART_WALLETS:
-            wallet_data = self.smart_wallet_tracker.get_smart_wallet_activity(token_address)
+        try:
+            logger.info(f"🔍 Analyzing {token_data.get('token_symbol', 'UNKNOWN')} ({token_address[:8]}...)")
             
-            if wallet_data['has_activity']:
-                wallet_score = wallet_data['score']
-                breakdown['smart_wallets'] = wallet_score
-                score += wallet_score
-                
-                # Build reason string
-                if wallet_data['elite_count'] > 0:
-                    reasons.append(f"🏆 {wallet_data['elite_count']} elite wallet{'s' if wallet_data['elite_count'] > 1 else ''}")
-                if wallet_data['top_kol_count'] > 0:
-                    reasons.append(f"👑 {wallet_data['top_kol_count']} top KOL{'s' if wallet_data['top_kol_count'] > 1 else ''}")
-        
-        # ================================================================
-        # 2. NARRATIVE DETECTION (Max +35 points)
-        # ================================================================
-        if config.ENABLE_NARRATIVES:
-            narrative_data = self.narrative_detector.analyze_token(symbol, name, description)
+            # Initialize scores
+            scores = {
+                'smart_wallet': 0,
+                'narrative': 0,
+                'holders': 0,        # NEW
+                'volume_velocity': 0, # NEW
+                'momentum': 0,
+                'total': 0
+            }
             
-            if narrative_data['has_narrative']:
-                narrative_score = narrative_data['score']
-                breakdown['narrative'] = narrative_score
-                score += narrative_score
-                
-                # Build reason string
-                primary = narrative_data['primary_narrative']
-                if primary:
-                    reasons.append(f"📈 {primary.upper()} narrative")
-                
-                if len(narrative_data['narratives']) > 1:
-                    reasons.append(f"🎯 Multiple narratives")
-        
-        # ================================================================
-        # 3. TIMING BONUS (Max +10 points)
-        # ================================================================
-        timing_score = 0
-        if age_minutes < 30:
-            timing_score = config.WEIGHTS['timing_very_early']
-            reasons.append("⚡ Ultra early (<30m)")
-        elif age_minutes < 60:
-            timing_score = config.WEIGHTS['timing_early']
-            reasons.append("🚀 Early entry (<1h)")
-        
-        breakdown['timing'] = timing_score
-        score += timing_score
-        
-        # ================================================================
-        # 4. BASIC QUALITY CHECKS
-        # ================================================================
-        passes_quality = True
-        quality_issues = []
-        
-        if liquidity < config.MIN_LIQUIDITY:
-            passes_quality = False
-            quality_issues.append(f"Low liquidity (${liquidity:,.0f})")
-        
-        if holders < config.MIN_HOLDERS:
-            passes_quality = False
-            quality_issues.append(f"Few holders ({holders})")
-        
-        if age_minutes > config.MAX_AGE_MINUTES:
-            passes_quality = False
-            quality_issues.append(f"Too old ({age_minutes}m)")
-        
-        # ================================================================
-        # 5. FINAL DECISION
-        # ================================================================
-        should_signal = (
-            score >= config.MIN_CONVICTION_SCORE and
-            passes_quality
-        )
-        
-        result = {
-            'conviction_score': min(score, 100),  # Cap at 100
-            'breakdown': breakdown,
-            'reasons': reasons,
-            'should_signal': should_signal,
-            'passes_quality': passes_quality,
-            'quality_issues': quality_issues,
-            'meets_threshold': score >= config.MIN_CONVICTION_SCORE
-        }
-        
-        # Log decision
-        if should_signal:
-            logger.info(f"✅ HIGH CONVICTION: {symbol} - Score: {score}/100")
-            for reason in reasons:
-                logger.info(f"   {reason}")
-        else:
-            logger.debug(f"❌ Low conviction: {symbol} - Score: {score}/100 (threshold: {config.MIN_CONVICTION_SCORE})")
-            if quality_issues:
-                for issue in quality_issues:
-                    logger.debug(f"   ⚠️ {issue}")
-        
-        return result
+            # 1. Smart Wallet Activity (0-40 points)
+            smart_wallet_data = await self.smart_wallet_tracker.get_smart_wallet_activity(
+                token_address, 
+                hours=24
+            )
+            scores['smart_wallet'] = smart_wallet_data.get('score', 0)
+            logger.info(f"   👑 Smart Wallets: {scores['smart_wallet']} points")
+            
+            # 2. Narrative Detection (0-25 points)
+            narrative_data = await self.narrative_detector.detect_narratives(
+                token_data.get('token_name', ''),
+                token_data.get('token_symbol', '')
+            )
+            scores['narrative'] = narrative_data.get('score', 0)
+            logger.info(f"   🎯 Narratives: {scores['narrative']} points")
+            
+            # 3. Holder Distribution (0-15 points) - NEW
+            holder_count = token_data.get('holder_count', 0)
+            scores['holders'] = self._score_holders(holder_count)
+            logger.info(f"   👥 Holders ({holder_count}): {scores['holders']} points")
+            
+            # 4. Volume Velocity (0-10 points) - NEW
+            scores['volume_velocity'] = self._score_volume_velocity(token_data)
+            logger.info(f"   📊 Volume Velocity: {scores['volume_velocity']} points")
+            
+            # 5. Price Momentum (0-10 points)
+            scores['momentum'] = self._score_momentum(token_data)
+            logger.info(f"   🚀 Momentum: {scores['momentum']} points")
+            
+            # Calculate total
+            scores['total'] = sum(scores.values()) - scores['total']  # Subtract total itself
+            
+            logger.info(f"   💎 TOTAL CONVICTION: {scores['total']}/100")
+            
+            # Prepare detailed response
+            return {
+                'score': scores['total'],
+                'breakdown': scores,
+                'smart_wallet_data': smart_wallet_data,
+                'narrative_data': narrative_data,
+                'token_data': token_data,
+                'holder_count': holder_count,
+                'meets_threshold': scores['total'] >= config.MIN_CONVICTION_SCORE
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Error analyzing token: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return {
+                'score': 0,
+                'breakdown': {},
+                'error': str(e)
+            }
     
-    def get_scoring_summary(self) -> str:
-        """Get a human-readable explanation of the scoring system"""
-        return f"""
-📊 CONVICTION SCORING SYSTEM
-
-Base Score: 50 points
-
-🏆 Smart Wallet Activity (Max +40):
-  • Elite wallet buy: +{config.WEIGHTS['smart_wallet_elite']} each
-  • Top KOL buy: +{config.WEIGHTS['smart_wallet_kol']} each
-
-📈 Narrative Matching (Max +35):
-  • Hot narrative: +{config.WEIGHTS['narrative_hot']}
-  • Fresh narrative: +{config.WEIGHTS['narrative_fresh']}
-  • Multiple narratives: +{config.WEIGHTS['narrative_multiple']}
-
-⚡ Timing Bonus (Max +10):
-  • Ultra early (<30m): +{config.WEIGHTS['timing_very_early']}
-  • Early (30-60m): +{config.WEIGHTS['timing_early']}
-
-📋 Quality Filters:
-  • Min liquidity: ${config.MIN_LIQUIDITY:,}
-  • Min holders: {config.MIN_HOLDERS}
-  • Max age: {config.MAX_AGE_MINUTES} minutes
-
-🎯 Signal Threshold: {config.MIN_CONVICTION_SCORE}/100
-        """.strip()
+    def _score_holders(self, holder_count: int) -> int:
+        """
+        Score based on holder count
+        
+        Args:
+            holder_count: Number of unique holders
+            
+        Returns:
+            Score (0-15 points)
+        """
+        if holder_count >= 100:
+            return config.WEIGHTS['holders_high']  # 15 points
+        elif holder_count >= 50:
+            return config.WEIGHTS['holders_medium']  # 10 points
+        elif holder_count >= config.MIN_HOLDERS:
+            return config.WEIGHTS['holders_low']  # 5 points
+        else:
+            # Below minimum - token should be filtered
+            return 0
+    
+    def _score_volume_velocity(self, token_data: Dict) -> int:
+        """
+        Score based on volume velocity (how fast volume is growing)
+        
+        Compares recent volume to liquidity and checks for spikes
+        
+        Args:
+            token_data: Token data with volume metrics
+            
+        Returns:
+            Score (0-10 points)
+        """
+        try:
+            volume_5m = token_data.get('volume_5m', 0)
+            volume_1h = token_data.get('volume_1h', 0)
+            volume_24h = token_data.get('volume_24h', 0)
+            liquidity = token_data.get('liquidity', 1)  # Avoid division by zero
+            
+            # Method 1: Check if volume doubled in 5 minutes
+            # (Compare 5m volume to average 1h rate)
+            if volume_1h > 0:
+                avg_5m_volume = volume_1h / 12  # Expected volume per 5min if steady
+                
+                if volume_5m >= avg_5m_volume * 2:
+                    # Volume spiking! (2x expected rate)
+                    logger.debug(f"      📈 Volume spike detected: {volume_5m:.0f} vs expected {avg_5m_volume:.0f}")
+                    return config.WEIGHTS['volume_spiking']  # 10 points
+                    
+                elif volume_5m >= avg_5m_volume * 1.25:
+                    # Volume growing (1.25x expected rate)
+                    logger.debug(f"      📈 Volume growing: {volume_5m:.0f} vs expected {avg_5m_volume:.0f}")
+                    return config.WEIGHTS['volume_growing']  # 5 points
+            
+            # Method 2: Fallback - check volume/liquidity ratio
+            # High ratio = lots of trading activity
+            if liquidity > 0:
+                vol_liq_ratio = volume_24h / liquidity
+                
+                if vol_liq_ratio >= 3.0:
+                    # Very high trading volume relative to liquidity
+                    logger.debug(f"      📈 High vol/liq ratio: {vol_liq_ratio:.2f}")
+                    return config.WEIGHTS['volume_growing']  # 5 points
+            
+            return 0
+            
+        except Exception as e:
+            logger.error(f"❌ Error scoring volume velocity: {e}")
+            return 0
+    
+    def _score_momentum(self, token_data: Dict) -> int:
+        """
+        Score based on price momentum
+        
+        Args:
+            token_data: Token data with price change metrics
+            
+        Returns:
+            Score (0-10 points)
+        """
+        try:
+            price_change_5m = token_data.get('price_change_5m', 0)
+            
+            if price_change_5m >= 50:
+                # Very strong momentum (+50% in 5min)
+                return config.WEIGHTS['momentum_very_strong']  # 10 points
+            elif price_change_5m >= 20:
+                # Strong momentum (+20% in 5min)
+                return config.WEIGHTS['momentum_strong']  # 5 points
+            else:
+                return 0
+                
+        except Exception as e:
+            logger.error(f"❌ Error scoring momentum: {e}")
+            return 0
