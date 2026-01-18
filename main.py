@@ -1,8 +1,10 @@
 """
 Sentinel Signals v2 - Clean, focused memecoin trading signals
+Now with PumpPortal for pre-graduation (40-60%) and graduation signals
 """
 import asyncio
 from datetime import datetime
+from typing import Dict
 from fastapi import FastAPI, Request
 from loguru import logger
 import sys
@@ -18,6 +20,7 @@ logger.add(
 # Import modules
 import config
 import database
+from pumpportal_monitor import PumpPortalMonitor
 from trackers.smart_wallets import SmartWalletTracker
 from trackers.narrative_detector import NarrativeDetector
 from scoring.conviction_engine import ConvictionEngine
@@ -29,6 +32,9 @@ from publishers.telegram import TelegramPublisher
 
 app = FastAPI(title="Sentinel Signals v2")
 
+# Monitors
+pumpportal_monitor = None  # Initialized in startup
+
 # Trackers
 smart_wallet_tracker = SmartWalletTracker()
 narrative_detector = NarrativeDetector()
@@ -39,6 +45,67 @@ conviction_engine = None  # Initialized after trackers
 # Publishers
 telegram_publisher = TelegramPublisher()
 
+# Database
+db = None
+
+# ============================================================================
+# SIGNAL PROCESSING
+# ============================================================================
+
+async def handle_pumpportal_signal(token_data: Dict, signal_type: str):
+    """
+    Handle signals from PumpPortal monitor
+    
+    Args:
+        token_data: Token information from PumpPortal
+        signal_type: 'PRE_GRADUATION' (40-60%) or 'POST_GRADUATION' (100%)
+    """
+    try:
+        token_address = token_data.get('token_address')
+        symbol = token_data.get('token_symbol', 'UNKNOWN')
+        bonding_pct = token_data.get('bonding_curve_pct', 0)
+        
+        logger.info(f"🎯 Signal received: ${symbol} at {bonding_pct:.1f}% ({signal_type})")
+        
+        # Calculate conviction score
+        conviction_score = await conviction_engine.calculate_conviction(token_data)
+        
+        # Different thresholds for pre vs post graduation
+        min_score = 80 if signal_type == 'PRE_GRADUATION' else 75
+        
+        if conviction_score >= min_score:
+            logger.info(f"✅ High conviction ({conviction_score}/100) - posting signal!")
+            
+            # Add signal type to token data
+            token_data['signal_type'] = signal_type
+            token_data['conviction_score'] = conviction_score
+            
+            # Post to Telegram
+            message_id = await telegram_publisher.post_signal(token_data, conviction_score)
+            
+            # Save to database
+            if db:
+                await db.insert_signal({
+                    'token_address': token_address,
+                    'token_name': token_data.get('token_name'),
+                    'token_symbol': symbol,
+                    'signal_type': signal_type,
+                    'bonding_curve_pct': bonding_pct,
+                    'conviction_score': conviction_score,
+                    'entry_price': token_data.get('price_usd', 0),
+                    'liquidity': token_data.get('liquidity', 0),
+                    'volume_24h': token_data.get('volume_24h', 0),
+                    'market_cap': token_data.get('market_cap', 0),
+                })
+                
+                if message_id:
+                    await db.mark_signal_posted(token_address, message_id)
+        else:
+            logger.info(f"⏭️  Low conviction ({conviction_score}/100) - skipping")
+            
+    except Exception as e:
+        logger.error(f"❌ Error handling PumpPortal signal: {e}", exc_info=True)
+
 # ============================================================================
 # STARTUP
 # ============================================================================
@@ -46,21 +113,26 @@ telegram_publisher = TelegramPublisher()
 @app.on_event("startup")
 async def startup():
     """Initialize all components"""
+    global conviction_engine, pumpportal_monitor, db
+    
     logger.info("=" * 70)
     logger.info("🚀 SENTINEL SIGNALS V2 STARTING")
     logger.info("=" * 70)
     
     # Initialize database
     logger.info("📊 Initializing database...")
-    database.init_db()
+    db = database.Database()
+    await db.connect()
+    logger.info("✅ Database connected")
     
     # Initialize trackers
     logger.info("🔍 Starting trackers...")
     await smart_wallet_tracker.start()
     await narrative_detector.start()
+    logger.info("✅ Trackers initialized")
     
     # Initialize conviction engine (needs trackers)
-    global conviction_engine
+    logger.info("🧠 Initializing conviction engine...")
     conviction_engine = ConvictionEngine(
         smart_wallet_tracker=smart_wallet_tracker,
         narrative_detector=narrative_detector
@@ -75,24 +147,35 @@ async def startup():
         # Send test message
         await telegram_publisher.post_test_message()
     
+    # Initialize PumpPortal monitor
+    logger.info("🔌 Initializing PumpPortal monitor...")
+    pumpportal_monitor = PumpPortalMonitor(on_signal_callback=handle_pumpportal_signal)
+    
+    # Start monitoring in background
+    asyncio.create_task(pumpportal_monitor.start())
+    logger.info("✅ PumpPortal monitor started")
+    
     # Log configuration
     logger.info("=" * 70)
     logger.info("⚙️  CONFIGURATION")
     logger.info("=" * 70)
-    logger.info(f"Min Conviction Score: {config.MIN_CONVICTION_SCORE}/100")
-    logger.info(f"Min Liquidity: ${config.MIN_LIQUIDITY:,}")
-    logger.info(f"Min Holders: {config.MIN_HOLDERS}")
-    logger.info(f"Max Age: {config.MAX_AGE_MINUTES} minutes")
+    logger.info(f"Pre-Graduation Threshold: 80/100 (40-60% bonding)")
+    logger.info(f"Post-Graduation Threshold: 75/100 (graduated tokens)")
     logger.info(f"Smart Wallets: {'✅ Enabled' if config.ENABLE_SMART_WALLETS else '❌ Disabled'}")
-    logger.info(f"Narratives: {'✅ Enabled' if config.ENABLE_NARRATIVES else '❌ Enabled'}")
+    logger.info(f"Narratives: {'✅ Enabled' if config.ENABLE_NARRATIVES else '❌ Disabled'}")
     logger.info(f"Telegram: {'✅ Enabled' if config.ENABLE_TELEGRAM else '❌ Disabled'}")
     logger.info("=" * 70)
     
     # Show scoring system
-    logger.info(conviction_engine.get_scoring_summary())
+    if conviction_engine:
+        logger.info(conviction_engine.get_scoring_summary())
     logger.info("=" * 70)
     
     logger.info("✅ SENTINEL SIGNALS V2 READY")
+    logger.info("=" * 70)
+    logger.info("🔍 Monitoring PumpPortal for signals...")
+    logger.info("⚡ Pre-graduation signals: 40-60% bonding curve (80+ conviction)")
+    logger.info("🎓 Post-graduation signals: 100% bonding curve (75+ conviction)")
     logger.info("=" * 70)
     
     # Start background tasks
@@ -102,31 +185,11 @@ async def startup():
 # WEBHOOKS
 # ============================================================================
 
-@app.post("/webhook/graduation")
-async def graduation_webhook(request: Request):
-    """
-    Helius webhook for token graduations
-    Receives notifications when tokens graduate from pump.fun
-    """
-    try:
-        data = await request.json()
-        logger.info("📥 Received graduation webhook")
-        
-        # Process graduation event
-        await process_graduation(data)
-        
-        return {"status": "success"}
-        
-    except Exception as e:
-        logger.error(f"❌ Error processing graduation webhook: {e}")
-        return {"status": "error", "message": str(e)}
-
-
 @app.post("/webhook/smart-wallet")
 async def smart_wallet_webhook(request: Request):
     """
     Helius webhook for smart wallet transactions
-    Receives notifications when tracked wallets make transactions
+    Receives notifications when tracked KOL wallets make transactions
     """
     try:
         data = await request.json()
@@ -141,165 +204,6 @@ async def smart_wallet_webhook(request: Request):
         logger.error(f"❌ Error processing smart wallet webhook: {e}")
         return {"status": "error", "message": str(e)}
 
-
-# ============================================================================
-# GRADUATION PROCESSING
-# ============================================================================
-
-async def process_graduation(webhook_data: list):
-    """Process token graduation event"""
-    
-    for event in webhook_data:
-        try:
-            # Extract token data
-            token_address = event.get('tokenTransfers', [{}])[0].get('mint', '')
-            
-            if not token_address:
-                continue
-            
-            logger.info(f"🎓 Processing graduation: {token_address[:8]}...")
-            
-            # Fetch token data from DexScreener
-            token_data = await fetch_token_data(token_address)
-            
-            if not token_data:
-                logger.warning(f"⚠️ Could not fetch data for {token_address}")
-                continue
-            
-            # Analyze and score
-            await analyze_and_signal(token_address, token_data)
-            
-        except Exception as e:
-            logger.error(f"❌ Error processing graduation: {e}")
-
-
-async def fetch_token_data(token_address: str) -> dict:
-    """Fetch token data from DexScreener API"""
-    
-    import aiohttp
-    
-    url = f"https://api.dexscreener.com/latest/dex/tokens/{token_address}"
-    
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    pairs = data.get('pairs', [])
-                    
-                    if pairs:
-                        # Get the main pair (usually first one)
-                        pair = pairs[0]
-                        
-                        # Calculate age
-                        created_at = pair.get('pairCreatedAt', 0)
-                        if created_at:
-                            age_ms = datetime.utcnow().timestamp() * 1000 - created_at
-                            age_minutes = age_ms / (1000 * 60)
-                        else:
-                            age_minutes = 0
-                        
-                        return {
-                            'symbol': pair.get('baseToken', {}).get('symbol', 'UNKNOWN'),
-                            'name': pair.get('baseToken', {}).get('name', ''),
-                            'price': float(pair.get('priceUsd', 0)),
-                            'market_cap': float(pair.get('marketCap', 0) or 0),
-                            'liquidity': float(pair.get('liquidity', {}).get('usd', 0) or 0),
-                            'volume_24h': float(pair.get('volume', {}).get('h24', 0) or 0),
-                            'price_change_24h': float(pair.get('priceChange', {}).get('h24', 0) or 0),
-                            'age_minutes': age_minutes,
-                            'holders': 50,  # DexScreener doesn't provide this, use default
-                        }
-    except Exception as e:
-        logger.error(f"❌ Error fetching token data: {e}")
-    
-    return None
-
-
-async def analyze_and_signal(token_address: str, token_data: dict):
-    """Analyze token and post signal if conviction is high enough"""
-    
-    # Calculate conviction
-    conviction_result = conviction_engine.calculate_conviction(
-        token_address=token_address,
-        symbol=token_data['symbol'],
-        name=token_data.get('name', ''),
-        age_minutes=token_data.get('age_minutes', 0),
-        liquidity=token_data.get('liquidity', 0),
-        holders=token_data.get('holders', 50),
-    )
-    
-    # Check if we should signal
-    if not conviction_result['should_signal']:
-        return
-    
-    # Get additional data for the signal
-    wallet_activity = smart_wallet_tracker.get_smart_wallet_activity(token_address)
-    narrative_data = narrative_detector.analyze_token(
-        token_data['symbol'],
-        token_data.get('name', ''),
-        ''
-    )
-    
-    # Build signal data
-    signal_data = {
-        'token_address': token_address,
-        'symbol': token_data['symbol'],
-        'conviction_score': conviction_result['conviction_score'],
-        'breakdown': conviction_result['breakdown'],
-        'reasons': conviction_result['reasons'],
-        'price': token_data.get('price', 0),
-        'market_cap': token_data.get('market_cap', 0),
-        'liquidity': token_data.get('liquidity', 0),
-        'holders': token_data.get('holders', 50),
-        'age_minutes': token_data.get('age_minutes', 0),
-        'wallet_activity': wallet_activity,
-        'narrative_data': narrative_data,
-    }
-    
-    # Post to Telegram
-    posted = await telegram_publisher.post_signal(signal_data)
-    
-    # Save to database
-    if posted:
-        save_signal_to_db(signal_data, wallet_activity, narrative_data)
-
-
-def save_signal_to_db(signal_data: dict, wallet_activity: dict, narrative_data: dict):
-    """Save posted signal to database"""
-    
-    session = database.get_session()
-    if not session:
-        return
-    
-    try:
-        signal = database.Signal(
-            token_address=signal_data['token_address'],
-            symbol=signal_data['symbol'],
-            conviction_score=signal_data['conviction_score'],
-            signal_type='standard',
-            entry_price=signal_data.get('price', 0),
-            entry_mcap=signal_data.get('market_cap', 0),
-            entry_liquidity=signal_data.get('liquidity', 0),
-            entry_holders=signal_data.get('holders', 0),
-            smart_wallet_score=signal_data['breakdown'].get('smart_wallets', 0),
-            narrative_score=signal_data['breakdown'].get('narrative', 0),
-            timing_score=signal_data['breakdown'].get('timing', 0),
-            kol_buyers=[w['name'] for w in wallet_activity.get('wallets', [])],
-            narratives=[n['name'] for n in narrative_data.get('narratives', [])],
-        )
-        
-        session.add(signal)
-        session.commit()
-        logger.info(f"💾 Saved signal to database: {signal_data['symbol']}")
-        
-    except Exception as e:
-        logger.error(f"❌ Error saving signal to database: {e}")
-        session.rollback()
-    finally:
-        session.close()
-
-
 # ============================================================================
 # BACKGROUND TASKS
 # ============================================================================
@@ -313,11 +217,14 @@ async def cleanup_task():
             logger.info("🧹 Running cleanup...")
             smart_wallet_tracker.cleanup_old_data()
             narrative_detector.cleanup_old_data()
+            
+            if pumpportal_monitor:
+                pumpportal_monitor.cleanup_old_tokens()
+            
             logger.info("✅ Cleanup complete")
             
         except Exception as e:
             logger.error(f"❌ Error in cleanup task: {e}")
-
 
 # ============================================================================
 # HEALTH CHECK
@@ -332,30 +239,47 @@ async def health_check():
         "timestamp": datetime.utcnow().isoformat()
     }
 
-
 @app.get("/status")
 async def status():
     """Detailed status endpoint"""
     
     # Get trending narratives
-    trending = narrative_detector.get_trending_narratives(24)
+    trending = narrative_detector.get_trending_narratives(24) if narrative_detector else []
     
     return {
         "status": "operational",
         "config": {
-            "min_conviction": config.MIN_CONVICTION_SCORE,
+            "pre_grad_conviction": 80,
+            "post_grad_conviction": 75,
             "smart_wallets_enabled": config.ENABLE_SMART_WALLETS,
             "narratives_enabled": config.ENABLE_NARRATIVES,
             "telegram_enabled": config.ENABLE_TELEGRAM,
         },
         "trackers": {
-            "smart_wallets": len(smart_wallet_tracker.tracked_wallets),
-            "narratives": len(narrative_detector.narratives),
+            "smart_wallets": len(smart_wallet_tracker.tracked_wallets) if smart_wallet_tracker else 0,
+            "narratives": len(narrative_detector.narratives) if narrative_detector else 0,
+            "pumpportal_tracked": len(pumpportal_monitor.tracked_tokens) if pumpportal_monitor else 0,
         },
         "trending_narratives": trending[:5],
         "timestamp": datetime.utcnow().isoformat()
     }
 
+# ============================================================================
+# SHUTDOWN
+# ============================================================================
+
+@app.on_event("shutdown")
+async def shutdown():
+    """Cleanup on shutdown"""
+    logger.info("🛑 Shutting down...")
+    
+    if pumpportal_monitor:
+        await pumpportal_monitor.stop()
+    
+    if db:
+        await db.close()
+    
+    logger.info("✅ Shutdown complete")
 
 # ============================================================================
 # MAIN
