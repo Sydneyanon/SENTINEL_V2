@@ -22,3 +22,5 @@ pydantic==2.5.3
 
 # Date/Time
 python-dateutil==2.8.2
+
+websockets
