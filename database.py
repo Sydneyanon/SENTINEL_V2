@@ -1,142 +1,178 @@
-"""
-Database - SQLAlchemy models and connection
-"""
-from sqlalchemy import create_engine, Column, String, Float, Integer, Boolean, DateTime, JSON
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
+import asyncpg
+import logging
+import os
 from datetime import datetime
-from loguru import logger
-import config
+from typing import Optional, List, Dict
 
-Base = declarative_base()
+logger = logging.getLogger(__name__)
 
-# ============================================================================
-# MODELS
-# ============================================================================
-
-class Signal(Base):
-    """Stores posted trading signals"""
-    __tablename__ = 'signals'
+class Database:
+    def __init__(self):
+        self.pool = None
+        self.database_url = os.getenv('DATABASE_URL')
+        
+        if not self.database_url:
+            logger.error("❌ DATABASE_URL not found in environment variables")
+            raise ValueError("DATABASE_URL environment variable is required")
     
-    id = Column(Integer, primary_key=True)
-    token_address = Column(String, unique=True, index=True)
-    symbol = Column(String)
-    conviction_score = Column(Integer)
-    
-    # Signal data
-    signal_type = Column(String)  # 'standard', 'ultra_early', etc.
-    posted_at = Column(DateTime, default=datetime.utcnow)
-    
-    # Entry metrics
-    entry_price = Column(Float)
-    entry_mcap = Column(Float)
-    entry_liquidity = Column(Float)
-    entry_holders = Column(Integer)
-    
-    # Scoring breakdown
-    smart_wallet_score = Column(Integer, default=0)
-    narrative_score = Column(Integer, default=0)
-    timing_score = Column(Integer, default=0)
-    
-    # Smart wallet activity
-    kol_buyers = Column(JSON)  # List of KOL wallets that bought
-    
-    # Narrative tags
-    narratives = Column(JSON)  # List of matched narratives
-    
-    # Performance tracking
-    peak_price = Column(Float)
-    peak_mcap = Column(Float)
-    current_price = Column(Float)
-    current_mcap = Column(Float)
-    max_gain = Column(Float, default=0)
-    last_updated = Column(DateTime, default=datetime.utcnow)
-    
-    # Outcome
-    outcome = Column(String)  # 'pending', 'win', 'loss', 'break_even'
-    final_gain = Column(Float)
-    
-
-class SmartWalletActivity(Base):
-    """Tracks smart wallet transactions"""
-    __tablename__ = 'smart_wallet_activity'
-    
-    id = Column(Integer, primary_key=True)
-    wallet_address = Column(String, index=True)
-    wallet_name = Column(String)
-    wallet_tier = Column(String)  # 'elite', 'top_kol', etc.
-    
-    token_address = Column(String, index=True)
-    transaction_type = Column(String)  # 'buy', 'sell'
-    amount = Column(Float)
-    timestamp = Column(DateTime, default=datetime.utcnow)
-    
-    signature = Column(String, unique=True)
-
-
-class NarrativeTrend(Base):
-    """Tracks narrative lifecycle and performance"""
-    __tablename__ = 'narrative_trends'
-    
-    id = Column(Integer, primary_key=True)
-    narrative_name = Column(String, unique=True)
-    
-    # Status
-    status = Column(String)  # 'emerging', 'hot', 'cooling', 'dead'
-    first_seen = Column(DateTime, default=datetime.utcnow)
-    last_seen = Column(DateTime, default=datetime.utcnow)
-    
-    # Performance
-    tokens_tracked = Column(Integer, default=0)
-    win_rate = Column(Float, default=0)
-    avg_gain = Column(Float, default=0)
-    
-    # Popularity
-    mention_count_24h = Column(Integer, default=0)
-    tokens_launched_24h = Column(Integer, default=0)
-
-
-# ============================================================================
-# DATABASE CONNECTION
-# ============================================================================
-
-def get_engine():
-    """Create database engine"""
-    if not config.DATABASE_URL:
-        logger.warning("⚠️ No DATABASE_URL set")
-        return None
-    
-    try:
-        engine = create_engine(
-            config.DATABASE_URL,
-            pool_pre_ping=True,
-            pool_size=5,
-            max_overflow=10
-        )
-        return engine
-    except Exception as e:
-        logger.error(f"❌ Failed to create database engine: {e}")
-        return None
-
-
-def init_db():
-    """Initialize database tables"""
-    engine = get_engine()
-    if engine:
+    async def connect(self):
+        """Create connection pool to PostgreSQL"""
         try:
-            Base.metadata.create_all(engine)
-            logger.info("✅ Database tables initialized")
-            return True
+            self.pool = await asyncpg.create_pool(self.database_url, min_size=2, max_size=10)
+            logger.info("✅ Database pool created")
+            await self.create_tables()
         except Exception as e:
-            logger.error(f"❌ Failed to initialize database: {e}")
-            return False
-    return False
-
-
-def get_session():
-    """Get database session"""
-    engine = get_engine()
-    if engine:
-        SessionLocal = sessionmaker(bind=engine)
-        return SessionLocal()
-    return None
+            logger.error(f"❌ Failed to create database pool: {e}")
+            raise
+    
+    async def close(self):
+        """Close database connection pool"""
+        if self.pool:
+            await self.pool.close()
+            logger.info("Database pool closed")
+    
+    async def create_tables(self):
+        """Create necessary tables if they don't exist"""
+        async with self.pool.acquire() as conn:
+            # Signals table
+            await conn.execute('''
+                CREATE TABLE IF NOT EXISTS signals (
+                    id SERIAL PRIMARY KEY,
+                    token_address TEXT UNIQUE NOT NULL,
+                    token_name TEXT,
+                    token_symbol TEXT,
+                    signal_type TEXT NOT NULL,
+                    bonding_curve_pct REAL,
+                    conviction_score INTEGER NOT NULL,
+                    entry_price REAL,
+                    current_price REAL,
+                    liquidity REAL,
+                    volume_24h REAL,
+                    market_cap REAL,
+                    signal_posted BOOLEAN DEFAULT FALSE,
+                    telegram_message_id INTEGER,
+                    created_at TIMESTAMP DEFAULT NOW(),
+                    updated_at TIMESTAMP DEFAULT NOW()
+                )
+            ''')
+            
+            # Performance tracking table
+            await conn.execute('''
+                CREATE TABLE IF NOT EXISTS performance (
+                    id SERIAL PRIMARY KEY,
+                    token_address TEXT NOT NULL,
+                    milestone REAL NOT NULL,
+                    price_at_milestone REAL NOT NULL,
+                    time_to_milestone INTERVAL,
+                    reached_at TIMESTAMP DEFAULT NOW(),
+                    UNIQUE(token_address, milestone)
+                )
+            ''')
+            
+            # KOL buys table
+            await conn.execute('''
+                CREATE TABLE IF NOT EXISTS kol_buys (
+                    id SERIAL PRIMARY KEY,
+                    token_address TEXT NOT NULL,
+                    kol_wallet TEXT NOT NULL,
+                    amount_sol REAL,
+                    transaction_signature TEXT UNIQUE,
+                    detected_at TIMESTAMP DEFAULT NOW()
+                )
+            ''')
+            
+            logger.info("✅ Database tables created/verified")
+    
+    async def insert_signal(self, signal_data: Dict):
+        """Insert a new signal"""
+        async with self.pool.acquire() as conn:
+            await conn.execute('''
+                INSERT INTO signals 
+                (token_address, token_name, token_symbol, signal_type, bonding_curve_pct, 
+                 conviction_score, entry_price, liquidity, volume_24h, market_cap)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                ON CONFLICT (token_address) DO UPDATE SET
+                    conviction_score = EXCLUDED.conviction_score,
+                    bonding_curve_pct = EXCLUDED.bonding_curve_pct,
+                    updated_at = NOW()
+            ''', signal_data['token_address'], signal_data.get('token_name'),
+                signal_data.get('token_symbol'), signal_data['signal_type'],
+                signal_data.get('bonding_curve_pct'), signal_data['conviction_score'],
+                signal_data.get('entry_price'), signal_data.get('liquidity'),
+                signal_data.get('volume_24h'), signal_data.get('market_cap'))
+    
+    async def mark_signal_posted(self, token_address: str, message_id: int):
+        """Mark a signal as posted to Telegram"""
+        async with self.pool.acquire() as conn:
+            await conn.execute('''
+                UPDATE signals 
+                SET signal_posted = TRUE, telegram_message_id = $1, updated_at = NOW()
+                WHERE token_address = $2
+            ''', message_id, token_address)
+    
+    async def get_signal(self, token_address: str) -> Optional[Dict]:
+        """Get a signal by token address"""
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                'SELECT * FROM signals WHERE token_address = $1',
+                token_address
+            )
+            return dict(row) if row else None
+    
+    async def update_price(self, token_address: str, current_price: float):
+        """Update current price for a token"""
+        async with self.pool.acquire() as conn:
+            await conn.execute('''
+                UPDATE signals 
+                SET current_price = $1, updated_at = NOW()
+                WHERE token_address = $2
+            ''', current_price, token_address)
+    
+    async def insert_milestone(self, token_address: str, milestone: float, price: float):
+        """Record a milestone reached"""
+        async with self.pool.acquire() as conn:
+            # Get entry time
+            signal = await self.get_signal(token_address)
+            if signal:
+                await conn.execute('''
+                    INSERT INTO performance (token_address, milestone, price_at_milestone, time_to_milestone)
+                    VALUES ($1, $2, $3, NOW() - $4)
+                    ON CONFLICT (token_address, milestone) DO NOTHING
+                ''', token_address, milestone, price, signal['created_at'])
+    
+    async def insert_kol_buy(self, token_address: str, kol_wallet: str, amount_sol: float, tx_sig: str):
+        """Record a KOL buy"""
+        async with self.pool.acquire() as conn:
+            await conn.execute('''
+                INSERT INTO kol_buys (token_address, kol_wallet, amount_sol, transaction_signature)
+                VALUES ($1, $2, $3, $4)
+                ON CONFLICT (transaction_signature) DO NOTHING
+            ''', token_address, kol_wallet, amount_sol, tx_sig)
+    
+    async def get_kol_buy_count(self, token_address: str) -> int:
+        """Get count of KOL buys for a token"""
+        async with self.pool.acquire() as conn:
+            count = await conn.fetchval(
+                'SELECT COUNT(*) FROM kol_buys WHERE token_address = $1',
+                token_address
+            )
+            return count or 0
+    
+    async def get_posted_signals_count(self) -> int:
+        """Get total count of posted signals"""
+        async with self.pool.acquire() as conn:
+            count = await conn.fetchval(
+                'SELECT COUNT(*) FROM signals WHERE signal_posted = TRUE'
+            )
+            return count or 0
+    
+    async def get_signals_today(self) -> List[Dict]:
+        """Get all signals posted today"""
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch('''
+                SELECT * FROM signals 
+                WHERE signal_posted = TRUE 
+                AND DATE(created_at) = CURRENT_DATE
+                ORDER BY created_at DESC
+            ''')
+            return [dict(row) for row in rows]
