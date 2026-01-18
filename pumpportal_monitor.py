@@ -1,6 +1,6 @@
 """
 PumpPortal Monitor - Real-time pump.fun bonding curve tracking
-UPDATED: Now fetches holder count and enhanced volume metrics
+UPDATED: Added extensive error logging to diagnose connection issues
 """
 import asyncio
 import json
@@ -31,6 +31,8 @@ class PumpPortalMonitor:
         self.ws = None
         self.tracked_tokens = {}  # {token_address: bonding_pct} to avoid duplicates
         self.running = False
+        self.connection_attempts = 0
+        self.messages_received = 0
         
     async def start(self):
         """Start monitoring PumpPortal WebSocket"""
@@ -39,48 +41,95 @@ class PumpPortalMonitor:
         
         while self.running:
             try:
+                self.connection_attempts += 1
+                logger.info(f"🔄 Connection attempt #{self.connection_attempts}")
                 await self._connect_and_listen()
             except Exception as e:
                 logger.error(f"❌ PumpPortal error: {e}")
+                logger.error(f"   Error type: {type(e).__name__}")
+                import traceback
+                logger.error(traceback.format_exc())
                 logger.info("🔄 Reconnecting in 5 seconds...")
                 await asyncio.sleep(5)
     
     async def _connect_and_listen(self):
         """Connect to WebSocket and listen for messages"""
-        async with websockets.connect(
-            self.ws_url,
-            ping_interval=20,
-            ping_timeout=10
-        ) as ws:
-            self.ws = ws
-            logger.info("✅ Connected to PumpPortal WebSocket")
+        try:
+            logger.info(f"📡 Connecting to {self.ws_url}...")
             
-            # Subscribe to new token events and trades
-            await self._subscribe()
-            
-            # Listen for messages
-            async for message in ws:
-                try:
-                    await self._process_message(message)
-                except Exception as e:
-                    logger.error(f"Error processing message: {e}")
+            async with websockets.connect(
+                self.ws_url,
+                ping_interval=20,
+                ping_timeout=10,
+                close_timeout=10
+            ) as ws:
+                self.ws = ws
+                logger.info("✅ Connected to PumpPortal WebSocket")
+                
+                # Subscribe to new token events and trades
+                await self._subscribe()
+                
+                # Listen for messages
+                logger.info("👂 Listening for messages...")
+                message_count = 0
+                
+                async for message in ws:
+                    try:
+                        message_count += 1
+                        self.messages_received += 1
+                        
+                        # Log first few messages for debugging
+                        if message_count <= 3:
+                            logger.info(f"📨 Message #{message_count} received: {message[:200]}...")
+                        elif message_count % 100 == 0:
+                            logger.info(f"📊 Received {message_count} messages so far (total: {self.messages_received})")
+                        
+                        await self._process_message(message)
+                    except Exception as e:
+                        logger.error(f"❌ Error processing message #{message_count}: {e}")
+                        
+        except websockets.exceptions.ConnectionClosed as e:
+            logger.warning(f"⚠️ WebSocket connection closed: {e}")
+            logger.warning(f"   Code: {e.code}, Reason: {e.reason}")
+        except asyncio.TimeoutError:
+            logger.error("❌ WebSocket connection timeout")
+        except Exception as e:
+            logger.error(f"❌ WebSocket connection error: {e}")
+            logger.error(f"   Error type: {type(e).__name__}")
+            import traceback
+            logger.error(traceback.format_exc())
+            raise
     
     async def _subscribe(self):
         """Subscribe to PumpPortal events"""
-        # Subscribe to new tokens
-        subscribe_new = {
-            "method": "subscribeNewToken"
-        }
-        await self.ws.send(json.dumps(subscribe_new))
-        logger.info("📡 Subscribed to new token events")
-        
-        # Subscribe to all token trades (for bonding curve tracking)
-        subscribe_trades = {
-            "method": "subscribeTokenTrade",
-            "keys": ["*"]  # Monitor all tokens
-        }
-        await self.ws.send(json.dumps(subscribe_trades))
-        logger.info("📡 Subscribed to token trade events")
+        try:
+            # Subscribe to new tokens
+            subscribe_new = {
+                "method": "subscribeNewToken"
+            }
+            logger.info("📤 Sending subscription: subscribeNewToken")
+            await self.ws.send(json.dumps(subscribe_new))
+            logger.info("✅ Sent subscribeNewToken")
+            
+            # Small delay to ensure subscription is processed
+            await asyncio.sleep(0.5)
+            
+            # Subscribe to all token trades (for bonding curve tracking)
+            subscribe_trades = {
+                "method": "subscribeTokenTrade",
+                "keys": ["*"]  # Monitor all tokens
+            }
+            logger.info("📤 Sending subscription: subscribeTokenTrade")
+            await self.ws.send(json.dumps(subscribe_trades))
+            logger.info("✅ Sent subscribeTokenTrade")
+            
+            logger.info("📡 Subscriptions sent - waiting for data...")
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to subscribe: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            raise
     
     async def _process_message(self, message: str):
         """Process incoming WebSocket message"""
@@ -92,6 +141,7 @@ class PumpPortalMonitor:
             
             if tx_type == 'create':
                 # New token created
+                logger.debug(f"🆕 New token: {data.get('symbol', 'UNKNOWN')}")
                 await self._handle_new_token(data)
             
             elif tx_type in ['buy', 'sell']:
@@ -101,11 +151,18 @@ class PumpPortalMonitor:
             elif tx_type == 'complete':
                 # Token graduated (100% bonding curve)
                 await self._handle_graduation(data)
+            else:
+                # Unknown message type - log for debugging
+                if self.messages_received <= 5:
+                    logger.info(f"📬 Unknown message type: {tx_type}")
+                    logger.info(f"   Data keys: {list(data.keys())}")
                 
         except json.JSONDecodeError:
-            logger.debug(f"Non-JSON message received: {message[:100]}")
+            logger.debug(f"⚠️ Non-JSON message received: {message[:100]}")
         except Exception as e:
-            logger.error(f"Error processing message: {e}")
+            logger.error(f"❌ Error processing message: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
     
     async def _handle_new_token(self, data: Dict):
         """Handle new token creation"""
@@ -158,15 +215,7 @@ class PumpPortalMonitor:
             self.tracked_tokens.pop(token_address, None)
     
     async def _extract_and_enrich_token_data(self, data: Dict) -> Dict:
-        """
-        Extract token data from PumpPortal and enrich with holder count
-        
-        Args:
-            data: Raw PumpPortal message
-            
-        Returns:
-            Enriched token data with holder count and volume metrics
-        """
+        """Extract token data from PumpPortal and enrich with holder count"""
         token_address = data.get('mint')
         
         # Base data from PumpPortal
@@ -178,8 +227,8 @@ class PumpPortalMonitor:
             'bonding_curve_pct': data.get('bondingCurvePercentage', 0),
             
             # Market data
-            'market_cap': data.get('marketCapSol', 0) * 150,  # Rough SOL to USD conversion
-            'liquidity': data.get('vSolInBondingCurve', 0) * 150,  # SOL in bonding curve
+            'market_cap': data.get('marketCapSol', 0) * 150,
+            'liquidity': data.get('vSolInBondingCurve', 0) * 150,
             'volume_24h': data.get('volume24h', 0),
             
             # Price data
@@ -188,7 +237,7 @@ class PumpPortalMonitor:
             'price_change_5m': data.get('priceChange5mPercent', 0),
             'price_change_1h': data.get('priceChange1hPercent', 0),
             
-            # Volume metrics (NEW - for velocity scoring)
+            # Volume metrics
             'volume_5m': data.get('volume5m', 0),
             'volume_1h': data.get('volume1h', 0),
             
@@ -201,7 +250,7 @@ class PumpPortalMonitor:
             'created_timestamp': data.get('timestamp'),
             
             # Holder count (will be enriched)
-            'holder_count': 0  # Default, will fetch
+            'holder_count': 0
         }
         
         # Enrich with holder count from DexScreener
@@ -211,22 +260,13 @@ class PumpPortalMonitor:
         return token_data
     
     async def _fetch_holder_count(self, token_address: str) -> int:
-        """
-        Fetch holder count from DexScreener API
-        
-        Args:
-            token_address: Token mint address
-            
-        Returns:
-            Number of holders (0 if unavailable)
-        """
+        """Fetch holder count from DexScreener API"""
         try:
             url = f"https://api.dexscreener.com/latest/dex/tokens/{token_address}"
             
             async with aiohttp.ClientSession() as session:
                 async with session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as resp:
                     if resp.status != 200:
-                        logger.debug(f"⚠️ DexScreener returned {resp.status} for holder count")
                         return 0
                     
                     data = await resp.json()
@@ -235,22 +275,15 @@ class PumpPortalMonitor:
                     if not pairs:
                         return 0
                     
-                    # Get holder count from first pair
                     pair = pairs[0]
                     holder_count = pair.get('txns', {}).get('h24', {}).get('unique', 0)
                     
-                    # If not available, try alternative field
                     if holder_count == 0:
                         holder_count = pair.get('holderCount', 0)
                     
-                    logger.debug(f"   👥 Fetched holder count: {holder_count}")
                     return holder_count
                     
-        except asyncio.TimeoutError:
-            logger.debug(f"⚠️ Timeout fetching holder count for {token_address[:8]}")
-            return 0
-        except Exception as e:
-            logger.debug(f"⚠️ Error fetching holder count: {e}")
+        except:
             return 0
     
     async def stop(self):
@@ -258,14 +291,12 @@ class PumpPortalMonitor:
         self.running = False
         if self.ws:
             await self.ws.close()
-            logger.info("PumpPortal monitor stopped")
+            logger.info(f"🛑 PumpPortal monitor stopped (received {self.messages_received} total messages)")
     
     def cleanup_old_tokens(self, max_age_hours: int = 24):
         """Remove tokens from tracking if they've been tracked too long"""
-        # This prevents memory leaks from tokens that never graduate
         current_size = len(self.tracked_tokens)
         
-        # Simple approach: if we're tracking more than 1000 tokens, clear half
         if current_size > 1000:
             tokens_to_remove = list(self.tracked_tokens.keys())[:500]
             for token in tokens_to_remove:
