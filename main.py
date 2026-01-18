@@ -275,6 +275,16 @@ async def status():
         "timestamp": datetime.utcnow().isoformat()
     }
 
+@app.get("/pumpportal-status")
+async def pumpportal_diagnostic():
+    """PumpPortal monitor diagnostic endpoint"""
+    return {
+        "monitor_exists": pumpportal_monitor is not None,
+        "is_running": pumpportal_monitor.running if pumpportal_monitor else False,
+        "tracked_tokens": len(pumpportal_monitor.tracked_tokens) if pumpportal_monitor else 0,
+        "websocket_connected": pumpportal_monitor.ws is not None if pumpportal_monitor else False,
+    }
+
 # ============================================================================
 # SHUTDOWN
 # ============================================================================
