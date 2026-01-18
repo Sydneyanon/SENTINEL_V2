@@ -1,7 +1,8 @@
 """
-Smart Wallet Tracker - Monitor elite trader transactions via Helius webhooks
+Smart Wallet Tracker - Updated with diagnostic logging for database failures
+REPLACE your current trackers/smart_wallets.py with this version
 """
-from typing import Dict, List, Optional
+from typing import Dict, List
 from datetime import datetime, timedelta
 from loguru import logger
 from data.curated_wallets import get_all_tracked_wallets, get_wallet_info
@@ -10,10 +11,12 @@ from data.curated_wallets import get_all_tracked_wallets, get_wallet_info
 class SmartWalletTracker:
     """Tracks wallet activity of known successful traders via Helius webhooks"""
     
-    def __init__(self, db=None):
+    def __init__(self):
         self.tracked_wallets = {}
         self.recent_buys: Dict[str, List[dict]] = {}  # token -> [{wallet, info, time}]
-        self.db = db  # Database instance for persistence
+        self.db = None  # Set externally after initialization
+        self.save_failures = 0
+        self.save_successes = 0
         
     async def start(self):
         """Initialize smart wallet tracking"""
@@ -30,20 +33,47 @@ class SmartWalletTracker:
         logger.info(f"   🏆 Elite wallets: {elite_count}")
         logger.info(f"   👑 Top KOLs: {top_kol_count}")
         logger.info(f"   📊 Total tracked: {len(self.tracked_wallets)}")
-        logger.info(f"   💾 Database: {'enabled' if self.db else 'memory-only'}")
+        logger.info(f"   💾 Database: {'enabled' if self.db else 'NOT SET (memory-only)'}")
+        
+        # Test database if available
+        if self.db:
+            try:
+                # Test the connection
+                result = await self.db.execute_query("SELECT 1 as test")
+                logger.info(f"   ✅ Database connection verified")
+                
+                # Check if table exists
+                table_check = await self.db.execute_query("""
+                    SELECT EXISTS (
+                        SELECT FROM information_schema.tables 
+                        WHERE table_name = 'kol_buys'
+                    )
+                """)
+                
+                if table_check and table_check[0].get('exists'):
+                    logger.info(f"   ✅ Table 'kol_buys' exists")
+                else:
+                    logger.error(f"   ❌ Table 'kol_buys' does NOT exist!")
+                    logger.error(f"   🔧 Run this SQL in Railway to create it:")
+                    logger.error(f"   CREATE TABLE kol_buys (...")
+                    
+            except Exception as e:
+                logger.error(f"   ❌ Database test FAILED: {e}")
         
         return True
     
     async def process_webhook(self, webhook_data: List[Dict]) -> None:
-        """
-        Process Helius webhook data for smart wallet transactions
-        webhook_data is a list of enhanced transaction objects
-        """
+        """Process Helius webhook data for smart wallet transactions"""
         try:
+            logger.debug(f"📥 Processing webhook with {len(webhook_data)} transactions")
+            
             for transaction in webhook_data:
                 await self._process_transaction(transaction)
+                
         except Exception as e:
             logger.error(f"❌ Error processing smart wallet webhook: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
     
     async def _process_transaction(self, tx_data: Dict) -> None:
         """Process a single transaction from webhook"""
@@ -53,10 +83,12 @@ class SmartWalletTracker:
             
             # Check if this is a tracked wallet
             if fee_payer not in self.tracked_wallets:
+                logger.debug(f"⏭️  Skipping non-tracked wallet: {fee_payer[:8]}...")
                 return
             
             wallet_info = get_wallet_info(fee_payer)
             if not wallet_info:
+                logger.warning(f"⚠️ No wallet info for tracked wallet: {fee_payer[:8]}")
                 return
             
             # Get token transfers
@@ -64,6 +96,10 @@ class SmartWalletTracker:
             signature = tx_data.get('signature', '')
             timestamp = tx_data.get('timestamp', datetime.utcnow().timestamp())
             tx_time = datetime.fromtimestamp(timestamp)
+            
+            if not token_transfers:
+                logger.debug(f"⏭️  No token transfers in transaction {signature[:8]}")
+                return
             
             # Look for token buys (receiving tokens)
             for transfer in token_transfers:
@@ -75,7 +111,7 @@ class SmartWalletTracker:
                     
                     if token_address and amount > 0:
                         # Record the buy
-                        await self._record_buy(
+                        success = await self._record_buy(
                             wallet_address=fee_payer,
                             wallet_info=wallet_info,
                             token_address=token_address,
@@ -84,10 +120,13 @@ class SmartWalletTracker:
                             signature=signature
                         )
                         
-                        logger.info(f"👑 {wallet_info['name']} ({wallet_info['tier']}) bought {token_address[:8]}...")
+                        status_emoji = "✅" if success else "⚠️"
+                        logger.info(f"👑 {wallet_info['name']} ({wallet_info['tier']}) bought {token_address[:8]}... {status_emoji}")
             
         except Exception as e:
             logger.error(f"❌ Error processing transaction: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
     
     async def _record_buy(
         self,
@@ -97,10 +136,10 @@ class SmartWalletTracker:
         amount: float,
         timestamp: datetime,
         signature: str
-    ) -> None:
-        """Record a smart wallet buy (both in-memory and database)"""
+    ) -> bool:
+        """Record a smart wallet buy. Returns True if saved to DB successfully."""
         
-        # Add to in-memory cache for fast lookups
+        # Add to in-memory cache ALWAYS (this is fast)
         if token_address not in self.recent_buys:
             self.recent_buys[token_address] = []
         
@@ -118,51 +157,94 @@ class SmartWalletTracker:
         if len(self.recent_buys[token_address]) > 20:
             self.recent_buys[token_address] = self.recent_buys[token_address][-20:]
         
-        # Persist to database if available
-        if self.db:
-            try:
-                await self.db.insert_smart_wallet_activity(
-                    wallet_address=wallet_address,
-                    wallet_name=wallet_info['name'],
-                    wallet_tier=wallet_info['tier'],
-                    token_address=token_address,
-                    transaction_type='buy',
-                    amount=amount,
-                    transaction_signature=signature,
-                    timestamp=timestamp
-                )
-                logger.debug(f"💾 Saved to database: {wallet_info['name']} -> {token_address[:8]}")
-            except Exception as e:
-                logger.error(f"❌ Failed to save to database: {e}")
+        logger.debug(f"📝 Added to memory: {wallet_info['name']} -> {token_address[:8]}")
         
-        logger.debug(f"📝 Recorded buy: {wallet_info['name']} -> {token_address[:8]}")
+        # Try to persist to database
+        if not self.db:
+            logger.debug(f"⚠️ No database configured - memory only")
+            return False
+        
+        try:
+            logger.debug(f"💾 Attempting database save...")
+            logger.debug(f"   Wallet: {wallet_address}")
+            logger.debug(f"   Name: {wallet_info['name']}")
+            logger.debug(f"   Token: {token_address}")
+            logger.debug(f"   Signature: {signature}")
+            
+            # Call the database insert method (using existing method name)
+            await self.db.insert_smart_wallet_activity(
+                wallet_address=wallet_address,
+                wallet_name=wallet_info['name'],
+                wallet_tier=wallet_info['tier'],
+                token_address=token_address,
+                transaction_type='buy',  # Always 'buy' for KOL purchases
+                amount=amount,
+                transaction_signature=signature,
+                timestamp=timestamp
+            )
+            
+            self.save_successes += 1
+            logger.info(f"💾 ✅ Saved to database (total: {self.save_successes})")
+            
+            # Log stats every 10 saves
+            if self.save_successes % 10 == 0:
+                logger.info(f"📊 Database stats: {self.save_successes} saves, {self.save_failures} failures")
+            
+            return True
+            
+        except AttributeError as e:
+            logger.error(f"❌ Database method missing: {e}")
+            logger.error(f"   Your Database class needs an 'insert_kol_buy()' method!")
+            self.save_failures += 1
+            return False
+            
+        except Exception as e:
+            logger.error(f"❌ Database save FAILED: {e}")
+            logger.error(f"   Error type: {type(e).__name__}")
+            
+            # Show full traceback for first few failures
+            if self.save_failures < 3:
+                import traceback
+                logger.error(traceback.format_exc())
+            
+            self.save_failures += 1
+            
+            # Alert every 10 failures
+            if self.save_failures % 10 == 0:
+                logger.error(f"🚨 Total database failures: {self.save_failures}")
+            
+            return False
     
-    async def get_smart_wallet_activity(self, token_address: str) -> Dict:
+    async def get_smart_wallet_activity(self, token_address: str, hours: int = 24) -> Dict:
         """
         Get smart wallet activity for a token
         Returns scoring data and wallet details
-        
-        First checks in-memory cache (fast), falls back to database if needed
         """
         # Try in-memory cache first (fast)
         if token_address in self.recent_buys and self.recent_buys[token_address]:
             buys = self.recent_buys[token_address]
+            logger.debug(f"📊 Found {len(buys)} buys in memory for {token_address[:8]}")
+        
         # Fall back to database
         elif self.db:
             try:
-                db_activity = await self.db.get_smart_wallet_activity(token_address, hours=24)
+                logger.debug(f"📊 Checking database for {token_address[:8]}...")
+                db_activity = await self.db.get_smart_wallet_activity(token_address, hours=hours)
+                
                 buys = [
                     {
                         'wallet': row['wallet_address'],
                         'name': row['wallet_name'],
                         'tier': row['wallet_tier'],
-                        'win_rate': 0,  # Not stored in DB yet
+                        'win_rate': 0,
                         'amount': row['amount'],
                         'timestamp': row['timestamp'],
                         'signature': row['transaction_signature']
                     }
                     for row in db_activity
                 ]
+                
+                logger.debug(f"📊 Found {len(buys)} buys in database for {token_address[:8]}")
             except Exception as e:
                 logger.error(f"❌ Database lookup failed: {e}")
                 buys = []
@@ -196,12 +278,15 @@ class SmartWalletTracker:
         elite_count = sum(1 for w in unique_wallets.values() if w['tier'] == 'elite')
         top_kol_count = sum(1 for w in unique_wallets.values() if w['tier'] == 'top_kol')
         
-        # Calculate score (max 40 points)
+        # Calculate score (use your config weights)
         from config import WEIGHTS
         score = 0
-        score += elite_count * WEIGHTS['smart_wallet_elite']  # +15 per elite
-        score += top_kol_count * WEIGHTS['smart_wallet_kol']  # +10 per top KOL
+        score += elite_count * WEIGHTS.get('smart_wallet_elite', 15)
+        score += top_kol_count * WEIGHTS.get('smart_wallet_kol', 10)
         score = min(score, 40)  # Cap at 40
+        
+        logger.debug(f"📊 Smart wallet score for {token_address[:8]}: {score} points")
+        logger.debug(f"   Elite: {elite_count}, Top KOLs: {top_kol_count}")
         
         return {
             'has_activity': True,
@@ -221,7 +306,7 @@ class SmartWalletTracker:
         }
     
     def cleanup_old_data(self):
-        """Remove old buy data from in-memory cache (database keeps everything)"""
+        """Remove old buy data from in-memory cache"""
         cutoff = datetime.utcnow() - timedelta(hours=24)
         
         for token_address in list(self.recent_buys.keys()):
