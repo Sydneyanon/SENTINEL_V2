@@ -93,11 +93,22 @@ class Database:
                     amount REAL,
                     transaction_signature TEXT UNIQUE NOT NULL,
                     timestamp TIMESTAMP NOT NULL,
-                    detected_at TIMESTAMP DEFAULT NOW(),
-                    INDEX idx_token (token_address),
-                    INDEX idx_wallet (wallet_address),
-                    INDEX idx_timestamp (timestamp)
+                    detected_at TIMESTAMP DEFAULT NOW()
                 )
+            ''')
+            
+            # Create indexes separately (PostgreSQL syntax)
+            await conn.execute('''
+                CREATE INDEX IF NOT EXISTS idx_smart_wallet_token 
+                ON smart_wallet_activity(token_address)
+            ''')
+            await conn.execute('''
+                CREATE INDEX IF NOT EXISTS idx_smart_wallet_wallet 
+                ON smart_wallet_activity(wallet_address)
+            ''')
+            await conn.execute('''
+                CREATE INDEX IF NOT EXISTS idx_smart_wallet_timestamp 
+                ON smart_wallet_activity(timestamp)
             ''')
             
             logger.info("✅ Database tables created/verified")
