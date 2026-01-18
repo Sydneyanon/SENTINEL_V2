@@ -81,6 +81,25 @@ class Database:
                 )
             ''')
             
+            # Smart wallet activity table (detailed tracking)
+            await conn.execute('''
+                CREATE TABLE IF NOT EXISTS smart_wallet_activity (
+                    id SERIAL PRIMARY KEY,
+                    wallet_address TEXT NOT NULL,
+                    wallet_name TEXT NOT NULL,
+                    wallet_tier TEXT NOT NULL,
+                    token_address TEXT NOT NULL,
+                    transaction_type TEXT NOT NULL,
+                    amount REAL,
+                    transaction_signature TEXT UNIQUE NOT NULL,
+                    timestamp TIMESTAMP NOT NULL,
+                    detected_at TIMESTAMP DEFAULT NOW(),
+                    INDEX idx_token (token_address),
+                    INDEX idx_wallet (wallet_address),
+                    INDEX idx_timestamp (timestamp)
+                )
+            ''')
+            
             logger.info("✅ Database tables created/verified")
     
     async def insert_signal(self, signal_data: Dict):
@@ -176,3 +195,59 @@ class Database:
                 ORDER BY created_at DESC
             ''')
             return [dict(row) for row in rows]
+    
+    async def insert_smart_wallet_activity(
+        self, 
+        wallet_address: str,
+        wallet_name: str,
+        wallet_tier: str,
+        token_address: str,
+        transaction_type: str,
+        amount: float,
+        transaction_signature: str,
+        timestamp: datetime
+    ):
+        """Record smart wallet activity"""
+        async with self.pool.acquire() as conn:
+            await conn.execute('''
+                INSERT INTO smart_wallet_activity 
+                (wallet_address, wallet_name, wallet_tier, token_address, 
+                 transaction_type, amount, transaction_signature, timestamp)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                ON CONFLICT (transaction_signature) DO NOTHING
+            ''', wallet_address, wallet_name, wallet_tier, token_address,
+                transaction_type, amount, transaction_signature, timestamp)
+    
+    async def get_smart_wallet_activity(
+        self, 
+        token_address: str, 
+        hours: int = 24
+    ) -> List[Dict]:
+        """Get smart wallet activity for a token in the last N hours"""
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch('''
+                SELECT * FROM smart_wallet_activity
+                WHERE token_address = $1
+                AND timestamp > NOW() - INTERVAL '%s hours'
+                ORDER BY timestamp DESC
+            ''', token_address, hours)
+            return [dict(row) for row in rows]
+    
+    async def get_wallet_performance(
+        self, 
+        wallet_address: str,
+        days: int = 30
+    ) -> Dict:
+        """Get performance stats for a specific wallet"""
+        async with self.pool.acquire() as conn:
+            total_trades = await conn.fetchval('''
+                SELECT COUNT(*) FROM smart_wallet_activity
+                WHERE wallet_address = $1
+                AND timestamp > NOW() - INTERVAL '%s days'
+            ''', wallet_address, days)
+            
+            return {
+                'wallet_address': wallet_address,
+                'total_trades': total_trades or 0,
+                'period_days': days
+            }
