@@ -1,342 +1,289 @@
 """
-Sentinel Signals v2 - Now with Performance Tracking & Daily Reports
+PumpPortal Monitor V2 - Real-time pump.fun bonding curve tracking
+Brand new file to force reload
 """
 import asyncio
-from typing import Dict
-from fastapi import FastAPI, Request
+import json
+from typing import Callable, Dict
+import websockets
+import aiohttp
 from loguru import logger
-import sys
 
-# Configure logging
-logger.remove()
-logger.add(
-    sys.stdout,
-    format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <level>{message}</level>",
-    level="INFO"
-)
-
-# Import existing modules
-import config
-from database import Database
-from pump_monitor_v2 import PumpMonitorV2
-from performance_tracker import PerformanceTracker
-from trackers.smart_wallets import SmartWalletTracker
-from trackers.narrative_detector import NarrativeDetector
-from scoring.conviction_engine import ConvictionEngine
-from publishers.telegram import TelegramPublisher
-
-# ============================================================================
-# GLOBAL INSTANCES
-# ============================================================================
-
-app = FastAPI(title="Sentinel Signals v2")
-
-# Database
-db = None
-
-# Monitors
-pumpportal_monitor = None
-performance_tracker = None
-
-# Trackers
-smart_wallet_tracker = SmartWalletTracker()
-narrative_detector = NarrativeDetector()
-
-# Scoring
-conviction_engine = None
-
-# Publishers
-telegram_publisher = TelegramPublisher()
-
-# ============================================================================
-# SIGNAL PROCESSING
-# ============================================================================
-
-async def handle_pumpportal_signal(token_data: Dict, signal_type: str):
-    """
-    Handle signals from PumpPortal monitor
+class PumpMonitorV2:
+    """Monitors pump.fun tokens via PumpPortal WebSocket"""
     
-    Args:
-        token_data: Token information from PumpPortal
-        signal_type: 'PRE_GRADUATION' (40-60%) or 'POST_GRADUATION' (100%)
-    """
-    try:
-        token_address = token_data.get('token_address')
-        symbol = token_data.get('token_symbol', 'UNKNOWN')
-        bonding_pct = token_data.get('bonding_curve_pct', 0)
+    def __init__(self, on_signal_callback: Callable):
+        self.ws_url = 'wss://pumpportal.fun/api/data'
+        self.on_signal_callback = on_signal_callback
+        self.ws = None
+        self.tracked_tokens = {}
+        self.running = False
+        self.connection_attempts = 0
+        self.messages_received = 0
+        logger.info("🎬 PumpMonitorV2 __init__ called")
         
-        logger.info(f"🎯 Signal received: ${symbol} at {bonding_pct:.1f}% ({signal_type})")
+    async def start(self):
+        """Start monitoring"""
+        logger.info("🚨🚨🚨 START METHOD CALLED! 🚨🚨🚨")
+        logger.info(f"Running flag BEFORE: {self.running}")
         
-        # Calculate conviction score using your existing conviction engine
-        conviction_data = await conviction_engine.analyze_token(token_address, token_data)
-        conviction_score = conviction_data.get('score', 0)
+        self.running = True
+        logger.info(f"Running flag AFTER: {self.running}")
+        logger.info("🔌 Starting PumpPortal monitor...")
         
-        # Different thresholds for pre vs post graduation
-        min_score = 80 if signal_type == 'PRE_GRADUATION' else 75
+        while self.running:
+            try:
+                self.connection_attempts += 1
+                logger.info(f"🔄 Connection attempt #{self.connection_attempts}")
+                await self._connect_and_listen()
+            except Exception as e:
+                logger.error(f"❌ Error: {e}")
+                import traceback
+                logger.error(traceback.format_exc())
+                await asyncio.sleep(5)
+    
+    async def _connect_and_listen(self):
+        """Connect to WebSocket"""
+        logger.info(f"📡 Connecting to {self.ws_url}...")
         
-        if conviction_score >= min_score:
-            logger.info(f"✅ High conviction ({conviction_score}/100) - posting signal!")
+        async with websockets.connect(
+            self.ws_url,
+            ping_interval=20,
+            ping_timeout=10
+        ) as ws:
+            self.ws = ws
+            logger.info("✅ Connected to PumpPortal WebSocket")
             
-            # Add signal type to conviction data
-            conviction_data['signal_type'] = signal_type
-            conviction_data['bonding_curve_pct'] = bonding_pct
+            await self._subscribe()
             
-            # Save to database BEFORE posting (so we can track it)
-            if db:
-                await db.insert_signal({
-                    'token_address': token_address,
-                    'token_name': token_data.get('token_name'),
-                    'token_symbol': symbol,
-                    'signal_type': signal_type,
-                    'bonding_curve_pct': bonding_pct,
-                    'conviction_score': conviction_score,
-                    'entry_price': token_data.get('price_usd', 0),
-                    'liquidity': token_data.get('liquidity', 0),
-                    'volume_24h': token_data.get('volume_24h', 0),
-                    'market_cap': token_data.get('market_cap', 0),
-                })
-            
-            # Post to Telegram using your existing publisher
-            message_id = await telegram_publisher.post_signal(conviction_data)
-            
-            # Mark as posted in database
-            if db and message_id:
-                await db.mark_signal_posted(token_address, message_id)
-            
-        else:
-            logger.info(f"⏭️  Low conviction ({conviction_score}/100) - skipping")
-            
-    except Exception as e:
-        logger.error(f"❌ Error handling PumpPortal signal: {e}", exc_info=True)
-
-# ============================================================================
-# BACKGROUND TASK WRAPPERS
-# ============================================================================
-
-async def start_pumpportal_task():
-    """Wrapper for PumpPortal task with error handling"""
-    try:
-        logger.info("🚨 Starting PumpPortal background task...")
-        logger.info(f"🚨 Monitor object exists: {pumpportal_monitor is not None}")
-        logger.info(f"🚨 Monitor type: {type(pumpportal_monitor)}")
-        logger.info("🚨 About to call pumpportal_monitor.start()...")
+            logger.info("👂 Listening for messages...")
+            async for message in ws:
+                self.messages_received += 1
+                if self.messages_received <= 3:
+                    logger.info(f"📨 Message #{self.messages_received}: {message[:100]}...")
+                await self._process_message(message)
+    
+    async def _subscribe(self):
+        """Subscribe to events"""
+        logger.info("📤 Subscribing to new tokens...")
+        await self.ws.send(json.dumps({"method": "subscribeNewToken"}))
+        logger.info("✅ Subscribed to new tokens")
         
-        await pumpportal_monitor.start()
+        await asyncio.sleep(0.5)
         
-        logger.info("🚨 After calling pumpportal_monitor.start() - THIS SHOULD NEVER PRINT")
-    except Exception as e:
-        logger.error(f"❌ PumpPortal task crashed: {e}")
-        import traceback
-        logger.error(traceback.format_exc())
-        # Don't exit - let other tasks continue
-
-# ============================================================================
-# STARTUP
-# ============================================================================
-
-@app.on_event("startup")
-async def startup():
-    """Initialize all components"""
-    global conviction_engine, pumpportal_monitor, db, performance_tracker
-    
-    logger.info("=" * 70)
-    logger.info("🚀 SENTINEL SIGNALS V2 STARTING")
-    logger.info("=" * 70)
-    
-    # Initialize database FIRST
-    logger.info("📊 Initializing database...")
-    db = Database()
-    await db.connect()
-    logger.info("✅ Database connected and tables created")
-    
-    # Pass database to smart wallet tracker
-    smart_wallet_tracker.db = db
-    
-    # Initialize trackers
-    logger.info("🔍 Starting trackers...")
-    await smart_wallet_tracker.start()
-    await narrative_detector.start()
-    logger.info("✅ Trackers initialized")
-    
-    # Initialize conviction engine
-    logger.info("🧠 Initializing conviction engine...")
-    conviction_engine = ConvictionEngine(
-        smart_wallet_tracker=smart_wallet_tracker,
-        narrative_detector=narrative_detector
-    )
-    logger.info("✅ Conviction engine initialized")
-    
-    # Initialize Telegram
-    logger.info("📱 Initializing Telegram...")
-    telegram_initialized = await telegram_publisher.initialize()
-    
-    if telegram_initialized:
-        await telegram_publisher.post_test_message()
-    
-    # Initialize Performance Tracker
-    logger.info("📊 Initializing performance tracker...")
-    performance_tracker = PerformanceTracker(db=db, telegram_publisher=telegram_publisher)
-    await performance_tracker.start()
-    logger.info("✅ Performance tracker started")
-    
-    # Initialize PumpPortal monitor
-    logger.info("🔌 Initializing PumpPortal monitor...")
-    pumpportal_monitor = PumpMonitorV2(on_signal_callback=handle_pumpportal_signal)
-    
-    # Wait a bit for everything to stabilize before starting background task
-    logger.info("⏳ Waiting 2 seconds before starting PumpPortal task...")
-    await asyncio.sleep(2)
-    
-    # Start monitoring in background with error handling
-    logger.info("🚨 Creating PumpPortal background task...")
-    asyncio.create_task(start_pumpportal_task())
-    logger.info("✅ PumpPortal monitor task created")
-    
-    # Log configuration
-    logger.info("=" * 70)
-    logger.info("⚙️  CONFIGURATION")
-    logger.info("=" * 70)
-    logger.info(f"Pre-Graduation Threshold: 80/100 (40-60% bonding)")
-    logger.info(f"Post-Graduation Threshold: 75/100 (graduated tokens)")
-    logger.info(f"Min Conviction Score: {config.MIN_CONVICTION_SCORE}/100")
-    logger.info(f"Smart Wallets: {len(smart_wallet_tracker.tracked_wallets)} tracked")
-    logger.info(f"Performance Tracking: ✅ Enabled")
-    logger.info(f"Milestones: {', '.join(f'{m}x' for m in config.MILESTONES)}")
-    logger.info(f"Daily Reports: ✅ Midnight UTC")
-    logger.info("=" * 70)
-    
-    logger.info("✅ SENTINEL SIGNALS V2 READY")
-    logger.info("=" * 70)
-    logger.info("🔍 Monitoring PumpPortal for signals...")
-    logger.info("⚡ Pre-graduation signals: 40-60% bonding curve (80+ conviction)")
-    logger.info("🎓 Post-graduation signals: 100% bonding curve (75+ conviction)")
-    logger.info("📊 Performance tracking: Active")
-    logger.info("=" * 70)
-    
-    # Start background tasks
-    asyncio.create_task(cleanup_task())
-
-# ============================================================================
-# WEBHOOKS
-# ============================================================================
-
-@app.post("/webhook/smart-wallet")
-async def smart_wallet_webhook(request: Request):
-    """
-    Helius webhook for smart wallet transactions
-    Receives notifications when tracked KOL wallets make transactions
-    """
-    try:
-        data = await request.json()
-        logger.info("📥 Received smart wallet webhook")
+        # Subscribe to migrations (graduations to Raydium)
+        logger.info("📤 Subscribing to migrations (graduations)...")
+        await self.ws.send(json.dumps({"method": "subscribeMigration"}))
+        logger.info("✅ Subscribed to migrations")
         
-        # Process through smart wallet tracker
-        await smart_wallet_tracker.process_webhook(data)
-        
-        return {"status": "success"}
-        
-    except Exception as e:
-        logger.error(f"❌ Error processing smart wallet webhook: {e}")
-        return {"status": "error", "message": str(e)}
-
-# ============================================================================
-# BACKGROUND TASKS
-# ============================================================================
-
-async def cleanup_task():
-    """Periodic cleanup of old data"""
-    while True:
+        logger.info("📡 Subscriptions complete - monitoring token creations and graduations")
+    
+    async def _process_message(self, message: str):
+        """Process message"""
         try:
-            await asyncio.sleep(3600)  # Run every hour
+            data = json.loads(message)
+            tx_type = data.get('txType')
             
-            logger.info("🧹 Running cleanup...")
-            smart_wallet_tracker.cleanup_old_data()
-            narrative_detector.cleanup_old_data()
+            # Log ALL message types we receive (not just create)
+            if self.messages_received <= 20:
+                logger.info(f"📬 Message type: {tx_type}, keys: {list(data.keys())[:10]}")
             
-            if pumpportal_monitor:
-                pumpportal_monitor.cleanup_old_tokens()
+            if tx_type == 'create':
+                await self._handle_new_token(data)
+            elif tx_type in ['buy', 'sell']:
+                await self._handle_trade(data)
+            elif tx_type == 'complete':
+                await self._handle_graduation(data)
+            else:
+                # Log unknown types
+                if self.messages_received <= 10:
+                    logger.info(f"🤷 Unknown tx_type: {tx_type}")
+        except:
+            pass
+    
+    async def _handle_new_token(self, data: Dict):
+        """Handle new token"""
+        token_address = data.get('mint')
+        symbol = data.get('symbol', 'UNKNOWN')
+        if token_address:
+            logger.info(f"🆕 New token: ${symbol}")
             
-            logger.info("✅ Cleanup complete")
+            # Subscribe to this specific token's trades to track bonding curve
+            try:
+                await self.ws.send(json.dumps({
+                    "method": "subscribeTokenTrade",
+                    "keys": [token_address]
+                }))
+                logger.debug(f"   📡 Subscribed to trades for {token_address[:8]}")
+            except Exception as e:
+                logger.debug(f"   ⚠️ Failed to subscribe to token trades: {e}")
+    
+    async def _handle_trade(self, data: Dict):
+        """Handle trade"""
+        token_address = data.get('mint')
+        bonding_pct = data.get('bondingCurvePercentage', 0)
+        
+        if not token_address:
+            return
+        
+        if 40 <= bonding_pct <= 60:
+            if token_address not in self.tracked_tokens:
+                logger.info(f"⚡ Token in range: {data.get('symbol')} at {bonding_pct:.1f}%")
+                token_data = await self._extract_token_data(data)
+                await self.on_signal_callback(token_data, 'PRE_GRADUATION')
+                self.tracked_tokens[token_address] = bonding_pct
+    
+    async def _handle_graduation(self, data: Dict):
+        """Handle graduation"""
+        token_address = data.get('mint')
+        symbol = data.get('symbol', 'UNKNOWN')
+        
+        if token_address:
+            logger.info(f"🎓 Graduation: ${symbol}")
+            token_data = await self._extract_token_data(data)
+            token_data['bonding_curve_pct'] = 100
+            await self.on_signal_callback(token_data, 'POST_GRADUATION')
+            self.tracked_tokens.pop(token_address, None)
+    
+    async def _extract_token_data(self, data: Dict) -> Dict:
+        """Extract token data"""
+        token_address = data.get('mint')
+        bonding_pct = data.get('bondingCurvePercentage', 0)
+        
+        token_data = {
+            'token_address': token_address,
+            'token_name': data.get('name'),
+            'token_symbol': data.get('symbol'),
+            'description': data.get('description', ''),
+            'bonding_curve_pct': bonding_pct,
+            'market_cap': data.get('marketCapSol', 0) * 150,
+            'liquidity': data.get('vSolInBondingCurve', 0) * 150,
+            'volume_24h': data.get('volume24h', 0),
+            'price_usd': data.get('priceUsd', 0),
+            'price_native': data.get('priceNative', 0),
+            'price_change_5m': data.get('priceChange5mPercent', 0),
+            'price_change_1h': data.get('priceChange1hPercent', 0),
+            'volume_5m': data.get('volume5m', 0),
+            'volume_1h': data.get('volume1h', 0),
+            'tx_signature': data.get('signature'),
+            'trader_wallet': data.get('traderPublicKey'),
+            'image_uri': data.get('uri', ''),
+            'created_timestamp': data.get('timestamp'),
+            'holder_count': 0
+        }
+        
+        # For post-graduation tokens, enrich with fresh DEX data
+        if bonding_pct >= 100:
+            dex_data = await self._get_dex_data(token_address)
+            if dex_data:
+                # Update with fresh Raydium volume data
+                token_data['volume_5m'] = dex_data.get('volume_5m', token_data['volume_5m'])
+                token_data['volume_1h'] = dex_data.get('volume_1h', token_data['volume_1h'])
+                token_data['volume_24h'] = dex_data.get('volume_24h', token_data['volume_24h'])
+                token_data['liquidity'] = dex_data.get('liquidity', token_data['liquidity'])
+                token_data['holder_count'] = dex_data.get('holder_count', 0)
+                logger.debug(f"   📊 Enriched with fresh DEX data")
+        else:
+            # Pre-graduation: Just get holder count from Helius
+            holder_count = await self._get_holders_from_helius(token_address)
+            token_data['holder_count'] = holder_count
+        
+        return token_data
+    
+    async def _get_dex_data(self, token_address: str) -> dict:
+        """
+        Get fresh volume and holder data from DexScreener for post-graduation tokens
+        Returns dict with volume_5m, volume_1h, volume_24h, liquidity, holder_count
+        """
+        try:
+            url = f"https://api.dexscreener.com/latest/dex/tokens/{token_address}"
             
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as resp:
+                    if resp.status != 200:
+                        logger.debug(f"⚠️ DexScreener returned {resp.status}")
+                        return None
+                    
+                    data = await resp.json()
+                    pairs = data.get('pairs', [])
+                    
+                    if not pairs:
+                        return None
+                    
+                    # Get data from first (most liquid) pair
+                    pair = pairs[0]
+                    
+                    # Extract volume data
+                    volume_obj = pair.get('volume', {})
+                    txns = pair.get('txns', {})
+                    
+                    dex_data = {
+                        'volume_5m': volume_obj.get('m5', 0),
+                        'volume_1h': volume_obj.get('h1', 0),
+                        'volume_24h': volume_obj.get('h24', 0),
+                        'liquidity': pair.get('liquidity', {}).get('usd', 0),
+                        'holder_count': txns.get('h24', {}).get('unique', 0) or pair.get('holderCount', 0)
+                    }
+                    
+                    logger.debug(f"   📊 DEX data: vol_1h=${dex_data['volume_1h']:.0f}, holders={dex_data['holder_count']}")
+                    return dex_data
+                    
         except Exception as e:
-            logger.error(f"❌ Error in cleanup task: {e}")
-
-# ============================================================================
-# HEALTH CHECK
-# ============================================================================
-
-@app.get("/")
-async def health_check():
-    """Health check endpoint"""
-    from datetime import datetime
-    return {
-        "status": "healthy",
-        "service": "Sentinel Signals v2",
-        "timestamp": datetime.utcnow().isoformat()
-    }
-
-@app.get("/status")
-async def status():
-    """Detailed status endpoint"""
-    from datetime import datetime
+            logger.debug(f"⚠️ Error fetching DEX data: {e}")
+            return None
     
-    trending = narrative_detector.get_trending_narratives(24) if narrative_detector else []
+    async def _get_holders_from_helius(self, token_address: str) -> int:
+        """Fetch holder count from Helius API (for pre-graduation tokens)"""
+        try:
+            # Import config to get Helius API key
+            import config
+            
+            url = f"https://mainnet.helius-rpc.com/?api-key={config.HELIUS_API_KEY}"
+            
+            payload = {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "getTokenAccounts",
+                "params": {
+                    "mint": token_address,
+                    "options": {
+                        "showZeroBalance": False
+                    }
+                }
+            }
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=5)) as resp:
+                    if resp.status != 200:
+                        logger.debug(f"⚠️ Helius returned {resp.status} for holder count")
+                        return 0
+                    
+                    data = await resp.json()
+                    
+                    # Get token accounts
+                    token_accounts = data.get('result', {}).get('token_accounts', [])
+                    holder_count = len(token_accounts)
+                    
+                    logger.debug(f"   👥 Helius holder count: {holder_count}")
+                    return holder_count
+                    
+        except asyncio.TimeoutError:
+            logger.debug(f"⚠️ Timeout fetching holders from Helius for {token_address[:8]}")
+            return 0
+        except Exception as e:
+            logger.debug(f"⚠️ Error fetching holders from Helius: {e}")
+            return 0
     
-    # Get performance stats
-    perf_stats = await performance_tracker.get_stats() if performance_tracker else {}
+    async def stop(self):
+        """Stop monitoring"""
+        self.running = False
+        if self.ws:
+            await self.ws.close()
+        logger.info(f"🛑 Stopped (received {self.messages_received} messages)")
     
-    return {
-        "status": "operational",
-        "config": {
-            "pre_grad_conviction": 80,
-            "post_grad_conviction": 75,
-            "min_conviction": config.MIN_CONVICTION_SCORE,
-        },
-        "trackers": {
-            "smart_wallets": len(smart_wallet_tracker.tracked_wallets) if smart_wallet_tracker else 0,
-            "pumpportal_tracked": len(pumpportal_monitor.tracked_tokens) if pumpportal_monitor else 0,
-        },
-        "performance": perf_stats,
-        "trending_narratives": trending[:5],
-        "timestamp": datetime.utcnow().isoformat()
-    }
-
-@app.get("/pumpportal-status")
-async def pumpportal_diagnostic():
-    """PumpPortal monitor diagnostic endpoint"""
-    return {
-        "monitor_exists": pumpportal_monitor is not None,
-        "is_running": pumpportal_monitor.running if pumpportal_monitor else False,
-        "tracked_tokens": len(pumpportal_monitor.tracked_tokens) if pumpportal_monitor else 0,
-        "websocket_connected": pumpportal_monitor.ws is not None if pumpportal_monitor else False,
-        "connection_attempts": pumpportal_monitor.connection_attempts if pumpportal_monitor else 0,
-        "messages_received": pumpportal_monitor.messages_received if pumpportal_monitor else 0,
-    }
-
-# ============================================================================
-# SHUTDOWN
-# ============================================================================
-
-@app.on_event("shutdown")
-async def shutdown():
-    """Cleanup on shutdown"""
-    logger.info("🛑 Shutting down...")
-    
-    if pumpportal_monitor:
-        await pumpportal_monitor.stop()
-    
-    if performance_tracker:
-        await performance_tracker.stop()
-    
-    if db:
-        await db.close()
-    
-    logger.info("✅ Shutdown complete")
-
-# ============================================================================
-# MAIN
-# ============================================================================
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    def cleanup_old_tokens(self):
+        """Cleanup"""
+        if len(self.tracked_tokens) > 1000:
+            tokens_to_remove = list(self.tracked_tokens.keys())[:500]
+            for token in tokens_to_remove:
+                self.tracked_tokens.pop(token, None)
