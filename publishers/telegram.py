@@ -17,9 +17,9 @@ class TelegramPublisher:
         self.bot: Optional[Bot] = None
         self.channel_id = config.TELEGRAM_CHANNEL_ID
         self.enabled = config.ENABLE_TELEGRAM
-        # Use file_id from config, or fallback to this one
-        self.banner_file_id = getattr(config, 'TELEGRAM_BANNER_FILE_ID', 
-                                      "AAMCBQADGQEAARo2t2luZc3uCBRvzP8MzukkPSpP2vhVAALUHAAC6vxxV7_SZXW_LNdlAQAHbQADOAQ")
+        # Banner disabled temporarily - file_id was for thumbnail, not animation
+        # To re-enable: upload actual GIF/animation and get new file_id
+        self.banner_file_id = getattr(config, 'TELEGRAM_BANNER_FILE_ID', None)
         
     async def initialize(self):
         """Initialize Telegram bot"""
@@ -190,13 +190,23 @@ class TelegramPublisher:
             
             # If we have a banner, send as animation with caption
             if self.banner_file_id:
-                result = await self.bot.send_animation(
-                    chat_id=self.channel_id,
-                    animation=self.banner_file_id,
-                    caption=message,
-                    parse_mode=ParseMode.HTML,
-                    disable_notification=False
-                )
+                try:
+                    result = await self.bot.send_animation(
+                        chat_id=self.channel_id,
+                        animation=self.banner_file_id,
+                        caption=message,
+                        parse_mode=ParseMode.HTML,
+                        disable_notification=False
+                    )
+                except TelegramError as e:
+                    logger.warning(f"⚠️ Banner failed ({e}), sending text-only")
+                    # Fallback to text-only
+                    result = await self.bot.send_message(
+                        chat_id=self.channel_id,
+                        text=message,
+                        parse_mode=ParseMode.HTML,
+                        disable_web_page_preview=False
+                    )
             else:
                 # Fallback to regular message if no banner
                 result = await self.bot.send_message(
