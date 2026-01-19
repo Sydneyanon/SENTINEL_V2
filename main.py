@@ -18,7 +18,7 @@ logger.add(
 # Import existing modules
 import config
 from database import Database
-from pumpportal_monitor import PumpPortalMonitor
+from pump_monitor_v2 import PumpMonitorV2
 from performance_tracker import PerformanceTracker
 from trackers.smart_wallets import SmartWalletTracker
 from trackers.narrative_detector import NarrativeDetector
@@ -181,7 +181,7 @@ async def startup():
     
     # Initialize PumpPortal monitor
     logger.info("🔌 Initializing PumpPortal monitor...")
-    pumpportal_monitor = PumpPortalMonitor(on_signal_callback=handle_pumpportal_signal)
+    pumpportal_monitor = PumpMonitorV2(on_signal_callback=handle_pumpportal_signal)
     
     # Wait a bit for everything to stabilize before starting background task
     logger.info("⏳ Waiting 2 seconds before starting PumpPortal task...")
