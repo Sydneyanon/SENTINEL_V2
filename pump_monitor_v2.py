@@ -107,7 +107,11 @@ class PumpMonitorV2:
         token_address = data.get('mint')
         symbol = data.get('symbol', 'UNKNOWN')
         if token_address:
-            logger.info(f"🆕 New token: ${symbol}")
+            # Only log if we're tracking this token (KOL bought it)
+            if self.active_tracker and self.active_tracker.is_tracked(token_address):
+                logger.info(f"🆕 New token (TRACKED): ${symbol}")
+            else:
+                logger.debug(f"🆕 New token: ${symbol}")  # Changed to debug
             
             # Subscribe to this specific token's trades to track bonding curve
             try:
@@ -141,9 +145,13 @@ class PumpMonitorV2:
         if self.active_tracker and self.active_tracker.is_tracked(token_address):
             # This is a tracked token! Update it in real-time
             # Log what fields we're getting from PumpPortal
-            logger.debug(f"🔍 PumpPortal trade keys: {list(data.keys())}")
-            logger.debug(f"   symbol={data.get('symbol')}, name={data.get('name')}")
-            logger.debug(f"   priceUsd={data.get('priceUsd')}, marketCapSol={data.get('marketCapSol')}")
+            logger.info(f"📊 PumpPortal data for tracked token:")
+            logger.info(f"   symbol: {data.get('symbol')}")
+            logger.info(f"   name: {data.get('name')}")
+            logger.info(f"   priceUsd: {data.get('priceUsd')}")
+            logger.info(f"   marketCapSol: {data.get('marketCapSol')}")
+            logger.info(f"   vSolInBondingCurve: {data.get('vSolInBondingCurve')}")
+            logger.info(f"   bondingCurvePercentage: {data.get('bondingCurvePercentage')}")
             
             await self.active_tracker.update_token_trade(token_address, data)
             return  # ActiveTracker handles everything from here
