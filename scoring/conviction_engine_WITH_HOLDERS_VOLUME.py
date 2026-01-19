@@ -31,7 +31,7 @@ class ConvictionEngine:
         
         Args:
             token_address: Token mint address
-            token_data: Token data from PumpPortal or DexScreener
+            token_data: Token data from PumpPortal
             
         Returns:
             Dict with score and detailed breakdown
