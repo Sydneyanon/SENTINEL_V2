@@ -127,13 +127,14 @@ class PumpMonitorV2:
     async def _extract_token_data(self, data: Dict) -> Dict:
         """Extract token data"""
         token_address = data.get('mint')
+        bonding_pct = data.get('bondingCurvePercentage', 0)
         
         token_data = {
             'token_address': token_address,
             'token_name': data.get('name'),
             'token_symbol': data.get('symbol'),
             'description': data.get('description', ''),
-            'bonding_curve_pct': data.get('bondingCurvePercentage', 0),
+            'bonding_curve_pct': bonding_pct,
             'market_cap': data.get('marketCapSol', 0) * 150,
             'liquidity': data.get('vSolInBondingCurve', 0) * 150,
             'volume_24h': data.get('volume24h', 0),
@@ -150,7 +151,107 @@ class PumpMonitorV2:
             'holder_count': 0
         }
         
+        # For post-graduation tokens, enrich with fresh DEX data
+        if bonding_pct >= 100:
+            dex_data = await self._get_dex_data(token_address)
+            if dex_data:
+                # Update with fresh Raydium volume data
+                token_data['volume_5m'] = dex_data.get('volume_5m', token_data['volume_5m'])
+                token_data['volume_1h'] = dex_data.get('volume_1h', token_data['volume_1h'])
+                token_data['volume_24h'] = dex_data.get('volume_24h', token_data['volume_24h'])
+                token_data['liquidity'] = dex_data.get('liquidity', token_data['liquidity'])
+                token_data['holder_count'] = dex_data.get('holder_count', 0)
+                logger.debug(f"   📊 Enriched with fresh DEX data")
+        else:
+            # Pre-graduation: Just get holder count from Helius
+            holder_count = await self._get_holders_from_helius(token_address)
+            token_data['holder_count'] = holder_count
+        
         return token_data
+    
+    async def _get_dex_data(self, token_address: str) -> dict:
+        """
+        Get fresh volume and holder data from DexScreener for post-graduation tokens
+        Returns dict with volume_5m, volume_1h, volume_24h, liquidity, holder_count
+        """
+        try:
+            url = f"https://api.dexscreener.com/latest/dex/tokens/{token_address}"
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as resp:
+                    if resp.status != 200:
+                        logger.debug(f"⚠️ DexScreener returned {resp.status}")
+                        return None
+                    
+                    data = await resp.json()
+                    pairs = data.get('pairs', [])
+                    
+                    if not pairs:
+                        return None
+                    
+                    # Get data from first (most liquid) pair
+                    pair = pairs[0]
+                    
+                    # Extract volume data
+                    volume_obj = pair.get('volume', {})
+                    txns = pair.get('txns', {})
+                    
+                    dex_data = {
+                        'volume_5m': volume_obj.get('m5', 0),
+                        'volume_1h': volume_obj.get('h1', 0),
+                        'volume_24h': volume_obj.get('h24', 0),
+                        'liquidity': pair.get('liquidity', {}).get('usd', 0),
+                        'holder_count': txns.get('h24', {}).get('unique', 0) or pair.get('holderCount', 0)
+                    }
+                    
+                    logger.debug(f"   📊 DEX data: vol_1h=${dex_data['volume_1h']:.0f}, holders={dex_data['holder_count']}")
+                    return dex_data
+                    
+        except Exception as e:
+            logger.debug(f"⚠️ Error fetching DEX data: {e}")
+            return None
+    
+    async def _get_holders_from_helius(self, token_address: str) -> int:
+        """Fetch holder count from Helius API (for pre-graduation tokens)"""
+        try:
+            # Import config to get Helius API key
+            import config
+            
+            url = f"https://mainnet.helius-rpc.com/?api-key={config.HELIUS_API_KEY}"
+            
+            payload = {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "getTokenAccounts",
+                "params": {
+                    "mint": token_address,
+                    "options": {
+                        "showZeroBalance": False
+                    }
+                }
+            }
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=5)) as resp:
+                    if resp.status != 200:
+                        logger.debug(f"⚠️ Helius returned {resp.status} for holder count")
+                        return 0
+                    
+                    data = await resp.json()
+                    
+                    # Get token accounts
+                    token_accounts = data.get('result', {}).get('token_accounts', [])
+                    holder_count = len(token_accounts)
+                    
+                    logger.debug(f"   👥 Helius holder count: {holder_count}")
+                    return holder_count
+                    
+        except asyncio.TimeoutError:
+            logger.debug(f"⚠️ Timeout fetching holders from Helius for {token_address[:8]}")
+            return 0
+        except Exception as e:
+            logger.debug(f"⚠️ Error fetching holders from Helius: {e}")
+            return 0
     
     async def stop(self):
         """Stop monitoring"""
