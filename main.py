@@ -117,7 +117,13 @@ async def start_pumpportal_task():
     """Wrapper for PumpPortal task with error handling"""
     try:
         logger.info("🚨 Starting PumpPortal background task...")
+        logger.info(f"🚨 Monitor object exists: {pumpportal_monitor is not None}")
+        logger.info(f"🚨 Monitor type: {type(pumpportal_monitor)}")
+        logger.info("🚨 About to call pumpportal_monitor.start()...")
+        
         await pumpportal_monitor.start()
+        
+        logger.info("🚨 After calling pumpportal_monitor.start() - THIS SHOULD NEVER PRINT")
     except Exception as e:
         logger.error(f"❌ PumpPortal task crashed: {e}")
         import traceback
