@@ -24,3 +24,6 @@ pydantic==2.5.3
 python-dateutil==2.8.2
 
 websockets
+
+# For bonding curve PDA derivation
+solders>=0.14.0
