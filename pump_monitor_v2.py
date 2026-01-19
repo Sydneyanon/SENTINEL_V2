@@ -117,6 +117,10 @@ class PumpMonitorV2:
                 logger.debug(f"   📡 Subscribed to trades for {token_address[:8]}")
             except Exception as e:
                 logger.debug(f"   ⚠️ Failed to subscribe to token trades: {e}")
+            
+            # Analyze the newly created token
+            token_data = await self._extract_token_data(data)
+            await self.on_signal_callback(token_data, 'NEW_TOKEN')
     
     async def _handle_trade(self, data: Dict):
         """Handle trade"""
