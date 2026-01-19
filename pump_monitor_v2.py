@@ -140,6 +140,11 @@ class PumpMonitorV2:
         # NEW: Check if this is a tracked token (KOL bought it)
         if self.active_tracker and self.active_tracker.is_tracked(token_address):
             # This is a tracked token! Update it in real-time
+            # Log what fields we're getting from PumpPortal
+            logger.debug(f"🔍 PumpPortal trade keys: {list(data.keys())}")
+            logger.debug(f"   symbol={data.get('symbol')}, name={data.get('name')}")
+            logger.debug(f"   priceUsd={data.get('priceUsd')}, marketCapSol={data.get('marketCapSol')}")
+            
             await self.active_tracker.update_token_trade(token_address, data)
             return  # ActiveTracker handles everything from here
         
@@ -314,4 +319,3 @@ class PumpMonitorV2:
             tokens_to_remove = list(self.tracked_tokens.keys())[:500]
             for token in tokens_to_remove:
                 self.tracked_tokens.pop(token, None)
-            
