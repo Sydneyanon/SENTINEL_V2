@@ -143,6 +143,8 @@ class ActiveTokenTracker:
             
             # Update token data with latest trade info
             state.token_data.update({
+                'token_name': trade_data.get('name', state.token_data.get('token_name', 'Unknown')),
+                'token_symbol': trade_data.get('symbol', state.token_data.get('token_symbol', 'UNKNOWN')),
                 'bonding_curve_pct': trade_data.get('bondingCurvePercentage', state.token_data.get('bonding_curve_pct', 0)),
                 'volume_5m': trade_data.get('volume5m', state.token_data.get('volume_5m', 0)),
                 'volume_1h': trade_data.get('volume1h', state.token_data.get('volume_1h', 0)),
@@ -152,15 +154,15 @@ class ActiveTokenTracker:
                 'market_cap': trade_data.get('marketCapSol', 0) * 150,
             })
             
-            # Update name/symbol if we didn't have it
-            if state.token_data.get('token_symbol') == 'UNKNOWN' and trade_data.get('symbol'):
-                state.token_data['token_symbol'] = trade_data.get('symbol')
-                state.token_data['token_name'] = trade_data.get('name', trade_data.get('symbol'))
-                logger.info(f"   📝 Updated token name: ${state.token_data['token_symbol']}")
-            
             state.last_updated = datetime.utcnow()
             
-            logger.debug(f"📊 Trade update: {token_address[:8]} at {state.token_data.get('bonding_curve_pct', 0):.1f}%")
+            # Log data quality for debugging
+            symbol = state.token_data.get('token_symbol', 'UNKNOWN')
+            price = state.token_data.get('price_usd', 0)
+            mcap = state.token_data.get('market_cap', 0)
+            liq = state.token_data.get('liquidity', 0)
+            
+            logger.debug(f"📊 {symbol}: price=${price:.8f}, mcap=${mcap:.0f}, liq=${liq:.0f}")
             
             # Re-analyze with updated data
             await self._reanalyze_token(token_address)
@@ -231,16 +233,20 @@ class ActiveTokenTracker:
             # Check if we should send signal
             from config import MIN_CONVICTION_SCORE
             
-            # Don't send signal if token data is still empty/unknown
+            # Strict validation - don't send signal if token data is incomplete
             has_real_data = (
-                state.token_data.get('token_symbol', 'UNKNOWN') != 'UNKNOWN' and
-                state.token_data.get('price_usd', 0) > 0
+                state.token_data.get('token_symbol', 'UNKNOWN') not in ['UNKNOWN', '', None] and
+                state.token_data.get('token_name', 'Unknown') not in ['Unknown', '', None] and
+                state.token_data.get('price_usd', 0) > 0 and
+                state.token_data.get('market_cap', 0) > 0 and
+                state.token_data.get('liquidity', 0) > 0
             )
             
             if new_score >= MIN_CONVICTION_SCORE and not state.signal_sent and has_real_data:
                 await self._send_signal(token_address, conviction_data)
             elif new_score >= MIN_CONVICTION_SCORE and not state.signal_sent and not has_real_data:
-                logger.debug(f"⏳ Waiting for real data before signaling {token_address[:8]}...")
+                symbol = state.token_data.get('token_symbol', 'UNKNOWN')
+                logger.info(f"⏳ {symbol}: Score {new_score} but waiting for complete data...")
             
         except Exception as e:
             logger.error(f"❌ Error re-analyzing token: {e}")
