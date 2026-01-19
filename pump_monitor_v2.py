@@ -1,10 +1,10 @@
 """
 PumpPortal Monitor V2 - Real-time pump.fun bonding curve tracking
-Brand new file to force reload
+NOW WITH: Active token tracking integration for KOL-bought tokens
 """
 import asyncio
 import json
-from typing import Callable, Dict
+from typing import Callable, Dict, Optional
 import websockets
 import aiohttp
 from loguru import logger
@@ -12,9 +12,10 @@ from loguru import logger
 class PumpMonitorV2:
     """Monitors pump.fun tokens via PumpPortal WebSocket"""
     
-    def __init__(self, on_signal_callback: Callable):
+    def __init__(self, on_signal_callback: Callable, active_tracker=None):
         self.ws_url = 'wss://pumpportal.fun/api/data'
         self.on_signal_callback = on_signal_callback
+        self.active_tracker = active_tracker  # NEW: Reference to ActiveTokenTracker
         self.ws = None
         self.tracked_tokens = {}
         self.running = False
@@ -123,13 +124,26 @@ class PumpMonitorV2:
             await self.on_signal_callback(token_data, 'NEW_TOKEN')
     
     async def _handle_trade(self, data: Dict):
-        """Handle trade"""
+        """
+        Handle trade
+        
+        NEW BEHAVIOR:
+        - Check if token is actively tracked by KOLs
+        - If yes, trigger immediate re-analysis via ActiveTokenTracker
+        """
         token_address = data.get('mint')
         bonding_pct = data.get('bondingCurvePercentage', 0)
         
         if not token_address:
             return
         
+        # NEW: Check if this is a tracked token (KOL bought it)
+        if self.active_tracker and self.active_tracker.is_tracked(token_address):
+            # This is a tracked token! Update it in real-time
+            await self.active_tracker.update_token_trade(token_address, data)
+            return  # ActiveTracker handles everything from here
+        
+        # OLD BEHAVIOR: Pre-graduation range monitoring (40-60%)
         if 40 <= bonding_pct <= 60:
             if token_address not in self.tracked_tokens:
                 logger.info(f"⚡ Token in range: {data.get('symbol')} at {bonding_pct:.1f}%")
@@ -144,9 +158,18 @@ class PumpMonitorV2:
         
         if token_address:
             logger.info(f"🎓 Graduation: ${symbol}")
-            token_data = await self._extract_token_data(data)
-            token_data['bonding_curve_pct'] = 100
-            await self.on_signal_callback(token_data, 'POST_GRADUATION')
+            
+            # NEW: Check if this is a tracked token
+            if self.active_tracker and self.active_tracker.is_tracked(token_address):
+                # Update tracked token with graduation info
+                data['bondingCurvePercentage'] = 100
+                await self.active_tracker.update_token_trade(token_address, data)
+            else:
+                # Not tracked by KOLs, still report graduation
+                token_data = await self._extract_token_data(data)
+                token_data['bonding_curve_pct'] = 100
+                await self.on_signal_callback(token_data, 'POST_GRADUATION')
+            
             self.tracked_tokens.pop(token_address, None)
     
     async def _extract_token_data(self, data: Dict) -> Dict:
@@ -291,3 +314,4 @@ class PumpMonitorV2:
             tokens_to_remove = list(self.tracked_tokens.keys())[:500]
             for token in tokens_to_remove:
                 self.tracked_tokens.pop(token, None)
+            
