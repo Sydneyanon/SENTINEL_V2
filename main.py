@@ -26,6 +26,7 @@ from trackers.narrative_detector import NarrativeDetector
 from scoring.conviction_engine import ConvictionEngine
 from publishers.telegram import TelegramPublisher
 from active_token_tracker import ActiveTokenTracker
+from helius_fetcher import HeliusDataFetcher
 
 # ============================================================================
 # GLOBAL INSTANCES
@@ -44,6 +45,7 @@ performance_tracker = None
 smart_wallet_tracker = SmartWalletTracker()
 narrative_detector = NarrativeDetector()
 active_tracker = None  # NEW: Tracks KOL-bought tokens
+helius_fetcher = None  # NEW: Fetches data from Helius
 
 # Scoring
 conviction_engine = None
@@ -153,14 +155,17 @@ async def start_pumpportal_task():
         import traceback
         logger.error(traceback.format_exc())
 
-async def holder_polling_task():
+async def smart_polling_task():
     """
-    Poll holder counts for actively tracked tokens
-    Runs every 15 seconds to stay real-time
+    Smart polling for actively tracked tokens
+    Uses age-based intervals:
+    - New tokens (< 5 min): Every 5 seconds
+    - Young tokens (5-60 min): Every 30 seconds
+    - Mature tokens (> 60 min): Every 60 seconds
     """
     while True:
         try:
-            await asyncio.sleep(15)  # Every 15 seconds
+            await asyncio.sleep(5)  # Check every 5 seconds
             
             if not active_tracker:
                 continue
@@ -170,51 +175,17 @@ async def holder_polling_task():
             if not active_tokens:
                 continue
             
-            logger.debug(f"👥 Polling holders for {len(active_tokens)} tokens...")
-            
-            # Poll each active token
+            # Smart poll each active token
+            # The smart_poll_token method handles its own interval checking
             for token_address in active_tokens:
                 try:
-                    holder_count = await fetch_holder_count(token_address)
-                    if holder_count > 0:
-                        await active_tracker.update_holder_count(token_address, holder_count)
+                    await active_tracker.smart_poll_token(token_address)
                 except Exception as e:
-                    logger.debug(f"⚠️ Error polling holders for {token_address[:8]}: {e}")
+                    logger.debug(f"⚠️ Error polling {token_address[:8]}: {e}")
             
         except Exception as e:
-            logger.error(f"❌ Error in holder polling task: {e}")
+            logger.error(f"❌ Error in smart polling task: {e}")
 
-async def fetch_holder_count(token_address: str) -> int:
-    """Fetch holder count from Helius"""
-    try:
-        import aiohttp
-        
-        url = f"https://mainnet.helius-rpc.com/?api-key={config.HELIUS_API_KEY}"
-        
-        payload = {
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "getTokenAccounts",
-            "params": {
-                "mint": token_address,
-                "options": {
-                    "showZeroBalance": False
-                }
-            }
-        }
-        
-        async with aiohttp.ClientSession() as session:
-            async with session.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=3)) as resp:
-                if resp.status != 200:
-                    return 0
-                
-                data = await resp.json()
-                token_accounts = data.get('result', {}).get('token_accounts', [])
-                return len(token_accounts)
-                
-    except Exception as e:
-        logger.debug(f"⚠️ Error fetching holders: {e}")
-        return 0
 
 async def cleanup_task():
     """Periodic cleanup of old data"""
@@ -244,7 +215,7 @@ async def cleanup_task():
 @app.on_event("startup")
 async def startup():
     """Initialize all components"""
-    global conviction_engine, pumpportal_monitor, db, performance_tracker, active_tracker
+    global conviction_engine, pumpportal_monitor, db, performance_tracker, active_tracker, helius_fetcher
     
     logger.info("=" * 70)
     logger.info("🚀 SENTINEL SIGNALS V2 - KOL-TRIGGERED TRACKING")
@@ -258,6 +229,11 @@ async def startup():
     
     # Pass database to smart wallet tracker
     smart_wallet_tracker.db = db
+    
+    # Initialize Helius fetcher
+    logger.info("🔗 Initializing Helius data fetcher...")
+    helius_fetcher = HeliusDataFetcher()
+    logger.info("✅ Helius fetcher initialized")
     
     # Initialize trackers
     logger.info("🔍 Starting trackers...")
@@ -291,7 +267,8 @@ async def startup():
     active_tracker = ActiveTokenTracker(
         conviction_engine=conviction_engine,
         telegram_publisher=telegram_publisher,
-        db=db
+        db=db,
+        helius_fetcher=helius_fetcher  # Pass Helius fetcher
     )
     logger.info("✅ Active token tracker initialized")
     
@@ -314,8 +291,8 @@ async def startup():
     
     # Start holder polling task (NEW!)
     logger.info("👥 Starting holder polling task...")
-    asyncio.create_task(holder_polling_task())
-    logger.info("✅ Holder polling started (every 15s)")
+    asyncio.create_task(smart_polling_task())
+    logger.info("✅ Smart polling started (age-based intervals)")
     
     # Log configuration
     logger.info("=" * 70)
