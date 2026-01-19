@@ -81,12 +81,20 @@ class PumpMonitorV2:
             data = json.loads(message)
             tx_type = data.get('txType')
             
+            # Log ALL message types we receive (not just create)
+            if self.messages_received <= 20:
+                logger.info(f"📬 Message type: {tx_type}, keys: {list(data.keys())[:10]}")
+            
             if tx_type == 'create':
                 await self._handle_new_token(data)
             elif tx_type in ['buy', 'sell']:
                 await self._handle_trade(data)
             elif tx_type == 'complete':
                 await self._handle_graduation(data)
+            else:
+                # Log unknown types
+                if self.messages_received <= 10:
+                    logger.info(f"🤷 Unknown tx_type: {tx_type}")
         except:
             pass
     
