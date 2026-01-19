@@ -7,7 +7,6 @@ from datetime import datetime, timedelta
 from dataclasses import dataclass
 from loguru import logger
 import asyncio
-import aiohttp
 
 
 @dataclass
@@ -73,17 +72,41 @@ class ActiveTokenTracker:
             # Fetch initial token data from Helius
             if self.helius_fetcher:
                 logger.info(f"   📡 Fetching data from Helius...")
-                helius_data = await self.helius_fetcher.get_token_data(token_address)
-                
-                if helius_data:
-                    # Enrich with DexScreener price data if available
-                    initial_data = await self.helius_fetcher.enrich_token_data(helius_data)
-                    logger.info(f"   ✅ Got data: ${initial_data.get('token_symbol', 'UNKNOWN')}")
-                else:
-                    logger.warning(f"   ⚠️ Helius returned no data - using minimal fallback")
-                    initial_data = self._create_minimal_data(token_address)
+                try:
+                    helius_data = await self.helius_fetcher.get_token_data(token_address)
+                    
+                    if helius_data:
+                        logger.info(f"   ✅ Helius returned data!")
+                        logger.info(f"      Symbol: {helius_data.get('token_symbol')}")
+                        logger.info(f"      Name: {helius_data.get('token_name')}")
+                        
+                        # Enrich with DexScreener price data if available
+                        initial_data = await self.helius_fetcher.enrich_token_data(helius_data)
+                        logger.info(f"   ✅ Got complete data: ${initial_data.get('token_symbol', 'UNKNOWN')}")
+                    else:
+                        logger.warning(f"   ⚠️ Helius returned None - trying metadata only...")
+                        # Try to get just metadata (name/symbol) without bonding curve
+                        metadata = await self._fetch_metadata_only(token_address)
+                        if metadata:
+                            initial_data = self._create_minimal_data(token_address)
+                            initial_data.update(metadata)
+                            logger.info(f"   ✅ Got metadata: ${metadata.get('token_symbol', 'UNKNOWN')}")
+                        else:
+                            logger.warning(f"   ⚠️ No metadata available - using minimal fallback")
+                            initial_data = self._create_minimal_data(token_address)
+                except Exception as e:
+                    logger.error(f"   ❌ Helius fetch error: {e}")
+                    import traceback
+                    logger.error(traceback.format_exc())
+                    # Try metadata only as last resort
+                    metadata = await self._fetch_metadata_only(token_address)
+                    if metadata:
+                        initial_data = self._create_minimal_data(token_address)
+                        initial_data.update(metadata)
+                    else:
+                        initial_data = self._create_minimal_data(token_address)
             else:
-                logger.warning(f"   ⚠️ No Helius fetcher - using minimal fallback")
+                logger.warning(f"   ⚠️ No Helius fetcher initialized - using minimal fallback")
                 initial_data = self._create_minimal_data(token_address)
             
             # Create initial state
@@ -135,6 +158,51 @@ class ActiveTokenTracker:
             'price_change_1h': 0,
         }
     
+    async def _fetch_metadata_only(self, token_address: str) -> Optional[Dict]:
+        """
+        Fetch JUST metadata (name/symbol) from Helius
+        Used as fallback when full bonding curve decode fails
+        """
+        try:
+            import aiohttp
+            import config
+            
+            url = f"https://api.helius.xyz/v0/token-metadata?api-key={config.HELIUS_API_KEY}"
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    url,
+                    json={"mintAccounts": [token_address]},
+                    timeout=aiohttp.ClientTimeout(total=3)
+                ) as resp:
+                    if resp.status != 200:
+                        return None
+                    
+                    data = await resp.json()
+                    
+                    if not data or len(data) == 0:
+                        return None
+                    
+                    asset = data[0]
+                    metadata = asset.get('offChainMetadata', {}).get('metadata', {})
+                    on_chain = asset.get('onChainMetadata', {}).get('data', {})
+                    
+                    name = metadata.get('name', on_chain.get('name', 'Unknown'))
+                    symbol = metadata.get('symbol', on_chain.get('symbol', 'UNKNOWN'))
+                    
+                    # Clean up
+                    name = name.replace('\x00', '').strip()
+                    symbol = symbol.replace('\x00', '').strip()
+                    
+                    return {
+                        'token_name': name,
+                        'token_symbol': symbol
+                    }
+                    
+        except Exception as e:
+            logger.debug(f"   ⚠️ Metadata fetch error: {e}")
+            return None
+    
     async def update_token_trade(self, token_address: str, trade_data: Dict) -> None:
         """
         Update token from PumpPortal trade event (REAL-TIME)
@@ -150,17 +218,43 @@ class ActiveTokenTracker:
         try:
             state = self.tracked_tokens[token_address]
             
+            # Calculate price from reserves (PumpPortal doesn't always provide priceUsd)
+            market_cap_sol = trade_data.get('marketCapSol', 0)
+            v_sol_reserves = trade_data.get('vSolInBondingCurve', 0)
+            
+            # Constants
+            TOTAL_SUPPLY = 1_000_000_000  # 1 billion tokens
+            SOL_PRICE_USD = 150  # TODO: Fetch live SOL price
+            
+            # Calculate price from market cap
+            price_sol = market_cap_sol / TOTAL_SUPPLY if market_cap_sol > 0 else 0
+            price_usd = price_sol * SOL_PRICE_USD
+            
+            # Calculate liquidity (SOL in bonding curve)
+            liquidity_usd = v_sol_reserves * SOL_PRICE_USD
+            
+            # Calculate market cap in USD
+            market_cap_usd = market_cap_sol * SOL_PRICE_USD
+            
+            # Calculate bonding curve %
+            bonding_pct = (v_sol_reserves / 85) * 100 if v_sol_reserves > 0 else 0
+            bonding_pct = min(bonding_pct, 100)  # Cap at 100%
+            
+            # Log calculation
+            if v_sol_reserves > 0:
+                logger.debug(f"   💰 Calculated from PumpPortal: price=${price_usd:.8f}, mcap=${market_cap_usd:.0f}, bonding={bonding_pct:.1f}%")
+            
             # Update token data with latest trade info
             state.token_data.update({
                 'token_name': trade_data.get('name', state.token_data.get('token_name', 'Unknown')),
                 'token_symbol': trade_data.get('symbol', state.token_data.get('token_symbol', 'UNKNOWN')),
-                'bonding_curve_pct': trade_data.get('bondingCurvePercentage', state.token_data.get('bonding_curve_pct', 0)),
+                'bonding_curve_pct': bonding_pct,
                 'volume_5m': trade_data.get('volume5m', state.token_data.get('volume_5m', 0)),
                 'volume_1h': trade_data.get('volume1h', state.token_data.get('volume_1h', 0)),
-                'price_usd': trade_data.get('priceUsd', state.token_data.get('price_usd', 0)),
+                'price_usd': price_usd,
                 'price_change_5m': trade_data.get('priceChange5mPercent', state.token_data.get('price_change_5m', 0)),
-                'liquidity': trade_data.get('vSolInBondingCurve', 0) * 150,
-                'market_cap': trade_data.get('marketCapSol', 0) * 150,
+                'liquidity': liquidity_usd,
+                'market_cap': market_cap_usd,
             })
             
             state.last_updated = datetime.utcnow()
@@ -407,122 +501,6 @@ class ActiveTokenTracker:
             logger.error(f"❌ Error sending signal: {e}")
             import traceback
             logger.error(traceback.format_exc())
-    
-    async def _fetch_token_data(self, token_address: str) -> Optional[Dict]:
-        """
-        Fetch initial token data - tries multiple sources
-        
-        Priority:
-        1. pump.fun API (for new/pre-graduation tokens)
-        2. DexScreener (for graduated tokens)
-        
-        Args:
-            token_address: Token mint address
-            
-        Returns:
-            Token data dict or None
-        """
-        # Try pump.fun first (most KOL buys are here)
-        token_data = await self._fetch_from_pumpfun(token_address)
-        if token_data:
-            logger.debug(f"   ✅ Got data from pump.fun")
-            return token_data
-        
-        # Try DexScreener (for graduated tokens)
-        token_data = await self._fetch_from_dexscreener(token_address)
-        if token_data:
-            logger.debug(f"   ✅ Got data from DexScreener")
-            return token_data
-        
-        return None
-    
-    async def _fetch_from_pumpfun(self, token_address: str) -> Optional[Dict]:
-        """
-        Fetch token data from pump.fun API
-        This is best for new tokens that KOLs just bought
-        """
-        try:
-            url = f"https://frontend-api.pump.fun/coins/{token_address}"
-            
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url, timeout=aiohttp.ClientTimeout(total=3)) as resp:
-                    if resp.status != 200:
-                        return None
-                    
-                    data = await resp.json()
-                    
-                    if not data:
-                        return None
-                    
-                    # Calculate bonding curve percentage
-                    virtual_sol_reserves = data.get('virtual_sol_reserves', 0) / 1e9  # Convert lamports to SOL
-                    
-                    # Bonding curve completes at ~85 SOL
-                    bonding_pct = min((virtual_sol_reserves / 85) * 100, 100) if virtual_sol_reserves else 0
-                    
-                    return {
-                        'token_address': token_address,
-                        'token_name': data.get('name', 'Unknown'),
-                        'token_symbol': data.get('symbol', 'UNKNOWN'),
-                        'description': data.get('description', ''),
-                        'bonding_curve_pct': bonding_pct,
-                        'price_usd': 0,
-                        'liquidity': virtual_sol_reserves * 150,  # Rough USD estimate
-                        'volume_24h': 0,
-                        'volume_1h': 0,
-                        'volume_5m': 0,
-                        'market_cap': data.get('usd_market_cap', 0),
-                        'holder_count': 0,
-                        'image_uri': data.get('image_uri', ''),
-                        'price_change_5m': 0,
-                        'price_change_1h': 0,
-                    }
-                    
-        except Exception as e:
-            logger.debug(f"⚠️ pump.fun API failed: {e}")
-            return None
-    
-    async def _fetch_from_dexscreener(self, token_address: str) -> Optional[Dict]:
-        """
-        Fetch token data from DexScreener
-        Best for graduated tokens on Raydium
-        """
-        try:
-            url = f"https://api.dexscreener.com/latest/dex/tokens/{token_address}"
-            
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as resp:
-                    if resp.status != 200:
-                        return None
-                    
-                    data = await resp.json()
-                    pairs = data.get('pairs', [])
-                    
-                    if not pairs:
-                        return None
-                    
-                    pair = pairs[0]
-                    
-                    return {
-                        'token_address': token_address,
-                        'token_name': pair.get('baseToken', {}).get('name', ''),
-                        'token_symbol': pair.get('baseToken', {}).get('symbol', ''),
-                        'bonding_curve_pct': 100,  # On DEX = graduated
-                        'price_usd': float(pair.get('priceUsd', 0)),
-                        'liquidity': pair.get('liquidity', {}).get('usd', 0),
-                        'volume_24h': pair.get('volume', {}).get('h24', 0),
-                        'volume_1h': pair.get('volume', {}).get('h1', 0),
-                        'volume_5m': pair.get('volume', {}).get('m5', 0),
-                        'market_cap': pair.get('marketCap', 0),
-                        'holder_count': 0,
-                        'description': '',
-                        'price_change_5m': 0,
-                        'price_change_1h': 0,
-                    }
-                    
-        except Exception as e:
-            logger.debug(f"⚠️ DexScreener failed: {e}")
-            return None
     
     def is_tracked(self, token_address: str) -> bool:
         """Check if token is being tracked"""
