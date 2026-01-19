@@ -1,10 +1,19 @@
 """
 Helius Data Fetcher - Get token data from Helius RPC/API
+Includes bonding curve decoder for pump.fun tokens
 """
 from typing import Dict, Optional
 import aiohttp
 from loguru import logger
 import config
+import base64
+import struct
+from solders.pubkey import Pubkey  # pip install solders
+
+
+# pump.fun constants
+PUMP_PROGRAM_ID = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"
+TOTAL_SUPPLY = 1_000_000_000  # 1 billion tokens fixed
 
 
 class HeliusDataFetcher:
@@ -13,6 +22,135 @@ class HeliusDataFetcher:
     def __init__(self):
         self.api_key = config.HELIUS_API_KEY
         self.rpc_url = f"https://mainnet.helius-rpc.com/?api-key={self.api_key}"
+        
+    async def get_bonding_curve_data(self, token_address: str) -> Optional[Dict]:
+        """
+        Get bonding curve data for pump.fun token
+        Decodes on-chain account to calculate price, mcap, bonding %
+        
+        Args:
+            token_address: Token mint address
+            
+        Returns:
+            Dict with price_usd, market_cap, liquidity, bonding_curve_pct or None
+        """
+        try:
+            # Derive bonding curve PDA
+            mint_pubkey = Pubkey.from_string(token_address)
+            program_pubkey = Pubkey.from_string(PUMP_PROGRAM_ID)
+            
+            bonding_curve_pda, _ = Pubkey.find_program_address(
+                [b"bonding-curve", bytes(mint_pubkey)],
+                program_pubkey
+            )
+            
+            logger.debug(f"   📐 Bonding curve PDA: {str(bonding_curve_pda)[:8]}...")
+            
+            # Get account data from Helius
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    self.rpc_url,
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": 1,
+                        "method": "getAccountInfo",
+                        "params": [
+                            str(bonding_curve_pda),
+                            {"encoding": "base64"}
+                        ]
+                    },
+                    timeout=aiohttp.ClientTimeout(total=5)
+                ) as resp:
+                    if resp.status != 200:
+                        logger.debug(f"   ⚠️ Helius RPC returned {resp.status}")
+                        return None
+                    
+                    data = await resp.json()
+                    result = data.get('result')
+                    
+                    if not result or not result.get('value'):
+                        logger.debug(f"   ⚠️ No bonding curve account found")
+                        return None
+                    
+                    account_data = result['value']['data'][0]  # Base64 encoded
+                    
+            # Decode the account data
+            decoded = self._decode_bonding_curve_account(account_data)
+            
+            if not decoded:
+                logger.debug(f"   ⚠️ Failed to decode bonding curve")
+                return None
+            
+            # Calculate price and mcap
+            virtual_sol = decoded['virtual_sol_reserves'] / 1_000_000_000  # lamports to SOL
+            virtual_token = decoded['virtual_token_reserves'] / 1_000_000  # 6 decimals
+            
+            # Get current SOL price (simplified - use 150 USD for now)
+            sol_price_usd = 150  # TODO: Fetch live SOL price
+            
+            price_sol = virtual_sol / virtual_token if virtual_token > 0 else 0
+            price_usd = price_sol * sol_price_usd
+            
+            # MCAP in SOL = virtual_sol (represents SOL value at current supply)
+            mcap_sol = virtual_sol
+            mcap_usd = mcap_sol * sol_price_usd
+            
+            # Liquidity (SOL in bonding curve)
+            liquidity_usd = virtual_sol * sol_price_usd
+            
+            # Bonding curve progress (completes at ~85 SOL)
+            bonding_pct = min((virtual_sol / 85) * 100, 100)
+            
+            logger.debug(f"   💰 Decoded: price=${price_usd:.8f}, mcap=${mcap_usd:.0f}, bonding={bonding_pct:.1f}%")
+            
+            return {
+                'price_usd': price_usd,
+                'market_cap': mcap_usd,
+                'liquidity': liquidity_usd,
+                'bonding_curve_pct': bonding_pct,
+                'virtual_sol_reserves': virtual_sol,
+                'virtual_token_reserves': virtual_token,
+            }
+            
+        except Exception as e:
+            logger.debug(f"   ⚠️ Bonding curve decode error: {e}")
+            return None
+    
+    def _decode_bonding_curve_account(self, base64_data: str) -> Optional[Dict]:
+        """
+        Decode bonding curve account data
+        Simplified borsh schema - extracts virtual reserves
+        
+        Args:
+            base64_data: Base64 encoded account data
+            
+        Returns:
+            Dict with virtual_sol_reserves and virtual_token_reserves
+        """
+        try:
+            # Decode base64
+            data = base64.b64decode(base64_data)
+            
+            # Simplified schema (full IDL has more fields)
+            # Offset 8: virtual_token_reserves (u64)
+            # Offset 16: virtual_sol_reserves (u64)
+            # This is a simplified version - adjust offsets if needed
+            
+            if len(data) < 24:
+                return None
+            
+            # Unpack u64 values (little endian)
+            virtual_token_reserves = struct.unpack('<Q', data[8:16])[0]
+            virtual_sol_reserves = struct.unpack('<Q', data[16:24])[0]
+            
+            return {
+                'virtual_token_reserves': virtual_token_reserves,
+                'virtual_sol_reserves': virtual_sol_reserves,
+            }
+            
+        except Exception as e:
+            logger.debug(f"   ⚠️ Decode error: {e}")
+            return None
         
     async def get_token_data(self, token_address: str) -> Optional[Dict]:
         """
@@ -35,7 +173,15 @@ class HeliusDataFetcher:
             # Extract token info
             token_data = self._parse_asset_data(token_address, asset_data)
             
-            logger.debug(f"   ✅ Got Helius data: {token_data.get('token_symbol', 'UNKNOWN')}")
+            # Try to get bonding curve data (for pump.fun tokens)
+            bonding_data = await self.get_bonding_curve_data(token_address)
+            
+            if bonding_data:
+                # Update with bonding curve data
+                token_data.update(bonding_data)
+                logger.debug(f"   ✅ Got Helius data + bonding curve: {token_data.get('token_symbol', 'UNKNOWN')}")
+            else:
+                logger.debug(f"   ✅ Got Helius data (no bonding curve): {token_data.get('token_symbol', 'UNKNOWN')}")
             
             return token_data
             
@@ -48,6 +194,8 @@ class HeliusDataFetcher:
         try:
             url = f"https://api.helius.xyz/v0/token-metadata?api-key={self.api_key}"
             
+            logger.debug(f"   🌐 Calling Helius API for {token_address[:8]}...")
+            
             async with aiohttp.ClientSession() as session:
                 async with session.post(
                     url,
@@ -55,17 +203,20 @@ class HeliusDataFetcher:
                     timeout=aiohttp.ClientTimeout(total=5)
                 ) as resp:
                     if resp.status != 200:
+                        logger.warning(f"   ⚠️ Helius API returned status {resp.status}")
                         return None
                     
                     data = await resp.json()
                     
                     if not data or len(data) == 0:
+                        logger.warning(f"   ⚠️ Helius API returned empty data")
                         return None
                     
+                    logger.debug(f"   ✅ Helius API returned data")
                     return data[0]
                     
         except Exception as e:
-            logger.debug(f"   Helius asset fetch error: {e}")
+            logger.warning(f"   ⚠️ Helius asset fetch error: {e}")
             return None
     
     async def get_holder_count(self, token_address: str) -> int:
@@ -189,7 +340,8 @@ class HeliusDataFetcher:
     
     async def enrich_token_data(self, token_data: Dict) -> Dict:
         """
-        Enrich token data with price/mcap from DexScreener if available
+        Enrich token data with price/mcap
+        Tries bonding curve first (for pre-graduation), then DexScreener (post-graduation)
         
         Args:
             token_data: Base token data
@@ -199,7 +351,16 @@ class HeliusDataFetcher:
         """
         token_address = token_data.get('token_address')
         
-        # Try to get DexScreener data (for graduated tokens)
+        # Try bonding curve first (for pump.fun pre-graduation tokens)
+        if token_data.get('bonding_curve_pct', 100) < 100:
+            # Token is on bonding curve
+            bonding_data = await self.get_bonding_curve_data(token_address)
+            if bonding_data:
+                token_data.update(bonding_data)
+                logger.debug(f"   💰 Enriched with bonding curve data")
+                return token_data
+        
+        # Try DexScreener (for graduated tokens)
         dex_data = await self.get_dexscreener_data(token_address)
         
         if dex_data:
