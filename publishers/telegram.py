@@ -177,6 +177,15 @@ class TelegramPublisher:
             return None
         
         try:
+            # Log what data we received
+            token_data = signal_data.get('token_data', {})
+            logger.info(f"📤 Preparing Telegram signal:")
+            logger.info(f"   Symbol: {token_data.get('token_symbol')}")
+            logger.info(f"   Price: ${token_data.get('price_usd', 0):.8f}")
+            logger.info(f"   MCap: ${token_data.get('market_cap', 0):,.0f}")
+            logger.info(f"   Liquidity: ${token_data.get('liquidity', 0):,.0f}")
+            logger.info(f"   Conviction: {signal_data.get('score', 0)}/100")
+            
             message = self._format_signal(signal_data)
             
             # If we have a banner, send as animation with caption
