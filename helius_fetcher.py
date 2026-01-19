@@ -160,25 +160,64 @@ class HeliusDataFetcher:
             # Decode base64
             data = base64.b64decode(base64_data)
             
+            logger.info(f"   📦 Account data length: {len(data)} bytes")
+            logger.info(f"   📦 First 32 bytes (hex): {data[:32].hex()}")
+            
             # Simplified schema (full IDL has more fields)
             # Offset 8: virtual_token_reserves (u64)
             # Offset 16: virtual_sol_reserves (u64)
             # This is a simplified version - adjust offsets if needed
             
             if len(data) < 24:
+                logger.warning(f"   ⚠️ Account data too short: {len(data)} bytes (need 24+)")
                 return None
             
-            # Unpack u64 values (little endian)
-            virtual_token_reserves = struct.unpack('<Q', data[8:16])[0]
-            virtual_sol_reserves = struct.unpack('<Q', data[16:24])[0]
+            # Try multiple offset combinations
+            attempts = [
+                (8, 16, "Standard (8, 16)"),
+                (0, 8, "Alt 1 (0, 8)"),
+                (16, 24, "Alt 2 (16, 24)"),
+                (32, 40, "Alt 3 (32, 40)"),
+            ]
             
-            return {
-                'virtual_token_reserves': virtual_token_reserves,
-                'virtual_sol_reserves': virtual_sol_reserves,
-            }
+            for token_offset, sol_offset, desc in attempts:
+                if len(data) < sol_offset + 8:
+                    continue
+                    
+                try:
+                    # Unpack u64 values (little endian)
+                    virtual_token_reserves = struct.unpack('<Q', data[token_offset:token_offset+8])[0]
+                    virtual_sol_reserves = struct.unpack('<Q', data[sol_offset:sol_offset+8])[0]
+                    
+                    # Sanity check - reserves should be reasonable
+                    token_in_millions = virtual_token_reserves / 1_000_000
+                    sol_in_sol = virtual_sol_reserves / 1_000_000_000
+                    
+                    logger.info(f"   🧪 Trying {desc}:")
+                    logger.info(f"      Token reserves: {virtual_token_reserves} ({token_in_millions:.2f}M)")
+                    logger.info(f"      SOL reserves: {virtual_sol_reserves} ({sol_in_sol:.4f} SOL)")
+                    
+                    # Check if values are reasonable
+                    # Token reserves should be ~100M-1000M (6 decimals)
+                    # SOL reserves should be 0.1-85 SOL (9 decimals = 100M-85B lamports)
+                    if (100_000 < virtual_token_reserves < 1_000_000_000_000 and
+                        100_000_000 < virtual_sol_reserves < 100_000_000_000):
+                        logger.info(f"   ✅ Found valid reserves with {desc}")
+                        return {
+                            'virtual_token_reserves': virtual_token_reserves,
+                            'virtual_sol_reserves': virtual_sol_reserves,
+                        }
+                except Exception as e:
+                    logger.debug(f"   Failed {desc}: {e}")
+                    continue
+            
+            logger.warning(f"   ⚠️ No valid reserves found in any offset")
+            return None
             
         except Exception as e:
-            logger.debug(f"   ⚠️ Decode error: {e}")
+            logger.error(f"   ❌ Decode error: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             return None
         
     async def get_token_data(self, token_address: str) -> Optional[Dict]:
