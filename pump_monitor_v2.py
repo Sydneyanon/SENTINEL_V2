@@ -71,9 +71,12 @@ class PumpMonitorV2:
         
         await asyncio.sleep(0.5)
         
-        logger.info("📤 Subscribing to token trades...")
-        await self.ws.send(json.dumps({"method": "subscribeTokenTrade", "keys": ["*"]}))
-        logger.info("✅ Subscribed to token trades")
+        # Subscribe to migrations (graduations to Raydium)
+        logger.info("📤 Subscribing to migrations (graduations)...")
+        await self.ws.send(json.dumps({"method": "subscribeMigration"}))
+        logger.info("✅ Subscribed to migrations")
+        
+        logger.info("📡 Subscriptions complete - monitoring token creations and graduations")
     
     async def _process_message(self, message: str):
         """Process message"""
@@ -104,6 +107,16 @@ class PumpMonitorV2:
         symbol = data.get('symbol', 'UNKNOWN')
         if token_address:
             logger.info(f"🆕 New token: ${symbol}")
+            
+            # Subscribe to this specific token's trades to track bonding curve
+            try:
+                await self.ws.send(json.dumps({
+                    "method": "subscribeTokenTrade",
+                    "keys": [token_address]
+                }))
+                logger.debug(f"   📡 Subscribed to trades for {token_address[:8]}")
+            except Exception as e:
+                logger.debug(f"   ⚠️ Failed to subscribe to token trades: {e}")
     
     async def _handle_trade(self, data: Dict):
         """Handle trade"""
