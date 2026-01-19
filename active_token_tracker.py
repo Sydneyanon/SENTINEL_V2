@@ -229,24 +229,50 @@ class ActiveTokenTracker:
             if new_score != old_score:
                 symbol = state.token_data.get('token_symbol', 'UNKNOWN')
                 logger.info(f"📈 {symbol}: {old_score} → {new_score} conviction")
+                
+                # Log data summary when score changes
+                logger.debug(f"   Data: symbol={state.token_data.get('token_symbol')}, "
+                           f"price=${state.token_data.get('price_usd', 0):.8f}, "
+                           f"mcap=${state.token_data.get('market_cap', 0):.0f}, "
+                           f"liq=${state.token_data.get('liquidity', 0):.0f}")
             
             # Check if we should send signal
             from config import MIN_CONVICTION_SCORE
             
             # Strict validation - don't send signal if token data is incomplete
+            symbol = state.token_data.get('token_symbol', 'UNKNOWN')
+            name = state.token_data.get('token_name', 'Unknown')
+            price = state.token_data.get('price_usd', 0)
+            mcap = state.token_data.get('market_cap', 0)
+            liq = state.token_data.get('liquidity', 0)
+            
             has_real_data = (
-                state.token_data.get('token_symbol', 'UNKNOWN') not in ['UNKNOWN', '', None] and
-                state.token_data.get('token_name', 'Unknown') not in ['Unknown', '', None] and
-                state.token_data.get('price_usd', 0) > 0 and
-                state.token_data.get('market_cap', 0) > 0 and
-                state.token_data.get('liquidity', 0) > 0
+                symbol not in ['UNKNOWN', '', None] and
+                name not in ['Unknown', '', None] and
+                price > 0 and
+                mcap > 0 and
+                liq > 0
             )
             
-            if new_score >= MIN_CONVICTION_SCORE and not state.signal_sent and has_real_data:
-                await self._send_signal(token_address, conviction_data)
-            elif new_score >= MIN_CONVICTION_SCORE and not state.signal_sent and not has_real_data:
-                symbol = state.token_data.get('token_symbol', 'UNKNOWN')
-                logger.info(f"⏳ {symbol}: Score {new_score} but waiting for complete data...")
+            if new_score >= MIN_CONVICTION_SCORE and not state.signal_sent:
+                if has_real_data:
+                    logger.info(f"✅ {symbol} ready to signal: score={new_score}, price=${price:.8f}, mcap=${mcap:.0f}")
+                    await self._send_signal(token_address, conviction_data)
+                else:
+                    # Log exactly what's missing
+                    missing = []
+                    if symbol in ['UNKNOWN', '', None]:
+                        missing.append(f"symbol={symbol}")
+                    if name in ['Unknown', '', None]:
+                        missing.append(f"name={name}")
+                    if price <= 0:
+                        missing.append(f"price=${price}")
+                    if mcap <= 0:
+                        missing.append(f"mcap=${mcap}")
+                    if liq <= 0:
+                        missing.append(f"liq=${liq}")
+                    
+                    logger.warning(f"⏳ {symbol}: Score {new_score} but missing data: {', '.join(missing)}")
             
         except Exception as e:
             logger.error(f"❌ Error re-analyzing token: {e}")
