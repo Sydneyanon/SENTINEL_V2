@@ -1,5 +1,6 @@
 """
 Sentinel Signals v2 - Configuration
+UPDATED: Added holder distribution and volume velocity scoring
 """
 import os
 from dotenv import load_dotenv
@@ -32,7 +33,7 @@ if not HELIUS_API_KEY:
 # Minimum conviction score to post signal (0-100)
 MIN_CONVICTION_SCORE = int(os.getenv('MIN_CONVICTION_SCORE', 75))
 
-# Score weights (updated with holder + volume velocity)
+# Score weights - UPDATED with holder + volume velocity
 WEIGHTS = {
     # Smart Wallet Activity (max 40 points)
     'smart_wallet_elite': 15,      # Elite wallet bought (+15 per wallet)
