@@ -1,8 +1,9 @@
 """
-Sentinel Signals v2 - Now with Performance Tracking & Daily Reports
+Sentinel Signals v2 - KOL-Triggered Real-Time Tracking
+Now with ActiveTokenTracker for intelligent monitoring
 """
 import asyncio
-from typing import Dict
+from typing import Dict, List
 from fastapi import FastAPI, Request
 from loguru import logger
 import sys
@@ -24,6 +25,7 @@ from trackers.smart_wallets import SmartWalletTracker
 from trackers.narrative_detector import NarrativeDetector
 from scoring.conviction_engine import ConvictionEngine
 from publishers.telegram import TelegramPublisher
+from active_token_tracker import ActiveTokenTracker
 
 # ============================================================================
 # GLOBAL INSTANCES
@@ -41,6 +43,7 @@ performance_tracker = None
 # Trackers
 smart_wallet_tracker = SmartWalletTracker()
 narrative_detector = NarrativeDetector()
+active_tracker = None  # NEW: Tracks KOL-bought tokens
 
 # Scoring
 conviction_engine = None
@@ -49,68 +52,89 @@ conviction_engine = None
 telegram_publisher = TelegramPublisher()
 
 # ============================================================================
-# SIGNAL PROCESSING
+# HELPER FUNCTIONS
+# ============================================================================
+
+def extract_token_addresses_from_webhook(webhook_data: List[Dict]) -> List[str]:
+    """
+    Extract token addresses from Helius webhook data
+    
+    Args:
+        webhook_data: List of transactions from Helius
+        
+    Returns:
+        List of unique token addresses that were bought
+    """
+    token_addresses = set()
+    
+    try:
+        for transaction in webhook_data:
+            fee_payer = transaction.get('feePayer', '')
+            
+            # Only process if it's a tracked wallet
+            if fee_payer not in smart_wallet_tracker.tracked_wallets:
+                continue
+            
+            # Get token transfers
+            token_transfers = transaction.get('tokenTransfers', [])
+            
+            for transfer in token_transfers:
+                to_address = transfer.get('toUserAccount', '')
+                
+                # If the tracked wallet received tokens (bought)
+                if to_address == fee_payer:
+                    token_address = transfer.get('mint', '')
+                    if token_address:
+                        token_addresses.add(token_address)
+        
+        return list(token_addresses)
+        
+    except Exception as e:
+        logger.error(f"❌ Error extracting token addresses: {e}")
+        return []
+
+# ============================================================================
+# SIGNAL PROCESSING (OLD - kept for PumpPortal graduations)
 # ============================================================================
 
 async def handle_pumpportal_signal(token_data: Dict, signal_type: str):
     """
     Handle signals from PumpPortal monitor
+    NOW: Only used for graduation signals or tokens not yet tracked by KOLs
     
     Args:
         token_data: Token information from PumpPortal
-        signal_type: 'PRE_GRADUATION' (40-60%) or 'POST_GRADUATION' (100%)
+        signal_type: 'NEW_TOKEN', 'PRE_GRADUATION', or 'POST_GRADUATION'
     """
     try:
         token_address = token_data.get('token_address')
-        symbol = token_data.get('token_symbol', 'UNKNOWN')
-        bonding_pct = token_data.get('bonding_curve_pct', 0)
         
-        logger.info(f"🎯 Signal received: ${symbol} at {bonding_pct:.1f}% ({signal_type})")
+        # If this is a NEW_TOKEN event, check if it's tracked by ActiveTracker
+        if signal_type == 'NEW_TOKEN':
+            # Check if we're already tracking this (KOL bought it)
+            if active_tracker and active_tracker.is_tracked(token_address):
+                # Update with PumpPortal data
+                await active_tracker.update_token_trade(token_address, token_data)
+                return  # Don't process further, ActiveTracker handles it
+            else:
+                # Not tracked by KOLs, skip
+                return
         
-        # Calculate conviction score using your existing conviction engine
-        conviction_data = await conviction_engine.analyze_token(token_address, token_data)
-        conviction_score = conviction_data.get('score', 0)
+        # For PRE_GRADUATION and POST_GRADUATION, check if tracked
+        if active_tracker and active_tracker.is_tracked(token_address):
+            # Just update the tracked token with graduation info
+            await active_tracker.update_token_trade(token_address, token_data)
+            return
         
-        # Different thresholds for pre vs post graduation
-        min_score = 80 if signal_type == 'PRE_GRADUATION' else 75
+        # If we get here, it's a graduation for a non-KOL token
+        # You can optionally score these too, but they're lower priority
+        logger.debug(f"⏭️  Graduation for non-KOL token: {token_address[:8]}")
         
-        if conviction_score >= min_score:
-            logger.info(f"✅ High conviction ({conviction_score}/100) - posting signal!")
-            
-            # Add signal type to conviction data
-            conviction_data['signal_type'] = signal_type
-            conviction_data['bonding_curve_pct'] = bonding_pct
-            
-            # Save to database BEFORE posting (so we can track it)
-            if db:
-                await db.insert_signal({
-                    'token_address': token_address,
-                    'token_name': token_data.get('token_name'),
-                    'token_symbol': symbol,
-                    'signal_type': signal_type,
-                    'bonding_curve_pct': bonding_pct,
-                    'conviction_score': conviction_score,
-                    'entry_price': token_data.get('price_usd', 0),
-                    'liquidity': token_data.get('liquidity', 0),
-                    'volume_24h': token_data.get('volume_24h', 0),
-                    'market_cap': token_data.get('market_cap', 0),
-                })
-            
-            # Post to Telegram using your existing publisher
-            message_id = await telegram_publisher.post_signal(conviction_data)
-            
-            # Mark as posted in database
-            if db and message_id:
-                await db.mark_signal_posted(token_address, message_id)
-            
-        else:
-            logger.info(f"⏭️  Low conviction ({conviction_score}/100) - skipping")
-            
     except Exception as e:
-        logger.error(f"❌ Error handling PumpPortal signal: {e}", exc_info=True)
+        logger.error(f"❌ Error handling PumpPortal signal: {e}")
 
 # ============================================================================
-# BACKGROUND TASK WRAPPERS
+# BACKGROUND TASKS
 # ============================================================================
 
 async def start_pumpportal_task():
@@ -128,7 +152,90 @@ async def start_pumpportal_task():
         logger.error(f"❌ PumpPortal task crashed: {e}")
         import traceback
         logger.error(traceback.format_exc())
-        # Don't exit - let other tasks continue
+
+async def holder_polling_task():
+    """
+    Poll holder counts for actively tracked tokens
+    Runs every 15 seconds to stay real-time
+    """
+    while True:
+        try:
+            await asyncio.sleep(15)  # Every 15 seconds
+            
+            if not active_tracker:
+                continue
+            
+            active_tokens = active_tracker.get_active_tokens()
+            
+            if not active_tokens:
+                continue
+            
+            logger.debug(f"👥 Polling holders for {len(active_tokens)} tokens...")
+            
+            # Poll each active token
+            for token_address in active_tokens:
+                try:
+                    holder_count = await fetch_holder_count(token_address)
+                    if holder_count > 0:
+                        await active_tracker.update_holder_count(token_address, holder_count)
+                except Exception as e:
+                    logger.debug(f"⚠️ Error polling holders for {token_address[:8]}: {e}")
+            
+        except Exception as e:
+            logger.error(f"❌ Error in holder polling task: {e}")
+
+async def fetch_holder_count(token_address: str) -> int:
+    """Fetch holder count from Helius"""
+    try:
+        import aiohttp
+        
+        url = f"https://mainnet.helius-rpc.com/?api-key={config.HELIUS_API_KEY}"
+        
+        payload = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "getTokenAccounts",
+            "params": {
+                "mint": token_address,
+                "options": {
+                    "showZeroBalance": False
+                }
+            }
+        }
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=3)) as resp:
+                if resp.status != 200:
+                    return 0
+                
+                data = await resp.json()
+                token_accounts = data.get('result', {}).get('token_accounts', [])
+                return len(token_accounts)
+                
+    except Exception as e:
+        logger.debug(f"⚠️ Error fetching holders: {e}")
+        return 0
+
+async def cleanup_task():
+    """Periodic cleanup of old data"""
+    while True:
+        try:
+            await asyncio.sleep(3600)  # Run every hour
+            
+            logger.info("🧹 Running cleanup...")
+            smart_wallet_tracker.cleanup_old_data()
+            narrative_detector.cleanup_old_data()
+            
+            if pumpportal_monitor:
+                pumpportal_monitor.cleanup_old_tokens()
+            
+            if active_tracker:
+                active_tracker.cleanup_old_tokens(max_age_hours=24)
+            
+            logger.info("✅ Cleanup complete")
+            
+        except Exception as e:
+            logger.error(f"❌ Error in cleanup task: {e}")
 
 # ============================================================================
 # STARTUP
@@ -137,10 +244,10 @@ async def start_pumpportal_task():
 @app.on_event("startup")
 async def startup():
     """Initialize all components"""
-    global conviction_engine, pumpportal_monitor, db, performance_tracker
+    global conviction_engine, pumpportal_monitor, db, performance_tracker, active_tracker
     
     logger.info("=" * 70)
-    logger.info("🚀 SENTINEL SIGNALS V2 STARTING")
+    logger.info("🚀 SENTINEL SIGNALS V2 - KOL-TRIGGERED TRACKING")
     logger.info("=" * 70)
     
     # Initialize database FIRST
@@ -179,9 +286,21 @@ async def startup():
     await performance_tracker.start()
     logger.info("✅ Performance tracker started")
     
+    # Initialize Active Token Tracker (NEW!)
+    logger.info("🎯 Initializing active token tracker...")
+    active_tracker = ActiveTokenTracker(
+        conviction_engine=conviction_engine,
+        telegram_publisher=telegram_publisher,
+        db=db
+    )
+    logger.info("✅ Active token tracker initialized")
+    
     # Initialize PumpPortal monitor
     logger.info("🔌 Initializing PumpPortal monitor...")
-    pumpportal_monitor = PumpMonitorV2(on_signal_callback=handle_pumpportal_signal)
+    pumpportal_monitor = PumpMonitorV2(
+        on_signal_callback=handle_pumpportal_signal,
+        active_tracker=active_tracker  # Pass active tracker
+    )
     
     # Wait a bit for everything to stabilize before starting background task
     logger.info("⏳ Waiting 2 seconds before starting PumpPortal task...")
@@ -192,14 +311,19 @@ async def startup():
     asyncio.create_task(start_pumpportal_task())
     logger.info("✅ PumpPortal monitor task created")
     
+    # Start holder polling task (NEW!)
+    logger.info("👥 Starting holder polling task...")
+    asyncio.create_task(holder_polling_task())
+    logger.info("✅ Holder polling started (every 15s)")
+    
     # Log configuration
     logger.info("=" * 70)
     logger.info("⚙️  CONFIGURATION")
     logger.info("=" * 70)
-    logger.info(f"Pre-Graduation Threshold: 80/100 (40-60% bonding)")
-    logger.info(f"Post-Graduation Threshold: 75/100 (graduated tokens)")
+    logger.info(f"🎯 KOL-Triggered Tracking: ENABLED")
     logger.info(f"Min Conviction Score: {config.MIN_CONVICTION_SCORE}/100")
     logger.info(f"Smart Wallets: {len(smart_wallet_tracker.tracked_wallets)} tracked")
+    logger.info(f"Holder Polling: Every 15 seconds")
     logger.info(f"Performance Tracking: ✅ Enabled")
     logger.info(f"Milestones: {', '.join(f'{m}x' for m in config.MILESTONES)}")
     logger.info(f"Daily Reports: ✅ Midnight UTC")
@@ -207,10 +331,10 @@ async def startup():
     
     logger.info("✅ SENTINEL SIGNALS V2 READY")
     logger.info("=" * 70)
-    logger.info("🔍 Monitoring PumpPortal for signals...")
-    logger.info("⚡ Pre-graduation signals: 40-60% bonding curve (80+ conviction)")
-    logger.info("🎓 Post-graduation signals: 100% bonding curve (75+ conviction)")
-    logger.info("📊 Performance tracking: Active")
+    logger.info("🎯 Waiting for KOL buys to trigger tracking...")
+    logger.info("⚡ Real-time analysis on every trade")
+    logger.info("👥 Holder counts polled every 15 seconds")
+    logger.info("🚀 Signals sent the moment threshold is crossed")
     logger.info("=" * 70)
     
     # Start background tasks
@@ -224,14 +348,28 @@ async def startup():
 async def smart_wallet_webhook(request: Request):
     """
     Helius webhook for smart wallet transactions
-    Receives notifications when tracked KOL wallets make transactions
+    
+    NEW BEHAVIOR:
+    1. Process webhook to save KOL activity
+    2. Extract tokens that were bought
+    3. Start real-time tracking for those tokens
     """
     try:
         data = await request.json()
         logger.info("📥 Received smart wallet webhook")
         
-        # Process through smart wallet tracker
+        # Process through smart wallet tracker (saves to DB)
         await smart_wallet_tracker.process_webhook(data)
+        
+        # Extract token addresses that were bought
+        token_addresses = extract_token_addresses_from_webhook(data)
+        
+        if token_addresses:
+            logger.info(f"🎯 KOL bought {len(token_addresses)} token(s) - starting tracking...")
+            
+            # Start tracking each token
+            for token_address in token_addresses:
+                await active_tracker.start_tracking(token_address)
         
         return {"status": "success"}
         
@@ -240,29 +378,7 @@ async def smart_wallet_webhook(request: Request):
         return {"status": "error", "message": str(e)}
 
 # ============================================================================
-# BACKGROUND TASKS
-# ============================================================================
-
-async def cleanup_task():
-    """Periodic cleanup of old data"""
-    while True:
-        try:
-            await asyncio.sleep(3600)  # Run every hour
-            
-            logger.info("🧹 Running cleanup...")
-            smart_wallet_tracker.cleanup_old_data()
-            narrative_detector.cleanup_old_data()
-            
-            if pumpportal_monitor:
-                pumpportal_monitor.cleanup_old_tokens()
-            
-            logger.info("✅ Cleanup complete")
-            
-        except Exception as e:
-            logger.error(f"❌ Error in cleanup task: {e}")
-
-# ============================================================================
-# HEALTH CHECK
+# HEALTH CHECK & STATUS
 # ============================================================================
 
 @app.get("/")
@@ -271,7 +387,7 @@ async def health_check():
     from datetime import datetime
     return {
         "status": "healthy",
-        "service": "Sentinel Signals v2",
+        "service": "Sentinel Signals v2 - KOL-Triggered",
         "timestamp": datetime.utcnow().isoformat()
     }
 
@@ -281,20 +397,20 @@ async def status():
     from datetime import datetime
     
     trending = narrative_detector.get_trending_narratives(24) if narrative_detector else []
-    
-    # Get performance stats
     perf_stats = await performance_tracker.get_stats() if performance_tracker else {}
+    tracker_stats = active_tracker.get_stats() if active_tracker else {}
     
     return {
         "status": "operational",
+        "mode": "KOL-Triggered Tracking",
         "config": {
-            "pre_grad_conviction": 80,
-            "post_grad_conviction": 75,
             "min_conviction": config.MIN_CONVICTION_SCORE,
         },
         "trackers": {
             "smart_wallets": len(smart_wallet_tracker.tracked_wallets) if smart_wallet_tracker else 0,
-            "pumpportal_tracked": len(pumpportal_monitor.tracked_tokens) if pumpportal_monitor else 0,
+            "active_tokens": tracker_stats.get('active_tokens', 0),
+            "tokens_tracked_total": tracker_stats.get('tokens_tracked_total', 0),
+            "signals_sent": tracker_stats.get('signals_sent', 0),
         },
         "performance": perf_stats,
         "trending_narratives": trending[:5],
