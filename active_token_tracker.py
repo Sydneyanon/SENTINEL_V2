@@ -30,10 +30,11 @@ class ActiveTokenTracker:
     Re-analyzes on every trade, holder change, or new KOL buy
     """
     
-    def __init__(self, conviction_engine, telegram_publisher, db=None):
+    def __init__(self, conviction_engine, telegram_publisher, db=None, helius_fetcher=None):
         self.conviction_engine = conviction_engine
         self.telegram_publisher = telegram_publisher
         self.db = db
+        self.helius_fetcher = helius_fetcher
         
         # Active tokens being tracked
         self.tracked_tokens: Dict[str, TokenState] = {}
@@ -69,13 +70,21 @@ class ActiveTokenTracker:
             
             logger.info(f"🎯 START TRACKING: {token_address[:8]}...")
             
-            # Get initial token data if not provided
-            if not initial_data:
-                initial_data = await self._fetch_token_data(token_address)
+            # Fetch initial token data from Helius
+            if self.helius_fetcher:
+                logger.info(f"   📡 Fetching data from Helius...")
+                helius_data = await self.helius_fetcher.get_token_data(token_address)
                 
-                if not initial_data:
-                    logger.warning(f"⚠️ Could not fetch data for {token_address[:8]} - using minimal fallback")
+                if helius_data:
+                    # Enrich with DexScreener price data if available
+                    initial_data = await self.helius_fetcher.enrich_token_data(helius_data)
+                    logger.info(f"   ✅ Got data: ${initial_data.get('token_symbol', 'UNKNOWN')}")
+                else:
+                    logger.warning(f"   ⚠️ Helius returned no data - using minimal fallback")
                     initial_data = self._create_minimal_data(token_address)
+            else:
+                logger.warning(f"   ⚠️ No Helius fetcher - using minimal fallback")
+                initial_data = self._create_minimal_data(token_address)
             
             # Create initial state
             now = datetime.utcnow()
@@ -198,6 +207,73 @@ class ActiveTokenTracker:
             
         except Exception as e:
             logger.error(f"❌ Error updating holder count: {e}")
+    
+    async def smart_poll_token(self, token_address: str) -> None:
+        """
+        Smart polling - fetch fresh data from Helius based on token age
+        
+        Polling strategy:
+        - New tokens (< 5 min): Every 5 seconds (fast updates)
+        - Young tokens (5-60 min): Every 30 seconds (medium updates)  
+        - Mature tokens (> 60 min): Every 60 seconds (slow updates)
+        
+        Args:
+            token_address: Token mint address
+        """
+        if token_address not in self.tracked_tokens:
+            return
+        
+        if not self.helius_fetcher:
+            return
+        
+        try:
+            state = self.tracked_tokens[token_address]
+            
+            # Calculate token age
+            age_seconds = (datetime.utcnow() - state.first_tracked_at).total_seconds()
+            age_minutes = age_seconds / 60
+            
+            # Determine poll interval based on age
+            if age_minutes < 5:
+                poll_interval = 5  # Fast polling for new tokens
+            elif age_minutes < 60:
+                poll_interval = 30  # Medium polling
+            else:
+                poll_interval = 60  # Slow polling
+            
+            # Check if it's time to poll
+            now = datetime.utcnow()
+            time_since_last_poll = (now - state.last_updated).total_seconds()
+            
+            if time_since_last_poll < poll_interval:
+                return  # Not time yet
+            
+            # Fetch fresh data from Helius
+            symbol = state.token_data.get('token_symbol', 'UNKNOWN')
+            logger.debug(f"🔄 Polling {symbol} (age: {age_minutes:.1f}m)")
+            
+            helius_data = await self.helius_fetcher.get_token_data(token_address)
+            
+            if helius_data:
+                # Enrich with DexScreener if available
+                enriched_data = await self.helius_fetcher.enrich_token_data(helius_data)
+                
+                # Fetch holder count separately
+                holder_count = await self.helius_fetcher.get_holder_count(token_address)
+                if holder_count > 0:
+                    enriched_data['holder_count'] = holder_count
+                
+                # Update token data
+                state.token_data.update(enriched_data)
+                state.last_updated = now
+                
+                logger.debug(f"   ✅ Updated: price=${enriched_data.get('price_usd', 0):.8f}, holders={holder_count}")
+                
+                # Re-analyze with fresh data
+                await self._reanalyze_token(token_address)
+            
+        except Exception as e:
+            logger.error(f"❌ Error polling token: {e}")
     
     async def _reanalyze_token(self, token_address: str) -> None:
         """
