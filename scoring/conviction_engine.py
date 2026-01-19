@@ -58,9 +58,10 @@ class ConvictionEngine:
             logger.info(f"   👑 Smart Wallets: {scores['smart_wallet']} points")
             
             # 2. Narrative Detection (0-25 points)
-            narrative_data = await self.narrative_detector.detect_narratives(
+            narrative_data = self.narrative_detector.analyze_token(
+                token_data.get('token_symbol', ''),
                 token_data.get('token_name', ''),
-                token_data.get('token_symbol', '')
+                token_data.get('description', '')
             )
             scores['narrative'] = narrative_data.get('score', 0)
             logger.info(f"   🎯 Narratives: {scores['narrative']} points")
