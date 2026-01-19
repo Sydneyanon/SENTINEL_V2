@@ -30,10 +30,11 @@ class ActiveTokenTracker:
     Re-analyzes on every trade, holder change, or new KOL buy
     """
     
-    def __init__(self, conviction_engine, telegram_publisher, db=None):
+    def __init__(self, conviction_engine, telegram_publisher, db=None, pumpportal_monitor=None):
         self.conviction_engine = conviction_engine
         self.telegram_publisher = telegram_publisher
         self.db = db
+        self.pumpportal_monitor = pumpportal_monitor  # NEW: for subscribing to specific tokens
         
         # Active tokens being tracked
         self.tracked_tokens: Dict[str, TokenState] = {}
@@ -51,7 +52,7 @@ class ActiveTokenTracker:
         
         Args:
             token_address: Token mint address
-            initial_data: Initial token data (optional, will fetch if not provided)
+            initial_data: Initial token data (optional, will be populated by PumpPortal)
             
         Returns:
             True if tracking started, False if already tracking
@@ -60,19 +61,34 @@ class ActiveTokenTracker:
             # Check if already tracking
             if token_address in self.tracked_tokens:
                 logger.debug(f"⏭️  Already tracking {token_address[:8]}...")
-                # Still do initial analysis in case it's a NEW KOL buy
+                # Still increment KOL buy count (another KOL bought)
+                self.tracked_tokens[token_address].kol_buy_count += 1
+                # Re-analyze with new KOL buy
                 await self._reanalyze_token(token_address)
                 return False
             
             logger.info(f"🎯 START TRACKING: {token_address[:8]}...")
             
-            # Get initial token data if not provided
+            # Create minimal initial data if not provided
+            # PumpPortal will populate this via trade updates
             if not initial_data:
-                initial_data = await self._fetch_token_data(token_address)
-            
-            if not initial_data:
-                logger.warning(f"⚠️ Could not fetch data for {token_address[:8]}")
-                return False
+                initial_data = {
+                    'token_address': token_address,
+                    'token_name': 'Unknown',
+                    'token_symbol': 'UNKNOWN',
+                    'bonding_curve_pct': 0,
+                    'price_usd': 0,
+                    'liquidity': 0,
+                    'volume_24h': 0,
+                    'volume_1h': 0,
+                    'volume_5m': 0,
+                    'market_cap': 0,
+                    'holder_count': 0,
+                    'description': '',
+                    'price_change_5m': 0,
+                    'price_change_1h': 0,
+                }
+                logger.info(f"   📊 Waiting for PumpPortal data...")
             
             # Create initial state
             now = datetime.utcnow()
@@ -85,16 +101,19 @@ class ActiveTokenTracker:
                 last_updated=now,
                 kol_buy_count=1,  # Started because of KOL buy
                 last_holder_check=now,
-                last_holder_count=initial_data.get('holder_count', 0)
+                last_holder_count=0
             )
             
             self.tracked_tokens[token_address] = state
             self.tokens_tracked_total += 1
             
-            # Do initial analysis
+            # Do initial analysis (will show KOL buy points at minimum)
             await self._reanalyze_token(token_address)
             
             logger.info(f"✅ Now tracking {self.get_active_count()} tokens")
+            
+            # Subscribe to this token's trades on PumpPortal
+            await self._subscribe_to_token_trades(token_address)
             
             return True
             
@@ -119,6 +138,8 @@ class ActiveTokenTracker:
             
             # Update token data with latest trade info
             state.token_data.update({
+                'token_name': trade_data.get('name', state.token_data.get('token_name', 'Unknown')),
+                'token_symbol': trade_data.get('symbol', state.token_data.get('token_symbol', 'UNKNOWN')),
                 'bonding_curve_pct': trade_data.get('bondingCurvePercentage', state.token_data.get('bonding_curve_pct', 0)),
                 'volume_5m': trade_data.get('volume5m', state.token_data.get('volume_5m', 0)),
                 'volume_1h': trade_data.get('volume1h', state.token_data.get('volume_1h', 0)),
@@ -262,50 +283,27 @@ class ActiveTokenTracker:
             import traceback
             logger.error(traceback.format_exc())
     
-    async def _fetch_token_data(self, token_address: str) -> Optional[Dict]:
+    async def _subscribe_to_token_trades(self, token_address: str) -> None:
         """
-        Fetch initial token data from DexScreener
+        Subscribe to trades for a specific token on PumpPortal
         
         Args:
             token_address: Token mint address
-            
-        Returns:
-            Token data dict or None
         """
+        if not self.pumpportal_monitor or not self.pumpportal_monitor.ws:
+            logger.debug(f"⚠️ PumpPortal not available for subscription")
+            return
+        
         try:
-            url = f"https://api.dexscreener.com/latest/dex/tokens/{token_address}"
-            
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as resp:
-                    if resp.status != 200:
-                        return None
-                    
-                    data = await resp.json()
-                    pairs = data.get('pairs', [])
-                    
-                    if not pairs:
-                        return None
-                    
-                    pair = pairs[0]
-                    
-                    return {
-                        'token_address': token_address,
-                        'token_name': pair.get('baseToken', {}).get('name', ''),
-                        'token_symbol': pair.get('baseToken', {}).get('symbol', ''),
-                        'bonding_curve_pct': 0,  # Unknown initially
-                        'price_usd': float(pair.get('priceUsd', 0)),
-                        'liquidity': pair.get('liquidity', {}).get('usd', 0),
-                        'volume_24h': pair.get('volume', {}).get('h24', 0),
-                        'volume_1h': pair.get('volume', {}).get('h1', 0),
-                        'volume_5m': pair.get('volume', {}).get('m5', 0),
-                        'market_cap': pair.get('marketCap', 0),
-                        'holder_count': 0,  # Will fetch separately
-                        'description': '',
-                    }
-                    
+            import json
+            await self.pumpportal_monitor.ws.send(json.dumps({
+                "method": "subscribeTokenTrade",
+                "keys": [token_address]
+            }))
+            logger.debug(f"📡 Subscribed to trades for {token_address[:8]}")
         except Exception as e:
-            logger.error(f"❌ Error fetching token data: {e}")
-            return None
+            logger.debug(f"⚠️ Failed to subscribe to token trades: {e}")
+    
     
     def is_tracked(self, token_address: str) -> bool:
         """Check if token is being tracked"""
