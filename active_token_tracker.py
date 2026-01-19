@@ -242,7 +242,7 @@ class ActiveTokenTracker:
             
             # Log calculation
             if v_sol_reserves > 0:
-                logger.debug(f"   💰 Calculated from PumpPortal: price=${price_usd:.8f}, mcap=${market_cap_usd:.0f}, bonding={bonding_pct:.1f}%")
+                logger.info(f"   💰 Calculated from PumpPortal: price=${price_usd:.8f}, mcap=${market_cap_usd:.0f}, bonding={bonding_pct:.1f}%")
             
             # Update token data with latest trade info
             state.token_data.update({
@@ -265,7 +265,7 @@ class ActiveTokenTracker:
             mcap = state.token_data.get('market_cap', 0)
             liq = state.token_data.get('liquidity', 0)
             
-            logger.debug(f"📊 {symbol}: price=${price:.8f}, mcap=${mcap:.0f}, liq=${liq:.0f}")
+            logger.info(f"   📊 Updated {symbol}: price=${price:.8f}, mcap=${mcap:.0f}, liq=${liq:.0f}")
             
             # Re-analyze with updated data
             await self._reanalyze_token(token_address)
