@@ -291,7 +291,8 @@ async def startup():
     active_tracker = ActiveTokenTracker(
         conviction_engine=conviction_engine,
         telegram_publisher=telegram_publisher,
-        db=db
+        db=db,
+        pumpportal_monitor=None  # Will set after pumpportal_monitor is created
     )
     logger.info("✅ Active token tracker initialized")
     
@@ -301,6 +302,10 @@ async def startup():
         on_signal_callback=handle_pumpportal_signal,
         active_tracker=active_tracker  # Pass active tracker
     )
+    
+    # Set pumpportal_monitor reference in active_tracker
+    active_tracker.pumpportal_monitor = pumpportal_monitor
+    logger.info("✅ PumpPortal monitor initialized and linked to tracker")
     
     # Wait a bit for everything to stabilize before starting background task
     logger.info("⏳ Waiting 2 seconds before starting PumpPortal task...")
