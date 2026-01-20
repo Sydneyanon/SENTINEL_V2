@@ -233,12 +233,20 @@ async def startup():
     enriched_wallets, wallet_addresses = await initialize_smart_wallets()
     logger.info(f"✅ Enriched {len(enriched_wallets)} wallets")
     
-    # Create SmartWalletTracker with enriched data
+    # Create SmartWalletTracker
     logger.info("👑 Initializing Smart Wallet Tracker...")
-    smart_wallet_tracker = SmartWalletTracker(wallets=enriched_wallets)
+    smart_wallet_tracker = SmartWalletTracker()  # ← No parameters
     
     # Pass database to smart wallet tracker
     smart_wallet_tracker.db = db
+    
+    # Manually set the enriched wallets dict (address -> wallet_info)
+    smart_wallet_tracker.tracked_wallets = {
+        wallet['address']: wallet 
+        for wallet in enriched_wallets
+    }
+    
+    logger.info(f"✅ Smart Wallet Tracker configured with {len(enriched_wallets)} wallets")
     
     # Initialize Helius fetcher
     logger.info("🔗 Initializing Helius data fetcher...")
