@@ -1,29 +1,9 @@
-# Web Framework
-fastapi==0.109.0
-uvicorn[standard]==0.27.0
-python-multipart==0.0.6
-
-# Database
-sqlalchemy==2.0.25
-asyncpg==0.29.0
-alembic==1.13.1
-
-# Async
-aiohttp==3.9.1
-asyncio==3.4.3
-
-# Telegram
-python-telegram-bot==20.7
-
-# Utilities
-python-dotenv==1.0.0
-loguru==0.7.2
-pydantic==2.5.3
-
-# Date/Time
-python-dateutil==2.8.2
-
-websockets
-
-# For bonding curve PDA derivation
-solders>=0.14.0
+✅ python-telegram-bot>=20.7    ← NEW for Telegram posting
+✅ aiohttp>=3.9.1                ← HTTP requests
+✅ websockets>=12.0              ← PumpPortal WebSocket
+✅ loguru>=0.7.2                 ← Logging
+✅ psycopg2-binary>=2.9.9        ← PostgreSQL database
+✅ python-dotenv>=1.0.0          ← Environment variables
+✅ python-dateutil>=2.8.2        ← Date/time handling
+✅ orjson>=3.9.10                ← Fast JSON parsing
+✅ asyncio>=3.4.3                ← Async support
