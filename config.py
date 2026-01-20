@@ -2,21 +2,28 @@
 Configuration for Sentinel Signals v2
 UPDATED: Tiered scoring thresholds and credit optimization settings
 """
+import os
 
 # =============================================================================
-# API KEYS
+# API KEYS & DATABASE
 # =============================================================================
 
-HELIUS_API_KEY = "your-helius-api-key-here"
-TELEGRAM_BOT_TOKEN = "your-telegram-bot-token-here"
-TELEGRAM_CHANNEL_ID = "your-telegram-channel-id-here"
+# Helius API (for Solana blockchain data + webhooks)
+HELIUS_API_KEY = os.getenv('HELIUS_API_KEY')
+
+# Railway PostgreSQL Database (automatically provided by Railway)
+DATABASE_URL = os.getenv('DATABASE_URL')
+
+# Telegram Bot (for posting signals)
+TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
+TELEGRAM_CHANNEL_ID = os.getenv('TELEGRAM_CHANNEL_ID')  # Should be like: -1001234567890
 
 # =============================================================================
 # CONVICTION SCORING THRESHOLDS
 # =============================================================================
 
 # Signal thresholds based on graduation status
-MIN_CONVICTION_SCORE = 80  # Pre-graduation threshold (40-60% bonding curve)
+MIN_CONVICTION_SCORE = 80  # Pre-graduation threshold (40%+ bonding curve)
 POST_GRAD_THRESHOLD = 75   # Post-graduation threshold (100% - on Raydium)
 
 # Base score threshold for distribution checks
