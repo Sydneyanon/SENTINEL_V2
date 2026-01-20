@@ -1,6 +1,6 @@
 """
-Configuration for Sentinel Signals v2
-UPDATED: Tiered scoring thresholds and credit optimization settings
+Configuration for PROMETHEUS
+Autonomous memecoin signal system with tiered scoring and credit optimization
 """
 import os
 
@@ -14,9 +14,10 @@ HELIUS_API_KEY = os.getenv('HELIUS_API_KEY')
 # Railway PostgreSQL Database (automatically provided by Railway)
 DATABASE_URL = os.getenv('DATABASE_URL')
 
-# Telegram Bot (for posting signals)
+# Telegram Bot (PROMETHEUS)
 TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 TELEGRAM_CHANNEL_ID = os.getenv('TELEGRAM_CHANNEL_ID')  # Should be like: -1001234567890
+ENABLE_TELEGRAM = True  # Enable Telegram posting
 
 # =============================================================================
 # CONVICTION SCORING THRESHOLDS
