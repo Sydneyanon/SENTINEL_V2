@@ -1,11 +1,19 @@
 """
 Rug Detector - Anti-scam filters with smart overrides
-Detects bundled buys and holder concentration to avoid rugs
+NOW USES: Helius transaction data for accurate bundle detection
 """
 from typing import Dict, List, Optional, Set
 from datetime import datetime, timedelta
 from loguru import logger
 from collections import defaultdict
+
+# Import Helius bundle detector for accurate detection
+try:
+    from helius_bundle_detector import HeliusBundleDetector
+    HELIUS_DETECTOR_AVAILABLE = True
+except ImportError:
+    logger.warning("⚠️ helius_bundle_detector not found - using fallback detection")
+    HELIUS_DETECTOR_AVAILABLE = False
 
 
 class RugDetector:
@@ -19,6 +27,15 @@ class RugDetector:
     
     def __init__(self, smart_wallet_tracker=None):
         self.smart_wallet_tracker = smart_wallet_tracker
+        
+        # Initialize Helius bundle detector (more accurate than PumpPortal)
+        if HELIUS_DETECTOR_AVAILABLE:
+            self.helius_detector = HeliusBundleDetector()
+            logger.info("✅ Using Helius bundle detection (more accurate)")
+        else:
+            self.helius_detector = None
+            logger.info("⚠️ Using fallback bundle detection")
+        
         self.bundle_cache = {}  # token -> last bundle check
         self.holder_cache = {}  # token -> last holder check
     
@@ -29,20 +46,21 @@ class RugDetector:
         unique_buyers: int = 0
     ) -> Dict:
         """
-        Detect bundled buy transactions from PumpPortal trade data
+        Detect bundled buy transactions
         
-        Bundles = Multiple buys in same block/second (coordinated sniping)
+        NOW USES: Helius webhook data for more accurate slot-based detection
+        FALLBACK: PumpPortal trade data if Helius not available
         
         Args:
             token_address: Token mint address
-            trades: List of trades from PumpPortal
+            trades: List of trades (Helius webhook or PumpPortal format)
             unique_buyers: Current unique buyer count (for override logic)
         
         Returns:
             {
                 'severity': 'none'|'minor'|'medium'|'massive',
                 'penalty': -5 to -40 points,
-                'same_block_count': int,
+                'same_slot_count': int,
                 'override_applied': bool,
                 'reason': str
             }
@@ -51,12 +69,54 @@ class RugDetector:
             return {
                 'severity': 'none',
                 'penalty': 0,
-                'same_block_count': 0,
+                'same_slot_count': 0,
                 'override_applied': False,
                 'reason': 'Not enough trades to detect bundles'
             }
         
-        # Group trades by block/slot
+        # Use Helius detector if available (more accurate)
+        if self.helius_detector:
+            # Check if trades are in Helius webhook format (has 'slot' field)
+            is_helius_format = any('slot' in trade for trade in trades)
+            
+            if is_helius_format:
+                logger.debug(f"   🔍 Using Helius slot-based bundle detection")
+                result = self.helius_detector.detect_from_helius_webhook(
+                    token_address,
+                    trades,
+                    unique_buyers
+                )
+            else:
+                logger.debug(f"   🔍 Using Helius block-based bundle detection")
+                result = self.helius_detector.detect_from_transaction_list(
+                    token_address,
+                    trades,
+                    unique_buyers
+                )
+            
+            # Cache result
+            self.bundle_cache[token_address] = {
+                **result,
+                'detected_at': datetime.utcnow()
+            }
+            
+            return result
+        
+        # Fallback to basic detection (if Helius detector not available)
+        return self._fallback_bundle_detection(token_address, trades, unique_buyers)
+    
+    
+    def _fallback_bundle_detection(
+        self,
+        token_address: str,
+        trades: List[Dict],
+        unique_buyers: int
+    ) -> Dict:
+        """
+        Fallback bundle detection using basic timestamp grouping
+        Used when Helius detector not available
+        """
+        # Group trades by block/slot or timestamp
         blocks = defaultdict(list)
         
         for trade in trades:
@@ -92,16 +152,12 @@ class RugDetector:
         final_penalty = base_penalty
         
         if unique_buyers > 100 and base_penalty < 0:
-            # Many unique buyers despite bundle = pump continuation
-            final_penalty = base_penalty // 2  # Cut penalty in half
+            final_penalty = base_penalty // 2
             override_applied = True
-            logger.info(f"   🔓 Bundle penalty override: {unique_buyers} unique buyers (reduced {base_penalty} → {final_penalty})")
-        
+            logger.info(f"   🔓 Bundle override: {unique_buyers} buyers (reduced {base_penalty} → {final_penalty})")
         elif unique_buyers > 50 and base_penalty <= -25:
-            # Moderate buyers = reduce severe penalties
-            final_penalty = base_penalty + 10  # Reduce by 10
+            final_penalty = base_penalty + 10
             override_applied = True
-            logger.debug(f"   🔓 Minor bundle override: {unique_buyers} buyers")
         
         return {
             'severity': severity,
