@@ -134,19 +134,72 @@ MIN_HOLDERS = 20            # Minimum holders for any signal
 MIN_UNIQUE_BUYERS = 15      # Minimum unique buyers for pre-grad signals
 MIN_LIQUIDITY = 5000        # Minimum liquidity in USD
 
-# Anti-Rug Detection: Dev Sell Penalties
-DEV_SELL_DETECTION = {
+# =============================================================================
+# RUG DETECTION SETTINGS (Grok's Anti-Scam System)
+# =============================================================================
+
+RUG_DETECTION = {
     'enabled': True,
-    'penalty_points': -25,           # Penalty if dev dumps early
-    'dev_sell_threshold': 0.20,      # Flag if dev sells >20% supply
-    'early_window_minutes': 30       # "Early" = within first 30 min
+    
+    # Bundle Detection (coordinated buys in same block)
+    'bundles': {
+        'detect': True,
+        'penalties': {
+            'minor': -10,      # 4-10 same-block txs
+            'medium': -25,     # 11-20 same-block txs
+            'massive': -40     # 21+ same-block txs (likely sniper bundle)
+        },
+        'overrides': {
+            'unique_buyers_high': 100,    # If >100 unique buyers, cut penalty in half
+            'unique_buyers_medium': 50    # If >50 buyers, reduce penalty by 10
+        }
+    },
+    
+    # Holder Concentration (top holder control)
+    'holder_concentration': {
+        'check': True,
+        'credit_cost': 10,           # Helius credits per check
+        'thresholds': {
+            'check_pre_grad': 65,    # Only check if base score >= 65 (pre-grad)
+            'check_post_grad': 60,   # Only check if base score >= 60 (post-grad)
+        },
+        'penalties': {
+            'extreme': -999,         # Top 10 hold >80% = HARD DROP
+            'severe': -35,           # Top 10 hold >70%
+            'high': -20,             # Top 10 hold >50%
+            'medium': -10            # Top 10 hold >40%
+        },
+        'concentration_limits': {
+            'hard_drop': 80,         # Auto-kill if top 10 > 80%
+            'severe': 70,
+            'high': 50,
+            'medium': 40
+        },
+        'kol_bonus': {
+            'enabled': True,
+            'per_kol': 10,           # +10 pts per KOL in top 10
+            'penalty_reduction': 5    # Reduce penalty by 5 per KOL
+        }
+    },
+    
+    # Pre-grad vs Post-grad differences
+    'pre_grad_strict': True,         # Stricter for pre-graduation (riskier)
+    'post_grad_forgive_bundles': True  # Forgive early bundles if distribution improved
+}
+
+# Anti-Rug Detection: Dev Sell Penalties (Future enhancement)
+DEV_SELL_DETECTION = {
+    'enabled': False,  # Not implemented yet
+    'penalty_points': -25,
+    'dev_sell_threshold': 0.20,
+    'early_window_minutes': 30
 }
 
 # Score Decay: Reduce conviction if metrics drop
 SCORE_DECAY = {
     'enabled': True,
-    'drop_threshold': 15,            # Flag if score drops 15+ points
-    'block_signal': True             # Don't signal if decaying
+    'drop_threshold': 15,
+    'block_signal': True
 }
 
 # =============================================================================
