@@ -1,9 +1,30 @@
-✅ python-telegram-bot>=20.7    ← NEW for Telegram posting
-✅ aiohttp>=3.9.1                ← HTTP requests
-✅ websockets>=12.0              ← PumpPortal WebSocket
-✅ loguru>=0.7.2                 ← Logging
-✅ psycopg2-binary>=2.9.9        ← PostgreSQL database
-✅ python-dotenv>=1.0.0          ← Environment variables
-✅ python-dateutil>=2.8.2        ← Date/time handling
-✅ orjson>=3.9.10                ← Fast JSON parsing
-✅ asyncio>=3.4.3                ← Async support
+# Prometheus Bot - Complete Dependencies
+
+# Web Framework (for FastAPI main.py)
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+
+# Telegram Integration
+python-telegram-bot>=20.7
+
+# WebSocket & HTTP
+aiohttp>=3.9.1
+websockets>=12.0
+
+# Logging
+loguru>=0.7.2
+
+# Database
+psycopg2-binary>=2.9.9
+
+# Environment Variables
+python-dotenv>=1.0.0
+
+# Date/Time Utilities
+python-dateutil>=2.8.2
+
+# JSON Handling (faster than standard json)
+orjson>=3.9.10
+
+# Async Support
+asyncio>=3.4.3
