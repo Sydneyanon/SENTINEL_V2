@@ -113,7 +113,7 @@ BUYER_TRACKING_WINDOW = 15  # Minutes to track unique buyers
 
 LOG_LEVEL = "INFO"          # Options: DEBUG, INFO, WARNING, ERROR
 LOG_TO_FILE = True
-LOG_FILE = "sentinel_signals.log"
+LOG_FILE = "prometheus.log"
 
 # =============================================================================
 # FEATURE FLAGS
@@ -122,6 +122,25 @@ LOG_FILE = "sentinel_signals.log"
 ENABLE_NARRATIVES = False   # Narrative detection (disabled for now)
 ENABLE_PERFORMANCE_TRACKING = True
 ENABLE_MILESTONE_ALERTS = True
+
+# =============================================================================
+# NARRATIVE DETECTION
+# =============================================================================
+
+# Hot narratives to watch for (can be updated dynamically)
+HOT_NARRATIVES = [
+    # AI / Agent narratives
+    {'name': 'AI Agent', 'keywords': ['ai', 'agent', 'autonomous', 'neural', 'gpt'], 'boost': 25},
+    {'name': 'DeSci', 'keywords': ['desci', 'science', 'research', 'biotech'], 'boost': 20},
+    
+    # DeFi narratives  
+    {'name': 'DeFi', 'keywords': ['defi', 'yield', 'stake', 'farm', 'swap'], 'boost': 15},
+    
+    # Gaming narratives
+    {'name': 'GameFi', 'keywords': ['game', 'play', 'nft', 'metaverse'], 'boost': 15},
+    
+    # Add your own hot narratives here
+]
 
 # =============================================================================
 # CREDIT USAGE ESTIMATES (for monitoring)
