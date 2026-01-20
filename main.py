@@ -6,6 +6,7 @@ import asyncio
 from typing import Dict, List
 from fastapi import FastAPI, Request
 from loguru import logger
+from datetime import datetime  # ← ADD THIS
 import sys
 
 # Configure logging
@@ -189,7 +190,11 @@ async def smart_polling_task():
 
 
 async def cleanup_task():
-    """Periodic cleanup of old data"""
+    """Periodic cleanup of old data and wallet metadata refresh"""
+    
+    # Track when we last refreshed wallets
+    last_wallet_refresh = datetime.utcnow()
+    
     while True:
         try:
             await asyncio.sleep(3600)  # Run every hour
@@ -205,6 +210,47 @@ async def cleanup_task():
                 active_tracker.cleanup_old_tokens(max_age_hours=24)
             
             logger.info("✅ Cleanup complete")
+            
+            # Check if we need to refresh wallet metadata (every 6 hours)
+            time_since_refresh = (datetime.utcnow() - last_wallet_refresh).total_seconds()
+            
+            if time_since_refresh >= 21600:  # 6 hours = 21600 seconds
+                logger.info("=" * 70)
+                logger.info("🔄 REFRESHING WALLET METADATA (6-hour update)")
+                logger.info("=" * 70)
+                
+                try:
+                    # Fetch fresh metadata from gmgn.ai
+                    from wallet_enrichment import initialize_smart_wallets
+                    enriched_wallets, _ = await initialize_smart_wallets()
+                    
+                    if enriched_wallets:
+                        # Update smart_wallet_tracker with fresh data
+                        old_count = len(smart_wallet_tracker.tracked_wallets)
+                        
+                        smart_wallet_tracker.tracked_wallets = {
+                            wallet['address']: wallet 
+                            for wallet in enriched_wallets
+                        }
+                        
+                        # Log changes
+                        logger.info(f"✅ Refreshed {len(enriched_wallets)} wallets")
+                        
+                        # Show any significant changes
+                        for wallet in enriched_wallets:
+                            name = wallet.get('name', 'Unknown')
+                            tier = wallet.get('tier', 'unknown')
+                            win_rate = wallet.get('win_rate', 0)
+                            logger.info(f"   📊 {name} ({tier}): {win_rate*100:.1f}% WR")
+                        
+                        last_wallet_refresh = datetime.utcnow()
+                        logger.info("=" * 70)
+                    else:
+                        logger.warning("⚠️ Wallet refresh returned no data - keeping existing")
+                        
+                except Exception as e:
+                    logger.error(f"❌ Failed to refresh wallet metadata: {e}")
+                    logger.info("   💡 Will retry in 6 hours")
             
         except Exception as e:
             logger.error(f"❌ Error in cleanup task: {e}")
