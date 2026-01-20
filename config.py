@@ -38,7 +38,26 @@ DISTRIBUTION_CHECK_THRESHOLD = 50
 # Smart Wallet Activity (0-40 points)
 SMART_WALLET_WEIGHTS = {
     'per_kol': 10,           # 10 points per KOL wallet that bought
-    'max_score': 40          # Cap at 4 KOLs (40 points max)
+    'max_score': 40,         # Cap at 4 KOLs (40 points max)
+    'multi_kol_bonus': 15,   # Extra bonus if 2+ KOLs buy within 5 min
+    'kol_time_window': 300   # 5 minutes for multi-KOL bonus
+}
+
+# Phase 3: Smart Polling Intervals (adaptive based on stage)
+POLLING_INTERVALS = {
+    'initial': 5,            # First 2 minutes: every 5 seconds
+    'initial_duration': 120, # 2 minutes at fast polling
+    'normal': 15,            # Normal: every 15 seconds
+    'slow': 30,              # If stuck: every 30 seconds
+    'stuck_threshold': 3,    # Consider "stuck" after 3 polls with no progress
+    'max_age': 1800          # Stop polling after 30 minutes
+}
+
+# Credit-Saving Gating: Only fetch holders if these conditions met
+HOLDER_FETCH_GATES = {
+    'min_unique_buyers': 50,     # Need at least 50 unique buyers
+    'min_base_score': 60,        # Need at least 60 pts from other factors
+    'always_fetch_post_grad': True  # Always check holders post-graduation
 }
 
 # Volume Velocity (0-10 points)
@@ -56,9 +75,11 @@ MOMENTUM_WEIGHTS = {
 # Distribution Scoring (0-15 points)
 # Pre-graduation: Based on unique buyers (FREE)
 UNIQUE_BUYER_WEIGHTS = {
-    'high': 15,             # 50+ unique buyers
-    'medium': 10,           # 30-49 unique buyers
-    'low': 5                # 15-29 unique buyers
+    'exceptional': 15,  # 100+ unique buyers (strong organic interest)
+    'high': 12,         # 70-99 unique buyers
+    'medium': 8,        # 40-69 unique buyers
+    'low': 5,           # 20-39 unique buyers
+    'minimal': 0        # <20 unique buyers (too risky)
 }
 
 # Post-graduation: Based on real holders (10 credits)
@@ -68,26 +89,94 @@ HOLDER_WEIGHTS = {
     'low': 5                # 20-49 holders
 }
 
+# Phase 1 Refinements: Early Kill Switch
+EARLY_KILL_SWITCH = {
+    'enabled': True,
+    'min_new_buyers': 5,        # Minimum new buyers in check window
+    'check_window_seconds': 120, # Check every 2 minutes
+    'trigger_at_bonding_pct': 50 # Only apply at 50%+ bonding curve
+}
+
 # =============================================================================
-# SAFETY FILTERS
+# SAFETY FILTERS & RUG DETECTION
 # =============================================================================
 
 MIN_HOLDERS = 20            # Minimum holders for any signal
 MIN_UNIQUE_BUYERS = 15      # Minimum unique buyers for pre-grad signals
 MIN_LIQUIDITY = 5000        # Minimum liquidity in USD
 
+# Anti-Rug Detection: Dev Sell Penalties
+DEV_SELL_DETECTION = {
+    'enabled': True,
+    'penalty_points': -25,           # Penalty if dev dumps early
+    'dev_sell_threshold': 0.20,      # Flag if dev sells >20% supply
+    'early_window_minutes': 30       # "Early" = within first 30 min
+}
+
+# Score Decay: Reduce conviction if metrics drop
+SCORE_DECAY = {
+    'enabled': True,
+    'drop_threshold': 15,            # Flag if score drops 15+ points
+    'block_signal': True             # Don't signal if decaying
+}
+
 # =============================================================================
-# SMART WALLET TRACKING
+# SMART WALLET TRACKING (ELITE KOLs)
 # =============================================================================
 
-# List of elite trader wallets to monitor
+# Option 1: Simple list (just addresses)
+# SMART_WALLETS = [
+#     "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU",
+#     "8BnEgHoWFysVcuFFX7QztDmzuH8r5ZFvyP3sYwn1XTh6",
+# ]
+
+# Option 2: Detailed tracking (RECOMMENDED) - addresses + metadata
 SMART_WALLETS = [
-    # Add your KOL wallet addresses here
-    # Example: "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU"
+    # Top 10 KOL wallets from gmgn.ai
+    # Bot will auto-discover: names, win rates, tiers, specialties on startup!
+    
+    "CyaE1VxvBrahnPWkqm5VsdCvyS2QmNht2UFrKJHga54o",
+    "5zCkbcD74hFPeBHwYdwJLJAoLVgHX45AFeR7RzC8vFiD",
+    "5TcyQLh8ojBf81DKeRC4vocTbNKJpJCsR9Kei16kLqDM",
+    "2wHHnAmdhFaAAsayWAeqKe3snK3KkbRQkRgLwTtz7iCi",
+    "DNfuF1L62WWyW3pNakVkyGGFzVVhj4Yr52jSmdTyeBHm",
+    "4BdKaxN8G6ka4GYtQQWk4G4dZRUTX2vQH9GcXdBREFUk",
+    "DYAn4XpAkN5mhiXkRB7dGq4Jadnx6XYgu8L5b3WGhbrt",
+    "DP7G43VPwR5Ab5rcjrCnvJ8UgvRXRHTWscMjRD1eSdGC",
+    "EvGpkcSBfhp5K9SNP48wVtfNXdKYRBiK3kvMkB66kU3Q",
+    "7uyGRgoCRKfynPbB35kWQwEGz9pmRvUyNFunV939mXpN",
+    
+    # Add 10-20 more for optimal coverage!
 ]
 
+# If using simple list format, convert to detailed internally
+# This happens automatically in smart_wallet_tracker.py
+
+# Wallet tiers for scoring
+WALLET_TIERS = {
+    'elite': {
+        'boost_multiplier': 1.2,    # 20% boost to conviction
+        'min_win_rate': 0.75
+    },
+    'top_kol': {
+        'boost_multiplier': 1.1,    # 10% boost
+        'min_win_rate': 0.65
+    },
+    'verified': {
+        'boost_multiplier': 1.0,    # Standard
+        'min_win_rate': 0.55
+    }
+}
+
+# Wallet scoring thresholds for auto-discovery (future feature)
+WALLET_SCORE_THRESHOLDS = {
+    'elite': 80,        # Auto-add if score >=80
+    'demote': 60,       # Auto-remove if score drops <60
+    'min_trades': 10,   # Minimum trades to be eligible
+}
+
 # =============================================================================
-# PERFORMANCE TRACKING
+# PERFORMANCE TRACKING & ROI ANALYSIS
 # =============================================================================
 
 # Milestone multipliers for performance alerts
@@ -95,6 +184,24 @@ MILESTONES = [1.5, 2, 3, 5, 10, 20, 50, 100]
 
 # How long to track token performance (hours)
 TRACKING_DURATION = 24
+
+# ROI tracking intervals for refinement (log at these intervals)
+ROI_TRACKING_INTERVALS = [
+    5,      # 5 minutes
+    15,     # 15 minutes
+    60,     # 1 hour
+    360,    # 6 hours
+    1440    # 24 hours
+]
+
+# Performance metrics to track
+TRACK_METRICS = {
+    'price_change': True,
+    'holder_growth': True,
+    'volume_24h': True,
+    'liquidity_change': True,
+    'unique_buyer_growth': True
+}
 
 # =============================================================================
 # CREDIT OPTIMIZATION SETTINGS
@@ -124,42 +231,82 @@ ENABLE_PERFORMANCE_TRACKING = True
 ENABLE_MILESTONE_ALERTS = True
 
 # =============================================================================
-# NARRATIVE DETECTION
+# NARRATIVE DETECTION (2026 HOT TRENDS)
 # =============================================================================
 
-# Hot narratives to watch for (can be updated dynamically)
+# Hot narratives to watch for (updated for 2026 meta)
 # Format: dict with narrative names as keys
 HOT_NARRATIVES = {
+    # AI / Agents (HOTTEST in 2026)
     'ai_agent': {
         'name': 'AI Agent',
-        'keywords': ['ai', 'agent', 'autonomous', 'neural', 'gpt', 'bot'],
-        'boost': 25,
+        'keywords': ['ai', 'agent', 'autonomous', 'neural', 'gpt', 'bot', 'llm', 'cognition'],
+        'boost': 25,  # Maximum boost
         'active': True
     },
+    
+    # DeSci (Growing trend)
     'desci': {
         'name': 'DeSci',
-        'keywords': ['desci', 'science', 'research', 'biotech', 'lab'],
+        'keywords': ['desci', 'science', 'research', 'biotech', 'lab', 'molecule', 'data'],
+        'boost': 22,
+        'active': True
+    },
+    
+    # RWA (Real World Assets - 2026 focus)
+    'rwa': {
+        'name': 'RWA',
+        'keywords': ['rwa', 'real world', 'asset', 'tokenized', 'treasury', 'bond'],
         'boost': 20,
         'active': True
     },
+    
+    # Privacy / ZK (Solana ZK compression)
+    'privacy': {
+        'name': 'Privacy',
+        'keywords': ['privacy', 'zk', 'zero knowledge', 'anonymous', 'private', 'stealth'],
+        'boost': 18,
+        'active': True
+    },
+    
+    # DeFi (Always relevant)
     'defi': {
         'name': 'DeFi',
-        'keywords': ['defi', 'yield', 'stake', 'farm', 'swap', 'liquidity'],
+        'keywords': ['defi', 'yield', 'stake', 'farm', 'swap', 'liquidity', 'dex'],
         'boost': 15,
         'active': True
     },
+    
+    # Mobile / Saga (Solana mobile push)
+    'mobile': {
+        'name': 'Mobile',
+        'keywords': ['mobile', 'saga', 'phone', 'seeker', 'dapp'],
+        'boost': 15,
+        'active': True
+    },
+    
+    # GameFi
     'gamefi': {
         'name': 'GameFi',
-        'keywords': ['game', 'play', 'nft', 'metaverse', 'gaming'],
-        'boost': 15,
+        'keywords': ['game', 'play', 'nft', 'metaverse', 'gaming', 'p2e'],
+        'boost': 12,
         'active': True
     },
+    
+    # Meme (Classic)
     'meme': {
         'name': 'Meme',
-        'keywords': ['meme', 'pepe', 'doge', 'shiba', 'wojak'],
+        'keywords': ['meme', 'pepe', 'doge', 'shiba', 'wojak', 'frog', 'cat', 'dog'],
         'boost': 10,
         'active': True
     }
+}
+
+# Narrative combo bonuses (when multiple narratives match)
+NARRATIVE_COMBOS = {
+    ('ai_agent', 'desci'): +10,      # AI + DeSci = powerful combo
+    ('ai_agent', 'defi'): +8,        # AI + DeFi = yield farming agents
+    ('rwa', 'defi'): +8,             # RWA + DeFi = tokenized yields
 }
 
 # =============================================================================
