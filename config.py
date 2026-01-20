@@ -1,111 +1,135 @@
 """
-Sentinel Signals v2 - Configuration
-UPDATED: Added holder distribution and volume velocity scoring
+Configuration for Sentinel Signals v2
+UPDATED: Tiered scoring thresholds and credit optimization settings
 """
-import os
-from dotenv import load_dotenv
 
-load_dotenv()
+# =============================================================================
+# API KEYS
+# =============================================================================
 
-# ============================================================================
-# TELEGRAM
-# ============================================================================
+HELIUS_API_KEY = "your-helius-api-key-here"
+TELEGRAM_BOT_TOKEN = "your-telegram-bot-token-here"
+TELEGRAM_CHANNEL_ID = "your-telegram-channel-id-here"
 
-TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
-TELEGRAM_CHANNEL_ID = os.getenv('TELEGRAM_CHANNEL_ID')
-ENABLE_TELEGRAM = os.getenv('ENABLE_TELEGRAM', 'true').lower() == 'true'
+# =============================================================================
+# CONVICTION SCORING THRESHOLDS
+# =============================================================================
 
-if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHANNEL_ID:
-    raise ValueError("TELEGRAM_BOT_TOKEN and TELEGRAM_CHANNEL_ID must be set")
+# Signal thresholds based on graduation status
+MIN_CONVICTION_SCORE = 80  # Pre-graduation threshold (40-60% bonding curve)
+POST_GRAD_THRESHOLD = 75   # Post-graduation threshold (100% - on Raydium)
 
-# ============================================================================
-# HELIUS
-# ============================================================================
+# Base score threshold for distribution checks
+# Only check distribution if base score >= this value
+DISTRIBUTION_CHECK_THRESHOLD = 50
 
-HELIUS_API_KEY = os.getenv('HELIUS_API_KEY')
-if not HELIUS_API_KEY:
-    raise ValueError("HELIUS_API_KEY must be set")
+# =============================================================================
+# SCORING WEIGHTS (Total: 0-75 points possible)
+# =============================================================================
 
-# ============================================================================
-# CONVICTION SCORING
-# ============================================================================
-
-# Minimum conviction score to post signal (0-100)
-MIN_CONVICTION_SCORE = int(os.getenv('MIN_CONVICTION_SCORE', 75))
-
-# Score weights - UPDATED with holder + volume velocity
-WEIGHTS = {
-    # Smart Wallet Activity (max 40 points)
-    'smart_wallet_elite': 15,      # Elite wallet bought (+15 per wallet)
-    'smart_wallet_kol': 10,         # Top KOL bought (+10 per wallet)
-    
-    # Narrative Detection (max 25 points)
-    'narrative_hot': 20,            # Hot/trending narrative
-    'narrative_fresh': 10,          # Fresh narrative (< 48h)
-    'narrative_multiple': 5,        # Multiple narratives
-    
-    # Holder Distribution (max 15 points) 🆕
-    'holders_high': 15,             # 100+ holders
-    'holders_medium': 10,           # 50-99 holders  
-    'holders_low': 5,               # 30-49 holders
-    
-    # Volume Velocity (max 10 points) 🆕
-    'volume_spiking': 10,           # Volume doubled in 5min
-    'volume_growing': 5,            # Volume up 25%+ in 5min
-    
-    # Price Momentum (max 10 points)
-    'momentum_very_strong': 10,     # +50% in 5min
-    'momentum_strong': 5,           # +20% in 5min
+# Smart Wallet Activity (0-40 points)
+SMART_WALLET_WEIGHTS = {
+    'per_kol': 10,           # 10 points per KOL wallet that bought
+    'max_score': 40          # Cap at 4 KOLs (40 points max)
 }
 
-# ============================================================================
-# SIGNAL FILTERS
-# ============================================================================
-
-# Minimum requirements (basic quality filters)
-MIN_LIQUIDITY = int(os.getenv('MIN_LIQUIDITY', 5000))
-MIN_HOLDERS = int(os.getenv('MIN_HOLDERS', 30))  # Hard minimum
-MAX_AGE_MINUTES = int(os.getenv('MAX_AGE_MINUTES', 120))  # Only signal tokens < 2h old
-
-# ============================================================================
-# NARRATIVE TRACKING
-# ============================================================================
-
-# Current hot narratives (update these periodically)
-HOT_NARRATIVES = {
-    'ai': {
-        'keywords': ['ai', 'agent', 'artificial', 'gpt', 'llm', 'neural', 'bot', 'assistant'],
-        'weight': 1.0,
-        'active': True
-    },
-    'meme': {
-        'keywords': ['pepe', 'doge', 'shib', 'wojak', 'chad', 'frog', 'cat', 'dog'],
-        'weight': 0.8,
-        'active': True
-    },
-    'gaming': {
-        'keywords': ['game', 'gaming', 'play', 'metaverse', 'nft', 'pixel'],
-        'weight': 0.7,
-        'active': True
-    },
-    'defi': {
-        'keywords': ['defi', 'yield', 'farm', 'stake', 'pool', 'swap'],
-        'weight': 0.6,
-        'active': True
-    },
-    'animals': {
-        'keywords': ['cat', 'dog', 'frog', 'monkey', 'ape', 'penguin', 'bear', 'bull'],
-        'weight': 0.5,
-        'active': True
-    }
+# Volume Velocity (0-10 points)
+VOLUME_WEIGHTS = {
+    'spiking': 10,          # Volume 2x+ expected rate
+    'growing': 5            # Volume 1.25x+ expected rate
 }
 
-# ============================================================================
+# Price Momentum (0-10 points)
+MOMENTUM_WEIGHTS = {
+    'very_strong': 10,      # +50% in 5 minutes
+    'strong': 5             # +20% in 5 minutes
+}
+
+# Distribution Scoring (0-15 points)
+# Pre-graduation: Based on unique buyers (FREE)
+UNIQUE_BUYER_WEIGHTS = {
+    'high': 15,             # 50+ unique buyers
+    'medium': 10,           # 30-49 unique buyers
+    'low': 5                # 15-29 unique buyers
+}
+
+# Post-graduation: Based on real holders (10 credits)
+HOLDER_WEIGHTS = {
+    'high': 15,             # 100+ holders
+    'medium': 10,           # 50-99 holders
+    'low': 5                # 20-49 holders
+}
+
+# =============================================================================
+# SAFETY FILTERS
+# =============================================================================
+
+MIN_HOLDERS = 20            # Minimum holders for any signal
+MIN_UNIQUE_BUYERS = 15      # Minimum unique buyers for pre-grad signals
+MIN_LIQUIDITY = 5000        # Minimum liquidity in USD
+
+# =============================================================================
+# SMART WALLET TRACKING
+# =============================================================================
+
+# List of elite trader wallets to monitor
+SMART_WALLETS = [
+    # Add your KOL wallet addresses here
+    # Example: "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU"
+]
+
+# =============================================================================
 # PERFORMANCE TRACKING
-# ============================================================================
+# =============================================================================
 
-# Milestones to track (e.g., 1.5x, 2x, 3x, 5x, 10x)
+# Milestone multipliers for performance alerts
 MILESTONES = [1.5, 2, 3, 5, 10, 20, 50, 100]
 
-# Daily report time (UTC)
-DAILY_REPORT_HOUR = 0  # Midnight UTC
+# How long to track token performance (hours)
+TRACKING_DURATION = 24
+
+# =============================================================================
+# CREDIT OPTIMIZATION SETTINGS
+# =============================================================================
+
+# Cleanup settings
+MAX_TRACKED_TOKENS = 1000   # Maximum tokens to track in memory
+CLEANUP_THRESHOLD = 500     # How many to remove when limit hit
+
+# Buyer tracking duration
+BUYER_TRACKING_WINDOW = 15  # Minutes to track unique buyers
+
+# =============================================================================
+# LOGGING
+# =============================================================================
+
+LOG_LEVEL = "INFO"          # Options: DEBUG, INFO, WARNING, ERROR
+LOG_TO_FILE = True
+LOG_FILE = "sentinel_signals.log"
+
+# =============================================================================
+# FEATURE FLAGS
+# =============================================================================
+
+ENABLE_NARRATIVES = False   # Narrative detection (disabled for now)
+ENABLE_PERFORMANCE_TRACKING = True
+ENABLE_MILESTONE_ALERTS = True
+
+# =============================================================================
+# CREDIT USAGE ESTIMATES (for monitoring)
+# =============================================================================
+
+CREDIT_COSTS = {
+    'webhook': 1,
+    'holder_check': 10,
+    'account_info': 1,
+    'metadata': 10
+}
+
+# Expected daily usage with optimizations
+EXPECTED_DAILY_CREDITS = {
+    'webhooks': 20000,      # 20 KOL wallets × ~1000 txs each
+    'holder_checks': 3000,  # ~300 post-grad checks × 10 credits
+    'other': 2000,          # Misc RPC calls
+    'total': 25000          # ~750k/month (well under 1M free tier)
+}
