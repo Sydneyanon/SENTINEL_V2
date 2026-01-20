@@ -1,6 +1,6 @@
 """
-Sentinel Signals v2 - KOL-Triggered Real-Time Tracking
-Now with ActiveTokenTracker for intelligent monitoring
+🔥 PROMETHEUS - Autonomous Signal System
+KOL-Triggered Real-Time Tracking with Conviction Scoring
 """
 import asyncio
 from typing import Dict, List
@@ -32,7 +32,7 @@ from helius_fetcher import HeliusDataFetcher
 # GLOBAL INSTANCES
 # ============================================================================
 
-app = FastAPI(title="Sentinel Signals v2")
+app = FastAPI(title="Prometheus - Autonomous Signals")
 
 # Database
 db = None
@@ -218,7 +218,7 @@ async def startup():
     global conviction_engine, pumpportal_monitor, db, performance_tracker, active_tracker, helius_fetcher
     
     logger.info("=" * 70)
-    logger.info("🚀 SENTINEL SIGNALS V2 - KOL-TRIGGERED TRACKING")
+    logger.info("🔥 PROMETHEUS - AUTONOMOUS SIGNAL SYSTEM")
     logger.info("=" * 70)
     
     # Initialize database FIRST
@@ -300,19 +300,21 @@ async def startup():
     logger.info("=" * 70)
     logger.info(f"🎯 KOL-Triggered Tracking: ENABLED")
     logger.info(f"Min Conviction Score: {config.MIN_CONVICTION_SCORE}/100")
-    logger.info(f"Smart Wallets: {len(smart_wallet_tracker.tracked_wallets)} tracked")
-    logger.info(f"Holder Polling: Every 15 seconds")
+    logger.info(f"Elite Wallets: {len(smart_wallet_tracker.tracked_wallets)} tracked")
+    logger.info(f"Smart Polling: Age-based intervals")
     logger.info(f"Performance Tracking: ✅ Enabled")
     logger.info(f"Milestones: {', '.join(f'{m}x' for m in config.MILESTONES)}")
     logger.info(f"Daily Reports: ✅ Midnight UTC")
     logger.info("=" * 70)
     
-    logger.info("✅ SENTINEL SIGNALS V2 READY")
+    logger.info("✅ PROMETHEUS READY")
     logger.info("=" * 70)
-    logger.info("🎯 Waiting for KOL buys to trigger tracking...")
+    logger.info("🔥 Watching all elite trader activity...")
     logger.info("⚡ Real-time analysis on every trade")
-    logger.info("👥 Holder counts polled every 15 seconds")
-    logger.info("🚀 Signals sent the moment threshold is crossed")
+    logger.info("👥 Smart polling for holder counts")
+    logger.info("🚀 Signals posted the moment threshold is crossed")
+    logger.info("")
+    logger.info("The fire has been stolen. Let it spread. 🔥")
     logger.info("=" * 70)
     
     # Start background tasks
@@ -365,7 +367,7 @@ async def health_check():
     from datetime import datetime
     return {
         "status": "healthy",
-        "service": "Sentinel Signals v2 - KOL-Triggered",
+        "service": "Prometheus - Autonomous Signals",
         "timestamp": datetime.utcnow().isoformat()
     }
 
@@ -385,7 +387,7 @@ async def status():
             "min_conviction": config.MIN_CONVICTION_SCORE,
         },
         "trackers": {
-            "smart_wallets": len(smart_wallet_tracker.tracked_wallets) if smart_wallet_tracker else 0,
+            "elite_wallets": len(smart_wallet_tracker.tracked_wallets) if smart_wallet_tracker else 0,
             "active_tokens": tracker_stats.get('active_tokens', 0),
             "tokens_tracked_total": tracker_stats.get('tokens_tracked_total', 0),
             "signals_sent": tracker_stats.get('signals_sent', 0),
@@ -414,7 +416,7 @@ async def pumpportal_diagnostic():
 @app.on_event("shutdown")
 async def shutdown():
     """Cleanup on shutdown"""
-    logger.info("🛑 Shutting down...")
+    logger.info("🛑 Shutting down Prometheus...")
     
     if pumpportal_monitor:
         await pumpportal_monitor.stop()
