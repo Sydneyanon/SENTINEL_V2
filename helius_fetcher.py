@@ -8,6 +8,7 @@ from loguru import logger
 import config
 import base64
 import struct
+from datetime import datetime, timedelta
 
 # Try to import solders - log if it fails
 try:
@@ -32,7 +33,11 @@ class HeliusDataFetcher:
     def __init__(self):
         self.api_key = config.HELIUS_API_KEY
         self.rpc_url = f"https://mainnet.helius-rpc.com/?api-key={self.api_key}"
-        
+
+        # Cache for holder checks (60-minute TTL to save credits)
+        self.holder_cache = {}  # {token_address: {'data': {...}, 'timestamp': datetime}}
+        self.cache_ttl_minutes = 60
+
         if SOLDERS_AVAILABLE:
             logger.info("   🔐 Bonding curve decoder enabled (solders loaded)")
         else:
@@ -325,12 +330,129 @@ class HeliusDataFetcher:
                     
                     # Count non-zero accounts
                     holders = len([acc for acc in value if acc.get('amount', '0') != '0'])
-                    
+
                     return holders
-                    
+
         except Exception as e:
             logger.debug(f"   Helius holder count error: {e}")
             return 0
+
+    async def get_token_holders(self, token_address: str, limit: int = 10) -> Optional[Dict]:
+        """
+        Get top token holders with 60-minute caching (saves credits!)
+
+        COST: 10 Helius credits per call (cached for 60 minutes)
+
+        Args:
+            token_address: Token mint address
+            limit: Number of top holders to return (default 10)
+
+        Returns:
+            {
+                'holders': [{'address': str, 'balance': int}, ...],
+                'total_supply': int,
+                'cached': bool
+            }
+        """
+        try:
+            # Check cache first
+            now = datetime.now()
+            if token_address in self.holder_cache:
+                cache_entry = self.holder_cache[token_address]
+                cache_age = now - cache_entry['timestamp']
+
+                if cache_age < timedelta(minutes=self.cache_ttl_minutes):
+                    logger.debug(f"   💾 Using cached holder data (age: {cache_age.seconds // 60}m)")
+                    cache_entry['data']['cached'] = True
+                    return cache_entry['data']
+                else:
+                    logger.debug(f"   ⏰ Cache expired (age: {cache_age.seconds // 60}m), fetching fresh data")
+
+            # Fetch fresh data from Helius (10 credits)
+            logger.info(f"   🌐 Fetching top {limit} holders from Helius (10 credits)")
+
+            async with aiohttp.ClientSession() as session:
+                # Get top holders
+                holders_response = await session.post(
+                    self.rpc_url,
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": 1,
+                        "method": "getTokenLargestAccounts",
+                        "params": [token_address]
+                    },
+                    timeout=aiohttp.ClientTimeout(total=10)
+                )
+
+                if holders_response.status != 200:
+                    logger.warning(f"   ⚠️ Helius RPC returned {holders_response.status}")
+                    return None
+
+                holders_data = await holders_response.json()
+
+                # Get token supply
+                supply_response = await session.post(
+                    self.rpc_url,
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": 2,
+                        "method": "getTokenSupply",
+                        "params": [token_address]
+                    },
+                    timeout=aiohttp.ClientTimeout(total=10)
+                )
+
+                if supply_response.status != 200:
+                    logger.warning(f"   ⚠️ Failed to get token supply")
+                    return None
+
+                supply_data = await supply_response.json()
+
+            # Parse response
+            holders_result = holders_data.get('result', {})
+            holders_value = holders_result.get('value', [])
+
+            supply_result = supply_data.get('result', {})
+            supply_value = supply_result.get('value', {})
+            total_supply = int(supply_value.get('amount', 0))
+
+            if not holders_value or not total_supply:
+                logger.warning(f"   ⚠️ No holder data or supply returned")
+                return None
+
+            # Format holders data (top N)
+            holders = []
+            for i, holder in enumerate(holders_value[:limit]):
+                amount = int(holder.get('amount', 0))
+                # Note: We don't have wallet addresses in getTokenLargestAccounts response
+                # We have account addresses (token accounts, not wallet addresses)
+                holders.append({
+                    'address': holder.get('address', f'holder_{i}'),
+                    'amount': amount  # Use 'amount' to match rug_detector expectation
+                })
+
+            result = {
+                'holders': holders,
+                'total_supply': total_supply,
+                'cached': False
+            }
+
+            # Store in cache
+            self.holder_cache[token_address] = {
+                'data': result,
+                'timestamp': now
+            }
+
+            logger.info(f"   ✅ Got {len(holders)} holders, total supply: {total_supply:,}")
+            logger.debug(f"   💾 Cached for {self.cache_ttl_minutes} minutes")
+
+            return result
+
+        except Exception as e:
+            logger.error(f"   ❌ Error fetching holder data: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return None
     
     def _parse_asset_data(self, token_address: str, asset_data: Dict) -> Dict:
         """Parse Helius asset data into our format"""
