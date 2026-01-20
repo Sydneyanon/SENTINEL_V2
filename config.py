@@ -32,7 +32,36 @@ POST_GRAD_THRESHOLD = 75   # Post-graduation threshold (100% - on Raydium)
 DISTRIBUTION_CHECK_THRESHOLD = 50
 
 # =============================================================================
-# SCORING WEIGHTS (Total: 0-75 points possible)
+# SCORING WEIGHTS (Total: 0-100 points possible)
+# =============================================================================
+
+# Combined WEIGHTS dictionary (required by conviction engine)
+WEIGHTS = {
+    # Smart Wallet Activity (max 40 points)
+    'smart_wallet_elite': 15,      # Elite wallet bought (+15 per wallet)
+    'smart_wallet_kol': 10,         # Top KOL bought (+10 per wallet)
+    
+    # Narrative Detection (max 25 points)
+    'narrative_hot': 20,            # Hot/trending narrative
+    'narrative_fresh': 10,          # Fresh narrative (< 48h)
+    'narrative_multiple': 5,        # Multiple narratives
+    
+    # Holder Distribution (max 15 points)
+    'holders_high': 15,             # 100+ holders
+    'holders_medium': 10,           # 50-99 holders  
+    'holders_low': 5,               # 30-49 holders
+    
+    # Volume Velocity (max 10 points)
+    'volume_spike': 10,             # Strong volume spike
+    'volume_increasing': 5,         # Steady increase
+    
+    # Price Momentum (max 10 points)
+    'momentum_strong': 10,          # Strong upward momentum
+    'momentum_moderate': 5,         # Moderate momentum
+}
+
+# =============================================================================
+# DETAILED SCORING WEIGHTS (for specific calculations)
 # =============================================================================
 
 # Smart Wallet Activity (0-40 points)
