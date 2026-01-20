@@ -128,19 +128,39 @@ ENABLE_MILESTONE_ALERTS = True
 # =============================================================================
 
 # Hot narratives to watch for (can be updated dynamically)
-HOT_NARRATIVES = [
-    # AI / Agent narratives
-    {'name': 'AI Agent', 'keywords': ['ai', 'agent', 'autonomous', 'neural', 'gpt'], 'boost': 25},
-    {'name': 'DeSci', 'keywords': ['desci', 'science', 'research', 'biotech'], 'boost': 20},
-    
-    # DeFi narratives  
-    {'name': 'DeFi', 'keywords': ['defi', 'yield', 'stake', 'farm', 'swap'], 'boost': 15},
-    
-    # Gaming narratives
-    {'name': 'GameFi', 'keywords': ['game', 'play', 'nft', 'metaverse'], 'boost': 15},
-    
-    # Add your own hot narratives here
-]
+# Format: dict with narrative names as keys
+HOT_NARRATIVES = {
+    'ai_agent': {
+        'name': 'AI Agent',
+        'keywords': ['ai', 'agent', 'autonomous', 'neural', 'gpt', 'bot'],
+        'boost': 25,
+        'active': True
+    },
+    'desci': {
+        'name': 'DeSci',
+        'keywords': ['desci', 'science', 'research', 'biotech', 'lab'],
+        'boost': 20,
+        'active': True
+    },
+    'defi': {
+        'name': 'DeFi',
+        'keywords': ['defi', 'yield', 'stake', 'farm', 'swap', 'liquidity'],
+        'boost': 15,
+        'active': True
+    },
+    'gamefi': {
+        'name': 'GameFi',
+        'keywords': ['game', 'play', 'nft', 'metaverse', 'gaming'],
+        'boost': 15,
+        'active': True
+    },
+    'meme': {
+        'name': 'Meme',
+        'keywords': ['meme', 'pepe', 'doge', 'shiba', 'wojak'],
+        'boost': 10,
+        'active': True
+    }
+}
 
 # =============================================================================
 # CREDIT USAGE ESTIMATES (for monitoring)
