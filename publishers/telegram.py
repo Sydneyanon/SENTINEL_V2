@@ -1,5 +1,5 @@
 """
-Telegram Publisher - Post signals to channel with animated banner
+Telegram Publisher - Post signals to channel with Prometheus branding
 """
 from typing import Dict, Any, Optional
 from datetime import datetime
@@ -91,8 +91,8 @@ class TelegramPublisher:
         fire_count = min(conviction // 20, 5)
         fire_emojis = "🔥" * fire_count
         
-        # Build message with HTML formatting (better for animations)
-        message = f"""🎯 <b>NEW SIGNAL</b> {fire_emojis}
+        # Build message with HTML formatting and PROMETHEUS branding
+        message = f"""🔥 <b>PROMETHEUS SIGNAL</b> {fire_emojis}
 
 <b>${symbol}</b>
 <b>Conviction: {conviction}/100</b>
@@ -113,7 +113,7 @@ class TelegramPublisher:
         if breakdown:
             message += "<b>📊 Score Breakdown:</b>\n"
             if breakdown.get('smart_wallet', 0) > 0:
-                message += f"👑 Smart Wallets: {breakdown['smart_wallet']}\n"
+                message += f"👑 Elite Wallets: {breakdown['smart_wallet']}\n"
             if breakdown.get('narrative', 0) > 0:
                 message += f"📈 Narratives: {breakdown['narrative']}\n"
             if breakdown.get('holders', 0) > 0:
@@ -126,7 +126,7 @@ class TelegramPublisher:
         
         # Add smart wallet activity
         if wallets or elite_count > 0 or kol_count > 0:
-            message += "<b>👑 Smart Money Activity:</b>\n"
+            message += "<b>👑 Elite Trader Activity:</b>\n"
             if elite_count > 0:
                 message += f"🏆 {elite_count} Elite trader(s)\n"
             if kol_count > 0:
@@ -160,7 +160,8 @@ class TelegramPublisher:
 
 <code>{token_address}</code>
 
-⚠️ DYOR - Not financial advice"""
+⚠️ DYOR - Not financial advice
+🔥 The fire spreads."""
         
         return message
     
@@ -221,7 +222,7 @@ class TelegramPublisher:
             symbol = token_data.get('token_symbol', signal_data.get('symbol', 'UNKNOWN'))
             conviction = signal_data.get('score', signal_data.get('conviction_score', 0))
             
-            logger.info(f"📤 Posted signal to Telegram: ${symbol} ({conviction}/100)")
+            logger.info(f"📤 Posted Prometheus signal to Telegram: ${symbol} ({conviction}/100)")
             return result.message_id
             
         except TelegramError as e:
@@ -241,12 +242,12 @@ class TelegramPublisher:
             return False
         
         try:
-            test_message = f"""🤖 <b>Bot Test Message</b>
+            test_message = f"""🔥 <b>PROMETHEUS - System Test</b>
 
 ✅ Telegram connection working
 ⏰ Time: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC
 
-This is a test message to verify the bot can post to the channel."""
+The fire has been stolen. Watching for elite trader activity... 🔥"""
             
             if self.banner_file_id:
                 # Send with banner if available
