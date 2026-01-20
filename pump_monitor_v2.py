@@ -1,10 +1,11 @@
 """
 PumpPortal Monitor V2 - Real-time pump.fun bonding curve tracking
-NOW WITH: Active token tracking integration for KOL-bought tokens
+UPDATED: Now tracks unique buyers for FREE pre-graduation distribution scoring
 """
 import asyncio
 import json
 from typing import Callable, Dict, Optional
+from datetime import datetime
 import websockets
 import aiohttp
 from loguru import logger
@@ -15,21 +16,24 @@ class PumpMonitorV2:
     def __init__(self, on_signal_callback: Callable, active_tracker=None):
         self.ws_url = 'wss://pumpportal.fun/api/data'
         self.on_signal_callback = on_signal_callback
-        self.active_tracker = active_tracker  # NEW: Reference to ActiveTokenTracker
+        self.active_tracker = active_tracker
         self.ws = None
         self.tracked_tokens = {}
+        
+        # NEW: Track unique buyers per token (FREE distribution metric)
+        self.unique_buyers = {}  # {token_address: set(buyer_wallets)}
+        self.buyer_tracking_start = {}  # {token_address: datetime}
+        
         self.running = False
         self.connection_attempts = 0
         self.messages_received = 0
-        logger.info("🎬 PumpMonitorV2 __init__ called")
+        logger.info("🎬 PumpMonitorV2 initialized with unique buyer tracking")
         
     async def start(self):
         """Start monitoring"""
-        logger.info("🚨🚨🚨 START METHOD CALLED! 🚨🚨🚨")
-        logger.info(f"Running flag BEFORE: {self.running}")
+        logger.info("🚨 START METHOD CALLED!")
         
         self.running = True
-        logger.info(f"Running flag AFTER: {self.running}")
         logger.info("🔌 Starting PumpPortal monitor...")
         
         while self.running:
@@ -111,15 +115,20 @@ class PumpMonitorV2:
             if self.active_tracker and self.active_tracker.is_tracked(token_address):
                 logger.info(f"🆕 New token (TRACKED): ${symbol}")
             else:
-                logger.debug(f"🆕 New token: ${symbol}")  # Changed to debug
+                logger.debug(f"🆕 New token: ${symbol}")
             
-            # Subscribe to this specific token's trades to track bonding curve
+            # Subscribe to this specific token's trades to track bonding curve + unique buyers
             try:
                 await self.ws.send(json.dumps({
                     "method": "subscribeTokenTrade",
                     "keys": [token_address]
                 }))
                 logger.debug(f"   📡 Subscribed to trades for {token_address[:8]}")
+                
+                # Initialize buyer tracking for this token
+                self.unique_buyers[token_address] = set()
+                self.buyer_tracking_start[token_address] = datetime.now()
+                
             except Exception as e:
                 logger.debug(f"   ⚠️ Failed to subscribe to token trades: {e}")
             
@@ -129,38 +138,49 @@ class PumpMonitorV2:
     
     async def _handle_trade(self, data: Dict):
         """
-        Handle trade
+        Handle trade - NOW TRACKS UNIQUE BUYERS FOR FREE DISTRIBUTION METRIC
         
         NEW BEHAVIOR:
+        - Track unique buyer wallets per token (0 credits!)
         - Check if token is actively tracked by KOLs
         - If yes, trigger immediate re-analysis via ActiveTokenTracker
         """
         token_address = data.get('mint')
         bonding_pct = data.get('bondingCurvePercentage', 0)
+        tx_type = data.get('txType')  # 'buy' or 'sell'
+        trader_wallet = data.get('traderPublicKey')
         
         if not token_address:
             return
         
-        # NEW: Check if this is a tracked token (KOL bought it)
+        # NEW: Track unique buyers (only buys, not sells)
+        if tx_type == 'buy' and trader_wallet:
+            if token_address not in self.unique_buyers:
+                self.unique_buyers[token_address] = set()
+                self.buyer_tracking_start[token_address] = datetime.now()
+            
+            # Add to set (automatically deduplicates)
+            self.unique_buyers[token_address].add(trader_wallet)
+            
+            # Log milestone buyer counts
+            buyer_count = len(self.unique_buyers[token_address])
+            if buyer_count in [10, 25, 50, 75, 100]:
+                logger.info(f"👥 {data.get('symbol', token_address[:8])} hit {buyer_count} unique buyers")
+        
+        # Check if this is a tracked token (KOL bought it)
         if self.active_tracker and self.active_tracker.is_tracked(token_address):
             # This is a tracked token! Update it in real-time
-            # Log what fields we're getting from PumpPortal
-            logger.info(f"📊 PumpPortal data for tracked token:")
-            logger.info(f"   symbol: {data.get('symbol')}")
-            logger.info(f"   name: {data.get('name')}")
-            logger.info(f"   priceUsd: {data.get('priceUsd')}")
-            logger.info(f"   marketCapSol: {data.get('marketCapSol')}")
-            logger.info(f"   vSolInBondingCurve: {data.get('vSolInBondingCurve')}")
-            logger.info(f"   bondingCurvePercentage: {data.get('bondingCurvePercentage')}")
-            
             await self.active_tracker.update_token_trade(token_address, data)
             return  # ActiveTracker handles everything from here
         
-        # OLD BEHAVIOR: Pre-graduation range monitoring (40-60%)
+        # Pre-graduation range monitoring (40-60%)
         if 40 <= bonding_pct <= 60:
             if token_address not in self.tracked_tokens:
                 logger.info(f"⚡ Token in range: {data.get('symbol')} at {bonding_pct:.1f}%")
+                
+                # Extract token data with unique buyer count
                 token_data = await self._extract_token_data(data)
+                
                 await self.on_signal_callback(token_data, 'PRE_GRADUATION')
                 self.tracked_tokens[token_address] = bonding_pct
     
@@ -170,9 +190,10 @@ class PumpMonitorV2:
         symbol = data.get('symbol', 'UNKNOWN')
         
         if token_address:
-            logger.info(f"🎓 Graduation: ${symbol}")
+            buyer_count = len(self.unique_buyers.get(token_address, set()))
+            logger.info(f"🎓 Graduation: ${symbol} ({buyer_count} unique buyers tracked)")
             
-            # NEW: Check if this is a tracked token
+            # Check if this is a tracked token
             if self.active_tracker and self.active_tracker.is_tracked(token_address):
                 # Update tracked token with graduation info
                 data['bondingCurvePercentage'] = 100
@@ -186,7 +207,7 @@ class PumpMonitorV2:
             self.tracked_tokens.pop(token_address, None)
     
     async def _extract_token_data(self, data: Dict) -> Dict:
-        """Extract token data"""
+        """Extract token data with unique buyer count"""
         token_address = data.get('mint')
         bonding_pct = data.get('bondingCurvePercentage', 0)
         
@@ -209,8 +230,12 @@ class PumpMonitorV2:
             'trader_wallet': data.get('traderPublicKey'),
             'image_uri': data.get('uri', ''),
             'created_timestamp': data.get('timestamp'),
-            'holder_count': 0
+            'holder_count': 0,
+            'unique_buyers': 0  # Will be set below
         }
+        
+        # NEW: Add unique buyer count (FREE!)
+        token_data['unique_buyers'] = len(self.unique_buyers.get(token_address, set()))
         
         # For post-graduation tokens, enrich with fresh DEX data
         if bonding_pct >= 100:
@@ -223,10 +248,7 @@ class PumpMonitorV2:
                 token_data['liquidity'] = dex_data.get('liquidity', token_data['liquidity'])
                 token_data['holder_count'] = dex_data.get('holder_count', 0)
                 logger.debug(f"   📊 Enriched with fresh DEX data")
-        else:
-            # Pre-graduation: Just get holder count from Helius
-            holder_count = await self._get_holders_from_helius(token_address)
-            token_data['holder_count'] = holder_count
+        # else: Pre-graduation uses unique_buyers instead of holder_count (already set above)
         
         return token_data
     
@@ -272,47 +294,34 @@ class PumpMonitorV2:
             logger.debug(f"⚠️ Error fetching DEX data: {e}")
             return None
     
-    async def _get_holders_from_helius(self, token_address: str) -> int:
-        """Fetch holder count from Helius API (for pre-graduation tokens)"""
-        try:
-            # Import config to get Helius API key
-            import config
+    def get_unique_buyers(self, token_address: str) -> int:
+        """
+        Get count of unique buyers for a token
+        
+        Args:
+            token_address: Token mint address
             
-            url = f"https://mainnet.helius-rpc.com/?api-key={config.HELIUS_API_KEY}"
+        Returns:
+            Number of unique buyers tracked
+        """
+        return len(self.unique_buyers.get(token_address, set()))
+    
+    def get_buyer_tracking_duration(self, token_address: str) -> float:
+        """
+        Get how long we've been tracking buyers for a token (in minutes)
+        
+        Args:
+            token_address: Token mint address
             
-            payload = {
-                "jsonrpc": "2.0",
-                "id": 1,
-                "method": "getTokenAccounts",
-                "params": {
-                    "mint": token_address,
-                    "options": {
-                        "showZeroBalance": False
-                    }
-                }
-            }
-            
-            async with aiohttp.ClientSession() as session:
-                async with session.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=5)) as resp:
-                    if resp.status != 200:
-                        logger.debug(f"⚠️ Helius returned {resp.status} for holder count")
-                        return 0
-                    
-                    data = await resp.json()
-                    
-                    # Get token accounts
-                    token_accounts = data.get('result', {}).get('token_accounts', [])
-                    holder_count = len(token_accounts)
-                    
-                    logger.debug(f"   👥 Helius holder count: {holder_count}")
-                    return holder_count
-                    
-        except asyncio.TimeoutError:
-            logger.debug(f"⚠️ Timeout fetching holders from Helius for {token_address[:8]}")
-            return 0
-        except Exception as e:
-            logger.debug(f"⚠️ Error fetching holders from Helius: {e}")
-            return 0
+        Returns:
+            Duration in minutes
+        """
+        if token_address not in self.buyer_tracking_start:
+            return 0.0
+        
+        start_time = self.buyer_tracking_start[token_address]
+        elapsed_seconds = (datetime.now() - start_time).total_seconds()
+        return elapsed_seconds / 60
     
     async def stop(self):
         """Stop monitoring"""
@@ -322,8 +331,13 @@ class PumpMonitorV2:
         logger.info(f"🛑 Stopped (received {self.messages_received} messages)")
     
     def cleanup_old_tokens(self):
-        """Cleanup"""
+        """Cleanup old tracked tokens and buyer data"""
         if len(self.tracked_tokens) > 1000:
             tokens_to_remove = list(self.tracked_tokens.keys())[:500]
             for token in tokens_to_remove:
                 self.tracked_tokens.pop(token, None)
+                # NEW: Also cleanup buyer tracking data
+                self.unique_buyers.pop(token, None)
+                self.buyer_tracking_start.pop(token, None)
+            
+            logger.info(f"🧹 Cleaned up {len(tokens_to_remove)} old tokens")
