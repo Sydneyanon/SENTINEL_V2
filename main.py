@@ -27,6 +27,7 @@ from scoring.conviction_engine import ConvictionEngine
 from publishers.telegram import TelegramPublisher
 from active_token_tracker import ActiveTokenTracker
 from helius_fetcher import HeliusDataFetcher
+from wallet_enrichment import initialize_smart_wallets  # ← NEW: Auto-discover wallet metadata
 
 # ============================================================================
 # GLOBAL INSTANCES
@@ -42,7 +43,7 @@ pumpportal_monitor = None
 performance_tracker = None
 
 # Trackers
-smart_wallet_tracker = SmartWalletTracker()
+smart_wallet_tracker = None  # ← FIXED: Will initialize with enriched wallets in startup()
 narrative_detector = NarrativeDetector()
 active_tracker = None  # NEW: Tracks KOL-bought tokens
 helius_fetcher = None  # NEW: Fetches data from Helius
@@ -215,7 +216,7 @@ async def cleanup_task():
 @app.on_event("startup")
 async def startup():
     """Initialize all components"""
-    global conviction_engine, pumpportal_monitor, db, performance_tracker, active_tracker, helius_fetcher
+    global conviction_engine, pumpportal_monitor, db, performance_tracker, active_tracker, helius_fetcher, smart_wallet_tracker
     
     logger.info("=" * 70)
     logger.info("🔥 PROMETHEUS - AUTONOMOUS SIGNAL SYSTEM")
@@ -226,6 +227,15 @@ async def startup():
     db = Database()
     await db.connect()
     logger.info("✅ Database connected and tables created")
+    
+    # Initialize smart wallet tracker with enriched wallets (NEW!)
+    logger.info("🔍 Enriching smart wallets with metadata...")
+    enriched_wallets, wallet_addresses = await initialize_smart_wallets()
+    logger.info(f"✅ Enriched {len(enriched_wallets)} wallets")
+    
+    # Create SmartWalletTracker with enriched data
+    logger.info("👑 Initializing Smart Wallet Tracker...")
+    smart_wallet_tracker = SmartWalletTracker(wallets=enriched_wallets)
     
     # Pass database to smart wallet tracker
     smart_wallet_tracker.db = db
