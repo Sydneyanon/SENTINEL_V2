@@ -12,7 +12,7 @@ Bot is properly configured in Telegram channel but Railway shows "Chat not found
 
 1. Open Telegram and search for `@BotFather`
 2. Send `/mybots`
-3. Select your bot: `@prometheus_fire_bot`
+3. Select your bot: `@prometheus_elitebot`
 4. Click "API Token"
 5. Copy the full token (looks like: `1234567890:ABCdefGHIjklMNOpqrsTUVwxyz`)
 
@@ -47,7 +47,7 @@ After adding both variables, Railway will automatically redeploy your service.
 Once redeployed, check logs for:
 
 ```
-✅ Telegram bot initialized: @prometheus_fire_bot
+✅ Telegram bot initialized: @prometheus_elitebot
 ```
 
 If you see this, the bot is working!
@@ -89,7 +89,7 @@ TELEGRAM_CHANNEL_ID = -1003380850002
 
 ## Current Status
 
-- ✅ Bot exists: `@prometheus_fire_bot`
+- ✅ Bot exists: `@prometheus_elitebot`
 - ✅ Bot in channel with admin permissions
 - ✅ Bot has "Post Messages" permission
 - ❌ Environment variables not set in Railway (NEEDS FIX)
@@ -99,7 +99,7 @@ TELEGRAM_CHANNEL_ID = -1003380850002
 Once environment variables are set correctly:
 
 1. Bot will initialize on startup
-2. Logs will show: `✅ Telegram bot initialized: @prometheus_fire_bot`
+2. Logs will show: `✅ Telegram bot initialized: @prometheus_elitebot`
 3. When a signal fires, you'll see a message like:
 
 ```

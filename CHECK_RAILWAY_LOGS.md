@@ -7,7 +7,7 @@ Once your Railway deployment restarts with the environment variables, check the 
 ### ✅ Success - Look for:
 
 ```
-✅ Telegram bot initialized: @prometheus_fire_bot
+✅ Telegram bot initialized: @prometheus_elitebot
 ```
 
 Or:
