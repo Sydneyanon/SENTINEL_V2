@@ -334,22 +334,27 @@ async def startup():
     )
     logger.info("✅ Active token tracker initialized")
     
-    # Initialize PumpPortal monitor
-    logger.info("🔌 Initializing PumpPortal monitor...")
-    pumpportal_monitor = PumpMonitorV2(
-        on_signal_callback=handle_pumpportal_signal,
-        active_tracker=active_tracker  # Pass active tracker
-    )
-    logger.info("✅ PumpPortal monitor initialized")
-    
-    # Wait a bit for everything to stabilize before starting background task
-    logger.info("⏳ Waiting 2 seconds before starting PumpPortal task...")
-    await asyncio.sleep(2)
-    
-    # Start monitoring in background with error handling
-    logger.info("🚨 Creating PumpPortal background task...")
-    asyncio.create_task(start_pumpportal_task())
-    logger.info("✅ PumpPortal monitor task created")
+    # Initialize PumpPortal monitor (OPTIONAL - can be disabled to save resources)
+    if config.DISABLE_PUMPPORTAL:
+        logger.info("⏭️  PumpPortal DISABLED (strict KOL-only mode)")
+        logger.info("   Only tracking tokens from Helius webhook (KOL buys)")
+        pumpportal_monitor = None
+    else:
+        logger.info("🔌 Initializing PumpPortal monitor...")
+        pumpportal_monitor = PumpMonitorV2(
+            on_signal_callback=handle_pumpportal_signal,
+            active_tracker=active_tracker  # Pass active tracker
+        )
+        logger.info("✅ PumpPortal monitor initialized")
+
+        # Wait a bit for everything to stabilize before starting background task
+        logger.info("⏳ Waiting 2 seconds before starting PumpPortal task...")
+        await asyncio.sleep(2)
+
+        # Start monitoring in background with error handling
+        logger.info("🚨 Creating PumpPortal background task...")
+        asyncio.create_task(start_pumpportal_task())
+        logger.info("✅ PumpPortal monitor task created")
     
     # Start holder polling task (NEW!)
     logger.info("🔄 Starting token polling task...")
@@ -364,6 +369,8 @@ async def startup():
     logger.info(f"Min Conviction Score: {config.MIN_CONVICTION_SCORE}/100")
     logger.info(f"Elite Wallets: {len(smart_wallet_tracker.tracked_wallets)} tracked")
     logger.info(f"💰 Data Sources: Helius + Bonding Curve + DexScreener")
+    logger.info(f"⚡ PumpPortal: {'DISABLED' if config.DISABLE_PUMPPORTAL else 'ENABLED'} (saves resources)")
+    logger.info(f"💎 Credit Optimization: {'ENABLED' if config.DISABLE_POLLING_BELOW_THRESHOLD else 'DISABLED'}")
     logger.info(f"Performance Tracking: ✅ Enabled")
     logger.info(f"Milestones: {', '.join(f'{m}x' for m in config.MILESTONES)}")
     logger.info(f"Daily Reports: ✅ Midnight UTC")
