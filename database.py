@@ -93,9 +93,25 @@ class Database:
                     amount REAL,
                     transaction_signature TEXT UNIQUE NOT NULL,
                     timestamp TIMESTAMP NOT NULL,
-                    detected_at TIMESTAMP DEFAULT NOW()
+                    detected_at TIMESTAMP DEFAULT NOW(),
+                    win_rate REAL,
+                    pnl_30d REAL
                 )
             ''')
+
+            # Add win_rate and pnl_30d columns if they don't exist (migration)
+            try:
+                await conn.execute('''
+                    ALTER TABLE smart_wallet_activity
+                    ADD COLUMN IF NOT EXISTS win_rate REAL
+                ''')
+                await conn.execute('''
+                    ALTER TABLE smart_wallet_activity
+                    ADD COLUMN IF NOT EXISTS pnl_30d REAL
+                ''')
+            except Exception as e:
+                # Columns might already exist, ignore
+                pass
             
             # Create indexes separately (PostgreSQL syntax)
             await conn.execute('''
@@ -208,7 +224,7 @@ class Database:
             return [dict(row) for row in rows]
     
     async def insert_smart_wallet_activity(
-        self, 
+        self,
         wallet_address: str,
         wallet_name: str,
         wallet_tier: str,
@@ -216,18 +232,20 @@ class Database:
         transaction_type: str,
         amount: float,
         transaction_signature: str,
-        timestamp: datetime
+        timestamp: datetime,
+        win_rate: Optional[float] = None,
+        pnl_30d: Optional[float] = None
     ):
-        """Record smart wallet activity"""
+        """Record smart wallet activity with KOL metadata"""
         async with self.pool.acquire() as conn:
             await conn.execute('''
-                INSERT INTO smart_wallet_activity 
-                (wallet_address, wallet_name, wallet_tier, token_address, 
-                 transaction_type, amount, transaction_signature, timestamp)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                INSERT INTO smart_wallet_activity
+                (wallet_address, wallet_name, wallet_tier, token_address,
+                 transaction_type, amount, transaction_signature, timestamp, win_rate, pnl_30d)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
                 ON CONFLICT (transaction_signature) DO NOTHING
             ''', wallet_address, wallet_name, wallet_tier, token_address,
-                transaction_type, amount, transaction_signature, timestamp)
+                transaction_type, amount, transaction_signature, timestamp, win_rate, pnl_30d)
     
     async def get_smart_wallet_activity(
         self, 

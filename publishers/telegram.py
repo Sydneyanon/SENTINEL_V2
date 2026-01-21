@@ -136,10 +136,15 @@ class TelegramPublisher:
                 name = wallet.get('name', 'Unknown')
                 tier = wallet.get('tier', '')
                 win_rate = wallet.get('win_rate', 0)
+                pnl_30d = wallet.get('pnl_30d', 0)
                 mins_ago = wallet.get('minutes_ago', 0)
-                
+
                 tier_emoji = "🏆" if tier == 'elite' else "👑"
-                if win_rate > 0:
+
+                # Build wallet line with win rate and optional PnL
+                if win_rate > 0 and pnl_30d > 0:
+                    message += f"{tier_emoji} {name} ({win_rate*100:.0f}% WR, ${pnl_30d/1000:.0f}k PnL) - {mins_ago:.0f}m ago\n"
+                elif win_rate > 0:
                     message += f"{tier_emoji} {name} ({win_rate*100:.0f}% WR) - {mins_ago:.0f}m ago\n"
                 else:
                     message += f"{tier_emoji} {name} - {mins_ago:.0f}m ago\n"
