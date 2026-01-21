@@ -1,12 +1,13 @@
 """
 Conviction Engine - Scores tokens based on multiple signals
-UPDATED: Integrated rug detection (bundle detection + holder concentration)
+UPDATED: Integrated rug detection + LunarCrush social sentiment
 """
 from typing import Dict, Optional
 from datetime import datetime
 from loguru import logger
 import config
 from rug_detector import RugDetector
+from lunarcrush_fetcher import get_lunarcrush_fetcher
 
 
 class ConvictionEngine:
@@ -25,7 +26,7 @@ class ConvictionEngine:
     """
     
     def __init__(
-        self, 
+        self,
         smart_wallet_tracker,
         narrative_detector=None,
         helius_fetcher=None,
@@ -35,9 +36,12 @@ class ConvictionEngine:
         self.narrative_detector = narrative_detector
         self.helius_fetcher = helius_fetcher
         self.active_tracker = active_tracker
-        
+
         # Initialize rug detector
         self.rug_detector = RugDetector(smart_wallet_tracker=smart_wallet_tracker)
+
+        # Initialize LunarCrush fetcher
+        self.lunarcrush = get_lunarcrush_fetcher()
         
     async def analyze_token(
         self, 
@@ -158,7 +162,27 @@ class ConvictionEngine:
             
             mid_total = adjusted_base + unique_buyers_score
             logger.info(f"   💎 MID SCORE: {mid_total}/100")
-            
+
+            # ================================================================
+            # PHASE 3.5: SOCIAL SENTIMENT (LUNARCRUSH) - FREE
+            # ================================================================
+
+            social_score = 0
+            social_data = {}
+
+            if config.ENABLE_LUNARCRUSH:
+                social_data = await self._score_social_sentiment(token_symbol)
+                social_score = social_data.get('score', 0)
+
+                if social_score > 0:
+                    logger.info(f"   🌙 LunarCrush: +{social_score} points")
+                    if social_data.get('is_trending'):
+                        logger.info(f"      📈 TRENDING in top {social_data['trending_rank']}")
+                    if social_data.get('sentiment', 0) > 3.5:
+                        logger.info(f"      😊 Bullish sentiment: {social_data['sentiment']}/5")
+
+            mid_total += social_score
+
             # ================================================================
             # PHASE 4: HOLDER CONCENTRATION CHECK (10 CREDITS) ⭐
             # ================================================================
@@ -230,6 +254,7 @@ class ConvictionEngine:
                     'momentum': base_scores['momentum'],
                     'bundle_penalty': bundle_result['penalty'],
                     'unique_buyers': unique_buyers_score,
+                    'social_sentiment': social_score,
                     'holder_penalty': holder_result['penalty'],
                     'kol_bonus': holder_result['kol_bonus'],
                     'total': final_score
@@ -237,7 +262,8 @@ class ConvictionEngine:
                 'rug_checks': {
                     'bundle': bundle_result,
                     'holder_concentration': holder_result
-                }
+                },
+                'social_data': social_data
             }
             
         except Exception as e:
@@ -283,7 +309,7 @@ class ConvictionEngine:
     def _score_unique_buyers(self, unique_buyers: int) -> int:
         """Score based on unique buyer count (0-15 points)"""
         weights = config.UNIQUE_BUYER_WEIGHTS
-        
+
         if unique_buyers >= 100:
             return weights['exceptional']
         elif unique_buyers >= 70:
@@ -294,3 +320,64 @@ class ConvictionEngine:
             return weights['low']
         else:
             return weights['minimal']
+
+    async def _score_social_sentiment(self, token_symbol: str) -> Dict:
+        """
+        Score based on LunarCrush social sentiment (0-20 points)
+
+        Scoring breakdown:
+        - Trending in top 50: +10 points
+        - Bullish sentiment (>3.5): +5 points
+        - High social volume growth (>50%): +5 points
+
+        Returns:
+            Dict with score and metrics
+        """
+        try:
+            metrics = await self.lunarcrush.get_coin_social_metrics(token_symbol)
+
+            if not metrics:
+                return {'score': 0}
+
+            score = 0
+            is_trending = False
+
+            # 1. Trending bonus (0-10 points)
+            trending_rank = metrics.get('trending_rank', 999)
+            if trending_rank <= 20:
+                score += 10
+                is_trending = True
+            elif trending_rank <= 50:
+                score += 7
+                is_trending = True
+            elif trending_rank <= 100:
+                score += 3
+                is_trending = True
+
+            # 2. Sentiment bonus (0-5 points)
+            sentiment = metrics.get('sentiment', 0)
+            if sentiment >= 4.0:  # Very bullish
+                score += 5
+            elif sentiment >= 3.5:  # Bullish
+                score += 3
+
+            # 3. Social volume growth (0-5 points)
+            volume_change = metrics.get('social_volume_24h_change', 0)
+            if volume_change >= 100:  # 100%+ growth
+                score += 5
+            elif volume_change >= 50:  # 50%+ growth
+                score += 3
+
+            return {
+                'score': score,
+                'is_trending': is_trending,
+                'trending_rank': trending_rank,
+                'sentiment': sentiment,
+                'social_volume': metrics.get('social_volume', 0),
+                'volume_change_24h': volume_change,
+                'galaxy_score': metrics.get('galaxy_score', 0)
+            }
+
+        except Exception as e:
+            logger.error(f"❌ Error scoring social sentiment: {e}")
+            return {'score': 0}

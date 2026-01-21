@@ -1,11 +1,12 @@
 """
-Smart Wallet Tracker - Updated with diagnostic logging for database failures
-REPLACE your current trackers/smart_wallets.py with this version
+Smart Wallet Tracker - Updated with GMGN metadata auto-fetching
+Auto-fetches wallet stats (win_rate, pnl_30d, name) from GMGN.ai via Apify
 """
 from typing import Dict, List
 from datetime import datetime, timedelta
 from loguru import logger
 from data.curated_wallets import get_all_tracked_wallets, get_wallet_info
+from gmgn_wallet_fetcher import get_gmgn_fetcher
 
 
 class SmartWalletTracker:
@@ -113,11 +114,35 @@ class SmartWalletTracker:
         signature: str
     ) -> bool:
         """Record a smart wallet buy. Returns True if saved to DB successfully."""
-        
+
+        # Auto-fetch metadata from GMGN if enabled
+        if wallet_info.get('fetch_metadata', False):
+            gmgn = get_gmgn_fetcher()
+            live_metadata = await gmgn.get_wallet_metadata(wallet_address, chain='sol')
+
+            if live_metadata:
+                # Merge live data with curated data
+                wallet_info = {
+                    **wallet_info,  # Keep tier and fetch_metadata flag
+                    'name': live_metadata['name'],
+                    'win_rate': live_metadata['win_rate'],
+                    'pnl_30d': live_metadata['pnl_30d']
+                }
+                logger.info(f"✅ Auto-fetched metadata: {live_metadata['name']} ({live_metadata['win_rate']*100:.0f}% WR, ${live_metadata['pnl_30d']/1000:.0f}k PnL)")
+            else:
+                logger.warning(f"⚠️ Failed to fetch GMGN metadata for {wallet_address[:8]}, using defaults")
+                # Use fallback values
+                wallet_info = {
+                    **wallet_info,
+                    'name': wallet_info.get('name') or f"KOL_{wallet_address[:6]}",
+                    'win_rate': wallet_info.get('win_rate', 0),
+                    'pnl_30d': wallet_info.get('pnl_30d', 0)
+                }
+
         # Add to in-memory cache ALWAYS (this is fast)
         if token_address not in self.recent_buys:
             self.recent_buys[token_address] = []
-        
+
         self.recent_buys[token_address].append({
             'wallet': wallet_address,
             'name': wallet_info['name'],

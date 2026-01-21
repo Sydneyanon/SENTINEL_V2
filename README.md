@@ -11,9 +11,10 @@ sentinel-v2/
 ├── main.py                      # FastAPI app with webhooks
 ├── config.py                    # Centralized configuration
 ├── database.py                  # Database models
+├── gmgn_wallet_fetcher.py      # GMGN metadata auto-fetcher
 │
 ├── data/
-│   └── curated_wallets.py      # 20 elite + KOL wallets
+│   └── curated_wallets.py      # 36 KOL wallets
 │
 ├── trackers/
 │   ├── smart_wallets.py        # Smart wallet webhook handler
@@ -73,6 +74,14 @@ DATABASE_URL=postgresql://...
 HELIUS_API_KEY=your_helius_api_key
 DEXSCREENER_API_KEY=your_dexscreener_api_key
 
+# GMGN Wallet Metadata (Optional - for live win_rate & PnL data)
+# Get free account at https://apify.com
+APIFY_API_TOKEN=your_apify_token
+
+# LunarCrush Social Sentiment (Optional - for X/Twitter trending data)
+# Get free API key at https://lunarcrush.com/developers/api
+LUNARCRUSH_API_KEY=your_lunarcrush_key
+
 # Telegram
 TELEGRAM_BOT_TOKEN=your_bot_token
 TELEGRAM_CHANNEL_ID=@your_channel
@@ -102,6 +111,61 @@ The app will start on `http://localhost:8000`
 
 ---
 
+## 🤖 GMGN Wallet Metadata Auto-Fetching
+
+The bot now automatically fetches live wallet stats (win_rate, pnl_30d, wallet name) from **GMGN.ai** via Apify when KOLs buy tokens.
+
+### **How It Works:**
+
+1. **Wallet buys in** → System checks if `fetch_metadata: True` in curated_wallets.py
+2. **Auto-fetch from GMGN** → Pulls live win_rate, PnL, and wallet name via Apify REST API
+3. **Cache for 6 hours** → Avoids excessive API calls, keeps data relatively fresh
+4. **Display in Telegram** → Shows `🔥 WalletName (75% WR, $52k PnL) bought 5m ago`
+
+### **Setup Apify (Free Tier):**
+
+1. Sign up at https://apify.com (free tier available)
+2. Get your API token from Account → Integrations
+3. Add to Railway env: `APIFY_API_TOKEN=apify_api_xxxxx`
+
+**Without Apify token:** Bot still works, but wallet metadata will be generic placeholders.
+
+**Cost:** Apify free tier includes 100 actor runs/month - plenty for 36 wallets with 6-hour caching.
+
+---
+
+## 🌙 LunarCrush Social Sentiment
+
+The bot integrates with **LunarCrush** to cross-reference social data with token signals.
+
+### **How It Works:**
+
+1. **Token signal generated** → Check if trending on X/Twitter via LunarCrush
+2. **Social metrics** → Galaxy Score, sentiment, social volume, trending rank
+3. **Bonus points** → Up to +20 points for trending tokens with bullish sentiment
+4. **Exit signals** → Detect when social hype is cooling (future feature)
+
+### **Scoring Breakdown:**
+
+- **Trending in top 20:** +10 points
+- **Bullish sentiment (>3.5/5):** +5 points
+- **High social volume growth (>50%):** +5 points
+
+### **Setup LunarCrush (Free Tier):**
+
+1. Sign up at https://lunarcrush.com/developers/api
+2. Get your free API key (1000 requests/day)
+3. Add to Railway env: `LUNARCRUSH_API_KEY=your_key`
+
+**Without LunarCrush:** Bot still works, social scoring disabled (0 points).
+
+**Use Cases:**
+- Cross-validate KOL buys with X/Twitter buzz
+- Detect trending narratives in real-time
+- Exit when sentiment cools (Ralph can test this)
+
+---
+
 ## 📡 Helius Webhooks Setup
 
 You need **2 webhooks** in your Helius dashboard:
@@ -113,31 +177,47 @@ You need **2 webhooks** in your Helius dashboard:
 - **Transaction Type**: Any
 - **Webhook URL**: `https://your-app.up.railway.app/webhook/graduation`
 
-### **Webhook 2: Smart Wallets** 
+### **Webhook 2: Smart Wallets**
 
-- **Type**: Enhanced Transactions  
-- **Addresses**: (All 20 addresses from `data/curated_wallets.py`)
+- **Type**: Enhanced Transactions
+- **Addresses**: (All 36 addresses from `data/curated_wallets.py`)
 ```
-9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM
-H7vNP4r7cNnA2tLWYCEtZhyPBn3n7FfFo7MsEk3qYK5U
-FjqQAQ8fmE3F5t7KJ9UxV5YcP8NmG3rZwTsN2D4vHk8L
-3jK5r9mN8tF7hP2vQ6xL4bY8sW1nC5dR9mT7kH6jP3wX
-2sR7tK9nM5gH3pL8vX6bF4yQ7wD1cT9mP5kN8jH4rY2W
-8xT4wK2nP7gL5mV9bN3sH6yR1cF8dQ5pM2jK7tL9nW3X
-5mN8tH3gP2vL7kR9bX4wF6yQ1sD3cK8pT5jM7nH9rY2W
-7gL5mV9bN3sH6yR1cF8dQ5pM2jK7tL9nW3X4wK2nP8xT
-CyaE1VxvBrahnPWkqm5VsdCvyS2QmNht2UFrKJHga54o
-8Dg8J8xSeKqtBvL1nBe9waX348w5FSFjVnQaRLMpf7eV
-Be24Gbf5KisDk1LcWWZsBn8dvB816By7YzYF5zWZnRR6
-4BdKaxN8G6ka4GYtQQWk4G4dZRUTX2vQH9GcXdBREFUk
-2fg5QD1eD7rzNNCsvnhmXFm5hqNgwTTG8p7kQ6f3rx6f
-FAicXNV5FVqtfbpn4Zccs71XcfGeyxBSGbqLDyDJZjke
-DYAn4XpAkN5mhiXkRB7dGq4Jadnx6XYgu8L5b3WGhbrt
-GJA1HEbxGnqBhBifH9uQauzXSB53to5rhDrzmKxhSU65
-G6fUXjMKPJzCY1rveAE6Qm7wy5U3vZgKDJmN1VPAdiZC
+3kebnKw7cPdSkLRfiMEALyZJGZ4wdiSRvmoN4rD1yPzV
 57rXqaQsvgyBKwebP2StfqQeCBjBS4jsrZFJN5aU2V9b
-4mN7tK8gP3vL6kR8bX5wF7yQ2sD4cK9pT6jM8nH0rY3W
-6gL4mV8bN2sH5yR0cF7dQ4pM1jK6tL8nW2X3wK1nP7xT
+FAicXNV5FVqtfbpn4Zccs71XcfGeyxBSGbqLDyDJZjke
+Bi4rd5FH5bYEN8scZ7wevxNZyNmKHdaBcvewdPFxYdLt
+G6fUXjMKPJzCY1rveAE6Qm7wy5U3vZgKDJmN1VPAdiZC
+Be24Gbf5KisDk1LcWWZsBn8dvB816By7YzYF5zWZnRR6
+GJA1HEbxGnqBhBifH9uQauzXSB53to5rhDrzmKxhSU65
+F5jWYuiDLTiaLYa54D88YbpXgEsA6NKHzWy4SN4bMYjt
+4vw54BmAogeRV3vPKWyFet5yf8DTLcREzdSzx4rw9Ud9
+CA4keXLtGJWBcsWivjtMFBghQ8pFsGRWFxLrRCtirzu5
+JAmx4Wsh7cWXRzQuVt3TCKAyDfRm9HA7ztJa4f7RM8h9
+2net6etAtTe3Rbq2gKECmQwnzcKVXRaLcHy2Zy1iCiWz
+gangJEP5geDHjPVRhDS5dTF5e6GtRvtNogMEEVs91RV
+5sNnKuWKUtZkdC1eFNyqz3XHpNoCRQ1D1DfHcNHMV7gn
+39q2g5tTQn9n7KnuapzwS2smSx3NGYqBoea11tBjsGEt
+G3gZWqrYkNmYFKYCyfRCNtGuxdyuE2wiYKkZpiZn4WSS
+215nhcAHjQQGgwpQSJQ7zR26etbjjtVdW74NLzwEgQjP
+EeXvxkcGqMDZeTaVeawzxm9mbzZwqDUMmfG3bF7uzumH
+4nvNc7dDEqKKLM4Sr9Kgk3t1of6f8G66kT64VoC95LYh
+4fZFcK8ms3bFMpo1ACzEUz8bH741fQW4zhAMGd5yZMHu
+6mWEJG9LoRdto8TwTdZxmnJpkXpTsEerizcGiCNZvzXd
+zhYnXqK3MNSmwS3yxSvPmY5kUa1n2WUaCJgYUDrAHkL
+9RrKUhRpbPDNxR7x88ZsCgdtqPHUfwYPjj4JdpV4FBj9
+5B52w1ZW9tuwUduueP5J7HXz5AcGfruGoX6YoAudvyxG
+BTf4A2exGK9BCVDNzy65b9dUzXgMqB4weVkvTMFQsadd
+DYAn4XpAkN5mhiXkRB7dGq4Jadnx6XYgu8L5b3WGhbrt
+sAdNbe1cKNMDqDsa4npB3TfL62T14uAo2MsUQfLvzLT
+GNrmKZCxYyNiSUsjduwwPJzhed3LATjciiKVuSGrsHEC
+DZAa55HwXgv5hStwaTEJGXZz1DhHejvpb7Yr762urXam
+PMJA8UQDyWTFw2Smhyp9jGA6aTaP7jKHR7BPudrgyYN
+BaLxyjXzATAnfm7cc5AFhWBpiwnsb71THcnofDLTWAPK
+CxgPWvH2GoEDENELne2XKAR2z2Fr4shG2uaeyqZceGve
+8oQoMhfBQnRspn7QtNAq2aPThRE4q94kLSTwaaFQvRgs
+87rRdssFiTJKY4MGARa4G5vQ31hmR7MxSmhzeaJ5AAxJ
+5B79fMkcFeRTiwm7ehsZsFiKsC7m7n1Bgv9yLxPp9q2X
+AAMnoNo3TpezKcT7ah9puLFZ4D59muEhQHJJqpX16ccg
 ```
 - **Transaction Type**: Any
 - **Webhook URL**: `https://your-app.up.railway.app/webhook/smart-wallet`
