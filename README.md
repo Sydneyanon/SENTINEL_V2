@@ -16,7 +16,7 @@ sentinel-v2/
 ├── data/
 │   └── curated_wallets.py      # 36 KOL wallets
 │
-├── trackers/
+├── trackers/ 
 │   ├── smart_wallets.py        # Smart wallet webhook handler
 │   └── narrative_detector.py   # Narrative analysis
 │
