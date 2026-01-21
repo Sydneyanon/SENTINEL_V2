@@ -86,6 +86,99 @@
       "passes": false,
       "notes": "",
       "baseline_metrics": {}
+    },
+    {
+      "id": "OPT-006",
+      "title": "Build on-chain data pipeline for proprietary signals",
+      "description": "As a system, I want real-time Solana on-chain data to detect smart money moves before public APIs",
+      "acceptanceCriteria": [
+        "Implement Helius Geyser websocket streamer for new token launches (Pump.fun)",
+        "Store 10k+ transactions to database (wallet, token, amount, timestamp)",
+        "Add data processing: cluster wallets by behavior (early buyers, quick flippers)",
+        "Create new signal source: 'on_chain_clusters' in conviction engine",
+        "Monitor for 4 hours",
+        "Keep if discovers 1+ high-performing wallet not in curated list",
+        "Commit streaming code + database schema"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": "Grok idea: Build data moat with on-chain streaming",
+      "baseline_metrics": {}
+    },
+    {
+      "id": "OPT-007",
+      "title": "Add RSS narrative detection with BERTopic ML",
+      "description": "As a narrative detector, I want to discover emerging narratives from crypto news without X API costs",
+      "acceptanceCriteria": [
+        "Implement RSS feed ingestion: CoinDesk, CoinTelegraph, Decrypt (free)",
+        "Add BERTopic clustering: hourly analysis for topic trends",
+        "Detect 'emerging' narratives: new clusters with >5 mentions in 24h",
+        "Add Reddit PRAW scraper for r/Solana hot posts (optional)",
+        "Auto-update HOT_NARRATIVES in config.py with discovered topics",
+        "Monitor for 24 hours",
+        "Keep if discovers 1+ narrative that generates successful signal",
+        "Commit RSS pipeline + BERTopic model"
+      ],
+      "priority": 7,
+      "passes": false,
+      "notes": "Grok idea: Free narrative data via RSS + ML clustering",
+      "baseline_metrics": {}
+    },
+    {
+      "id": "OPT-008",
+      "title": "ML-powered smart wallet discovery from on-chain data",
+      "description": "As a wallet curator, I want ML to automatically find high-alpha wallets from transaction patterns",
+      "acceptanceCriteria": [
+        "Query Dune/Helius for Solana traders: 100+ trades, meme focus",
+        "Extract features: win_rate, avg_roi, hold_time, entry_timing, trade_frequency",
+        "Train scikit-learn classifier: 'smart' = win_rate>70% AND avg_roi>50%",
+        "Apply to unlabeled wallets: predict top 20 candidates",
+        "Add top 5 to curated_wallets.py as 'ml_discovered' tier",
+        "Monitor for 7 days",
+        "Keep if ML wallets generate 2+ successful signals",
+        "Commit ML model + discovered wallets"
+      ],
+      "priority": 8,
+      "passes": false,
+      "notes": "Grok idea: Proprietary smart wallet list via ML clustering",
+      "baseline_metrics": {}
+    },
+    {
+      "id": "OPT-009",
+      "title": "Build backtesting framework for strategy validation",
+      "description": "As a system, I want to validate optimizations on historical data before deploying",
+      "acceptanceCriteria": [
+        "Create backtesting engine: replay historical signals from database",
+        "Simulate conviction scoring with different thresholds/weights",
+        "Measure historical ROI, win_rate, drawdowns for each config",
+        "Add test suite: backtest OPT-001 through OPT-005 on last 30 days",
+        "Generate report: best config = highest Sharpe ratio",
+        "Integrate into ralph/collect_metrics.py for future optimizations",
+        "Commit backtesting framework"
+      ],
+      "priority": 9,
+      "passes": false,
+      "notes": "Grok idea: Backtest optimizations before live deploy",
+      "baseline_metrics": {}
+    },
+    {
+      "id": "OPT-010",
+      "title": "Add dynamic risk management with ML exit strategies",
+      "description": "As a trader, I want automated TP/SL that adapts to volatility and market conditions",
+      "acceptanceCriteria": [
+        "Implement volatility calculation: rolling std dev from price data",
+        "Train ML model for dynamic exits: features (volatility, volume_spike, holder_growth)",
+        "Add adaptive trailing stop: tighter in high volatility, wider in calm markets",
+        "Create exit signal generator in conviction_engine.py",
+        "Backtest on 100 historical signals: measure improvement in avg_roi",
+        "Monitor live for 7 days",
+        "Keep if avg_roi improves >15% or max drawdown reduces >20%",
+        "Commit ML exit model + integration"
+      ],
+      "priority": 10,
+      "passes": false,
+      "notes": "Grok idea: ML-powered dynamic TP/SL for better exits",
+      "baseline_metrics": {}
     }
   ]
 }
