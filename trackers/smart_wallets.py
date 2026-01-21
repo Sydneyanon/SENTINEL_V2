@@ -71,8 +71,9 @@ class SmartWalletTracker:
             if fee_payer not in self.tracked_wallets:
                 logger.debug(f"⏭️  Skipping non-tracked wallet: {fee_payer[:8]}...")
                 return
-            
-            wallet_info = get_wallet_info(fee_payer)
+
+            # Get wallet info from tracked wallets (has enriched names with fallbacks)
+            wallet_info = self.tracked_wallets[fee_payer]
             if not wallet_info:
                 logger.warning(f"⚠️ No wallet info for tracked wallet: {fee_payer[:8]}")
                 return
