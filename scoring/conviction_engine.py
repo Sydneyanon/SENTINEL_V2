@@ -135,33 +135,34 @@ class ConvictionEngine:
                         logger.info(f"      {bundle_result['reason']}")
             
             adjusted_base = base_total + bundle_result['penalty']
-            
-            # Early exit if base + bundle penalty too low
-            if adjusted_base < 50:
-                logger.info(f"   ⏭️  Base+Bundle: {adjusted_base}/100 - Too low for further analysis")
-                return {
-                    'score': adjusted_base,
-                    'passed': False,
-                    'reason': 'Base score + bundle penalty too low',
-                    'breakdown': {
-                        **base_scores,
-                        'bundle_penalty': bundle_result['penalty'],
-                        'total': adjusted_base
-                    }
-                }
-            
+
             # ================================================================
             # PHASE 3: UNIQUE BUYERS (FREE)
             # ================================================================
-            
+
             unique_buyers_score = 0
             if self.active_tracker:
                 unique_buyers = len(self.active_tracker.unique_buyers.get(token_address, set()))
                 unique_buyers_score = self._score_unique_buyers(unique_buyers)
                 logger.info(f"   👥 Unique Buyers ({unique_buyers}): {unique_buyers_score} points")
-            
+
             mid_total = adjusted_base + unique_buyers_score
             logger.info(f"   💎 MID SCORE: {mid_total}/100")
+
+            # Early exit if mid score (base + bundle + unique buyers) too low
+            if mid_total < 50:
+                logger.info(f"   ⏭️  Mid Score: {mid_total}/100 - Too low for further analysis")
+                return {
+                    'score': mid_total,
+                    'passed': False,
+                    'reason': 'Score too low after unique buyers',
+                    'breakdown': {
+                        **base_scores,
+                        'bundle_penalty': bundle_result['penalty'],
+                        'unique_buyers': unique_buyers_score,
+                        'total': mid_total
+                    }
+                }
 
             # ================================================================
             # PHASE 3.5: SOCIAL SENTIMENT (LUNARCRUSH) - FREE
