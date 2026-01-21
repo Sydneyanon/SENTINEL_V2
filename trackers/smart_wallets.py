@@ -288,14 +288,23 @@ class SmartWalletTracker:
         # Count by tier
         elite_count = sum(1 for w in unique_wallets.values() if w['tier'] == 'elite')
         top_kol_count = sum(1 for w in unique_wallets.values() if w['tier'] == 'top_kol')
-        
+        other_count = len(unique_wallets) - elite_count - top_kol_count
+
+        # Debug: Show tier breakdown
+        if other_count > 0:
+            logger.warning(f"📊 Tier breakdown for {token_address[:8]}:")
+            logger.warning(f"   Elite: {elite_count}, Top KOLs: {top_kol_count}, Other/Unknown: {other_count}")
+            for addr, info in unique_wallets.items():
+                if info['tier'] not in ['elite', 'top_kol']:
+                    logger.warning(f"   ⚠️ {addr[:8]} has tier='{info['tier']}' (should be 'top_kol')")
+
         # Calculate score (use your config weights)
         from config import WEIGHTS
         score = 0
         score += elite_count * WEIGHTS.get('smart_wallet_elite', 15)
         score += top_kol_count * WEIGHTS.get('smart_wallet_kol', 10)
         score = min(score, 40)  # Cap at 40
-        
+
         logger.debug(f"📊 Smart wallet score for {token_address[:8]}: {score} points")
         logger.debug(f"   Elite: {elite_count}, Top KOLs: {top_kol_count}")
         
