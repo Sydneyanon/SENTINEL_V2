@@ -78,6 +78,10 @@ DEXSCREENER_API_KEY=your_dexscreener_api_key
 # Get free account at https://apify.com
 APIFY_API_TOKEN=your_apify_token
 
+# LunarCrush Social Sentiment (Optional - for X/Twitter trending data)
+# Get free API key at https://lunarcrush.com/developers/api
+LUNARCRUSH_API_KEY=your_lunarcrush_key
+
 # Telegram
 TELEGRAM_BOT_TOKEN=your_bot_token
 TELEGRAM_CHANNEL_ID=@your_channel
@@ -127,6 +131,38 @@ The bot now automatically fetches live wallet stats (win_rate, pnl_30d, wallet n
 **Without Apify token:** Bot still works, but wallet metadata will be generic placeholders.
 
 **Cost:** Apify free tier includes 100 actor runs/month - plenty for 36 wallets with 6-hour caching.
+
+---
+
+## 🌙 LunarCrush Social Sentiment
+
+The bot integrates with **LunarCrush** to cross-reference social data with token signals.
+
+### **How It Works:**
+
+1. **Token signal generated** → Check if trending on X/Twitter via LunarCrush
+2. **Social metrics** → Galaxy Score, sentiment, social volume, trending rank
+3. **Bonus points** → Up to +20 points for trending tokens with bullish sentiment
+4. **Exit signals** → Detect when social hype is cooling (future feature)
+
+### **Scoring Breakdown:**
+
+- **Trending in top 20:** +10 points
+- **Bullish sentiment (>3.5/5):** +5 points
+- **High social volume growth (>50%):** +5 points
+
+### **Setup LunarCrush (Free Tier):**
+
+1. Sign up at https://lunarcrush.com/developers/api
+2. Get your free API key (1000 requests/day)
+3. Add to Railway env: `LUNARCRUSH_API_KEY=your_key`
+
+**Without LunarCrush:** Bot still works, social scoring disabled (0 points).
+
+**Use Cases:**
+- Cross-validate KOL buys with X/Twitter buzz
+- Detect trending narratives in real-time
+- Exit when sentiment cools (Ralph can test this)
 
 ---
 

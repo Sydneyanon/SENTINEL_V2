@@ -311,6 +311,7 @@ LOG_FILE = "prometheus.log"
 ENABLE_NARRATIVES = False   # Narrative detection (disabled for now)
 ENABLE_PERFORMANCE_TRACKING = True
 ENABLE_MILESTONE_ALERTS = True
+ENABLE_LUNARCRUSH = True    # Social sentiment via LunarCrush API
 
 # =============================================================================
 # NARRATIVE DETECTION (2026 HOT TRENDS)
