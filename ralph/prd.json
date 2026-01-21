@@ -220,6 +220,104 @@
       "passes": false,
       "notes": "Meta-learning: Learn what conditions = high mcap. Features: holders%, volume, KOLs, narratives, momentum, etc.",
       "baseline_metrics": {}
+    },
+    {
+      "id": "OPT-013",
+      "title": "Auto-detect and fix runtime errors from Railway logs",
+      "description": "As a self-healing system, I want to detect errors in Railway logs and automatically fix them",
+      "acceptanceCriteria": [
+        "Implement Railway API log fetcher: pull last 1000 lines of logs",
+        "Parse for error patterns: 'ERROR', 'Exception', 'Failed', 'Traceback'",
+        "Classify errors: API failures, data parsing, missing data, timeouts",
+        "For each error type, implement fix: add try/catch, add validation, add fallbacks",
+        "Test fixes locally, then deploy to Railway",
+        "Monitor for 2 hours to ensure error rate drops",
+        "Keep if error count decreases >50%",
+        "Commit fixes with error analysis in commit message"
+      ],
+      "priority": 13,
+      "passes": false,
+      "notes": "User request: Ralph should fix errors automatically. High priority!",
+      "baseline_metrics": {}
+    },
+    {
+      "id": "OPT-014",
+      "title": "Optimize metadata collection (name, symbol, description)",
+      "description": "As a data pipeline, I want faster and more reliable token metadata without wasting credits",
+      "acceptanceCriteria": [
+        "Audit current metadata sources: Helius DAS API, bonding curve, DexScreener",
+        "Measure success rate and latency for each source",
+        "Add fallback chain: Helius → DexScreener → Jupiter API → Solscan",
+        "Implement 24h cache for token metadata (Redis or in-memory)",
+        "Add parallel fetching: fetch metadata + price + holders simultaneously",
+        "Monitor for 2 hours",
+        "Keep if metadata fetch success rate >95% and latency <500ms",
+        "Commit optimized metadata pipeline"
+      ],
+      "priority": 14,
+      "passes": false,
+      "notes": "User request: Optimize metadata collection. Name/symbol often missing.",
+      "baseline_metrics": {}
+    },
+    {
+      "id": "OPT-015",
+      "title": "Optimize price data fetching (reduce 'No price data' errors)",
+      "description": "As a pricing system, I want accurate prices from multiple sources with smart fallbacks",
+      "acceptanceCriteria": [
+        "Audit price sources: bonding curve decoder, DexScreener, Jupiter, Raydium",
+        "Measure success rate per source and avg price accuracy",
+        "Implement weighted price aggregation: average prices from multiple sources",
+        "Add staleness detection: reject prices >5 minutes old",
+        "Implement price cache: 30s TTL to reduce API calls",
+        "Add sanity checks: reject outliers (price changes >500% in 1 min)",
+        "Monitor for 2 hours",
+        "Keep if 'No price data' errors drop >80%",
+        "Commit improved price pipeline"
+      ],
+      "priority": 15,
+      "passes": false,
+      "notes": "User request: Fix price fetching. Often shows 'No price data available'.",
+      "baseline_metrics": {}
+    },
+    {
+      "id": "OPT-016",
+      "title": "Track and optimize KOL performance (win rate, ROI, accuracy)",
+      "description": "As a wallet curator, I want to track which KOLs are actually making money and adjust scoring",
+      "acceptanceCriteria": [
+        "For each KOL wallet, track: tokens bought, outcomes (rug/2x/10x/50x+), win_rate, avg_roi",
+        "Store to database: kol_performance table with weekly aggregates",
+        "Auto-demote KOLs with <50% win rate after 20+ trades",
+        "Auto-promote wallets with >75% win rate + >3x avg ROI",
+        "Adjust scoring weights: high-performing KOLs get +15 pts, low-performers get +5 pts",
+        "Create /kol-leaderboard command: show top 10 KOLs by performance",
+        "Monitor for 7 days",
+        "Keep if signal quality improves >10%",
+        "Commit KOL performance tracking system"
+      ],
+      "priority": 16,
+      "passes": false,
+      "notes": "User request: Track KOL win rates and optimize scoring based on actual performance.",
+      "baseline_metrics": {}
+    },
+    {
+      "id": "OPT-017",
+      "title": "Auto-tune scoring weights with ML gradient descent",
+      "description": "As a self-optimizing system, I want to learn optimal scoring weights from historical data",
+      "acceptanceCriteria": [
+        "Extract last 100 signals from database with outcomes (rug/2x/10x/etc)",
+        "Current weights: smart_wallet=40, narrative=25, holders=15, volume=10, momentum=10",
+        "Train ML model (gradient descent) to predict outcome from feature scores",
+        "Find optimal weights that maximize 10x+ predictions while minimizing rugs",
+        "Test on validation set: compare old weights vs new weights",
+        "Apply new weights to config.py",
+        "Monitor for 3 days",
+        "Keep if 10x+ rate improves >20% OR rug rate drops >30%",
+        "Commit optimized weights with ML analysis report"
+      ],
+      "priority": 17,
+      "passes": false,
+      "notes": "User request: Optimize scoring algorithm. Let ML find best weights.",
+      "baseline_metrics": {}
     }
   ]
 }

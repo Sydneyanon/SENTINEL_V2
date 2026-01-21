@@ -237,6 +237,10 @@ class Database:
         pnl_30d: Optional[float] = None
     ):
         """Record smart wallet activity with KOL metadata"""
+        # Handle None wallet_name (database has NOT NULL constraint)
+        if wallet_name is None:
+            wallet_name = f"KOL_{wallet_address[:8]}"
+
         async with self.pool.acquire() as conn:
             await conn.execute('''
                 INSERT INTO smart_wallet_activity
