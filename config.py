@@ -28,10 +28,10 @@ ENABLE_TELEGRAM = True  # Enable Telegram posting
 # When False: Also processes PumpPortal graduations (burns credits fast!)
 STRICT_KOL_ONLY_MODE = True  # ← SET TO TRUE TO SAVE CREDITS!
 
-# Disable PumpPortal entirely (saves CPU/memory, we only need Helius webhooks!)
-# When True: Skip PumpPortal WebSocket entirely
-# When False: Connect to PumpPortal (uses resources, not needed in strict mode)
-DISABLE_PUMPPORTAL = True  # ← SET TO TRUE TO SAVE RESOURCES!
+# Disable PumpPortal entirely (saves CPU/memory)
+# When True: Skip PumpPortal WebSocket entirely (Helius webhooks only)
+# When False: Connect to PumpPortal for FREE unique buyers + KOL detection
+DISABLE_PUMPPORTAL = False  # ← RE-ENABLED for unique buyers + KOL trade detection!
 
 # Disable polling for tokens below threshold (saves credits)
 DISABLE_POLLING_BELOW_THRESHOLD = True  # Only poll tokens >= 50 conviction

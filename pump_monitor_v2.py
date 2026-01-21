@@ -1,6 +1,7 @@
 """
 PumpPortal Monitor V2 - Real-time pump.fun bonding curve tracking
 UPDATED: Now tracks unique buyers for FREE pre-graduation distribution scoring
+         + Detects KOL trades from PumpPortal and logs with names
 """
 import asyncio
 import json
@@ -9,6 +10,7 @@ from datetime import datetime
 import websockets
 import aiohttp
 from loguru import logger
+from data.curated_wallets import get_wallet_info
 
 class PumpMonitorV2:
     """Monitors pump.fun tokens via PumpPortal WebSocket"""
@@ -155,13 +157,26 @@ class PumpMonitorV2:
         
         # NEW: Track unique buyers (only buys, not sells)
         if tx_type == 'buy' and trader_wallet:
+            # Track locally in PumpPortal
             if token_address not in self.unique_buyers:
                 self.unique_buyers[token_address] = set()
                 self.buyer_tracking_start[token_address] = datetime.now()
-            
-            # Add to set (automatically deduplicates)
             self.unique_buyers[token_address].add(trader_wallet)
-            
+
+            # CRITICAL: Sync to active_tracker for conviction scoring
+            if self.active_tracker:
+                if token_address not in self.active_tracker.unique_buyers:
+                    self.active_tracker.unique_buyers[token_address] = set()
+                self.active_tracker.unique_buyers[token_address].add(trader_wallet)
+
+            # NEW: Check if this trader is a KOL from our list
+            kol_info = get_wallet_info(trader_wallet)
+            if kol_info:
+                buyer_count = len(self.unique_buyers[token_address])
+                tier_emoji = "🏆" if kol_info['tier'] == 'elite' else "👑" if kol_info['tier'] == 'top_kol' else "✅"
+                symbol = data.get('symbol', token_address[:8])
+                logger.info(f"{tier_emoji} {kol_info['name']} ({kol_info['tier']}) bought ${symbol} on PumpPortal ({buyer_count} unique buyers)")
+
             # Log milestone buyer counts
             buyer_count = len(self.unique_buyers[token_address])
             if buyer_count in [10, 25, 50, 75, 100]:
