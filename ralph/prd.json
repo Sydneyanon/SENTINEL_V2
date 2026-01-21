@@ -1,0 +1,91 @@
+{
+  "project": "Prometheus Signals Bot",
+  "branchName": "ralph/optimize-v1",
+  "description": "Autonomous optimization of Prometheus memecoin signals bot",
+  "userStories": [
+    {
+      "id": "OPT-001",
+      "title": "Optimize conviction score threshold",
+      "description": "As a trader, I want higher quality signals by tuning the minimum conviction threshold",
+      "acceptanceCriteria": [
+        "Test conviction thresholds: 65, 70, 75, 80",
+        "Monitor for 2 hours after deploy to Railway",
+        "Measure: signal count, avg ROI, false positive rate",
+        "Keep threshold that maximizes (ROI * signal_count) while keeping false positives < 30%",
+        "Update config.py with optimal value",
+        "Commit if metrics improve by >10%"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "",
+      "baseline_metrics": {}
+    },
+    {
+      "id": "OPT-002",
+      "title": "Reduce Helius API credit waste",
+      "description": "As an operator, I want to minimize Helius credit usage without sacrificing signal quality",
+      "acceptanceCriteria": [
+        "Identify top 3 credit-consuming operations from logs",
+        "Increase caching TTL for holder checks (60min → 120min)",
+        "Monitor credit usage for 2 hours",
+        "Ensure signal quality doesn't drop >5%",
+        "Commit if credits reduced by >20%"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "",
+      "baseline_metrics": {}
+    },
+    {
+      "id": "OPT-003",
+      "title": "Auto-discover high-performing wallets",
+      "description": "As a system, I want to automatically add wallets that consistently call winners",
+      "acceptanceCriteria": [
+        "Query database for wallets that appeared in 3+ successful signals (>2x ROI)",
+        "Filter for win rate >70%",
+        "Add top 5 to curated_wallets.py as 'discovered' tier",
+        "Monitor for 4 hours",
+        "Keep if new wallets generate >1 successful signal",
+        "Commit wallet additions with performance data"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": "",
+      "baseline_metrics": {}
+    },
+    {
+      "id": "OPT-004",
+      "title": "Tune bundle detection penalties",
+      "description": "As a filter, I want optimal bundle penalties that catch rugs without false positives",
+      "acceptanceCriteria": [
+        "Test bundle penalty values: -10, -15, -20 for minor bundles",
+        "Monitor rug detection accuracy for 2 hours",
+        "Measure: rugs caught, false positives (organic pumps blocked)",
+        "Optimize for max rugs caught with <10% false positive rate",
+        "Update RUG_DETECTION config",
+        "Commit if rug catch rate improves >15%"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": "",
+      "baseline_metrics": {}
+    },
+    {
+      "id": "OPT-005",
+      "title": "Build ML prediction layer",
+      "description": "As a system, I want to learn from historical signals to predict success",
+      "acceptanceCriteria": [
+        "Extract features from database: smart_wallet_count, narrative_match, holder_concentration, volume_ratio",
+        "Train simple logistic regression on historical signals (target: 2x+ ROI)",
+        "Add ML score as bonus points (0-10) in conviction_engine.py",
+        "Monitor for 4 hours",
+        "Keep if signal success rate improves >10%",
+        "Commit model weights and integration code"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": "",
+      "baseline_metrics": {}
+    }
+  ]
+}
