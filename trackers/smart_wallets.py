@@ -123,6 +123,7 @@ class SmartWalletTracker:
             'name': wallet_info['name'],
             'tier': wallet_info['tier'],
             'win_rate': wallet_info.get('win_rate', 0),
+            'pnl_30d': wallet_info.get('pnl_30d', 0),
             'amount': amount,
             'timestamp': timestamp,
             'signature': signature
@@ -146,7 +147,7 @@ class SmartWalletTracker:
             logger.debug(f"   Token: {token_address}")
             logger.debug(f"   Signature: {signature}")
             
-            # Call the database insert method (using existing method name)
+            # Call the database insert method with KOL metadata
             await self.db.insert_smart_wallet_activity(
                 wallet_address=wallet_address,
                 wallet_name=wallet_info['name'],
@@ -155,7 +156,9 @@ class SmartWalletTracker:
                 transaction_type='buy',  # Always 'buy' for KOL purchases
                 amount=amount,
                 transaction_signature=signature,
-                timestamp=timestamp
+                timestamp=timestamp,
+                win_rate=wallet_info.get('win_rate'),  # Save win rate from curated_wallets
+                pnl_30d=wallet_info.get('pnl_30d')     # Save 30d PnL from curated_wallets
             )
             
             self.save_successes += 1
@@ -211,7 +214,8 @@ class SmartWalletTracker:
                         'wallet': row['wallet_address'],
                         'name': row['wallet_name'],
                         'tier': row['wallet_tier'],
-                        'win_rate': 0,
+                        'win_rate': row.get('win_rate', 0),  # Get from DB or default to 0
+                        'pnl_30d': row.get('pnl_30d', 0),    # Get from DB or default to 0
                         'amount': row['amount'],
                         'timestamp': row['timestamp'],
                         'signature': row['transaction_signature']
@@ -245,6 +249,7 @@ class SmartWalletTracker:
                     'name': buy['name'],
                     'tier': buy['tier'],
                     'win_rate': buy.get('win_rate', 0),
+                    'pnl_30d': buy.get('pnl_30d', 0),
                     'first_buy': buy['timestamp'],
                     'amount': buy['amount']
                 }
