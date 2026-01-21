@@ -34,15 +34,18 @@ class ActiveTokenTracker:
         self.telegram_publisher = telegram_publisher
         self.db = db
         self.helius_fetcher = helius_fetcher
-        
+
         # Active tokens being tracked
         self.tracked_tokens: Dict[str, TokenState] = {}
-        
+
+        # Unique buyer tracking (for conviction scoring)
+        self.unique_buyers: Dict[str, Set[str]] = {}  # {token_address: set(buyer_wallets)}
+
         # Metrics
         self.tokens_tracked_total = 0
         self.signals_sent_total = 0
         self.reanalyses_total = 0
-        
+
         logger.info("🎯 ActiveTokenTracker initialized")
     
     async def start_tracking(self, token_address: str, initial_data: Optional[Dict] = None) -> bool:
@@ -495,7 +498,43 @@ class ActiveTokenTracker:
             logger.error(f"❌ Error sending signal: {e}")
             import traceback
             logger.error(traceback.format_exc())
-    
+
+    def track_buyers_from_webhook(self, token_address: str, webhook_transactions: List[Dict]) -> int:
+        """
+        Track unique buyers from Helius webhook transactions
+
+        Args:
+            token_address: Token mint address
+            webhook_transactions: List of Helius enhanced transactions
+
+        Returns:
+            Count of unique buyers for this token
+        """
+        try:
+            # Initialize set if needed
+            if token_address not in self.unique_buyers:
+                self.unique_buyers[token_address] = set()
+
+            # Extract buyer addresses from token transfers
+            for transaction in webhook_transactions:
+                token_transfers = transaction.get('tokenTransfers', [])
+
+                for transfer in token_transfers:
+                    # Check if this transfer is for our token
+                    if transfer.get('mint') == token_address:
+                        # Get the receiver (buyer)
+                        buyer = transfer.get('toUserAccount', '')
+                        if buyer:
+                            self.unique_buyers[token_address].add(buyer)
+
+            buyer_count = len(self.unique_buyers[token_address])
+            logger.debug(f"👥 {token_address[:8]}: {buyer_count} unique buyers")
+            return buyer_count
+
+        except Exception as e:
+            logger.error(f"❌ Error tracking buyers from webhook: {e}")
+            return 0
+
     def is_tracked(self, token_address: str) -> bool:
         """Check if token is being tracked"""
         return token_address in self.tracked_tokens
@@ -546,6 +585,10 @@ class ActiveTokenTracker:
             score = self.tracked_tokens[token_address].conviction_score
             logger.debug(f"🧹 Removing {symbol} from tracking (conviction={score})")
             del self.tracked_tokens[token_address]
+
+            # Also remove unique buyer data
+            if token_address in self.unique_buyers:
+                del self.unique_buyers[token_address]
 
         if tokens_to_remove:
             logger.info(f"🧹 Cleaned up {len(tokens_to_remove)} tokens, {self.get_active_count()} remain")

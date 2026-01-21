@@ -412,14 +412,17 @@ async def smart_wallet_webhook(request: Request):
         
         # Extract token addresses that were bought
         token_addresses = extract_token_addresses_from_webhook(data)
-        
+
         if token_addresses:
             logger.info(f"🎯 KOL bought {len(token_addresses)} token(s) - starting tracking...")
-            
+
             # Start tracking each token
             for token_address in token_addresses:
                 await active_tracker.start_tracking(token_address)
-        
+
+                # Track unique buyers from this webhook
+                active_tracker.track_buyers_from_webhook(token_address, data)
+
         return {"status": "success"}
         
     except Exception as e:
