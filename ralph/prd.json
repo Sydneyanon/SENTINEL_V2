@@ -199,6 +199,27 @@
       "passes": false,
       "notes": "Replicate outlight.fun caller tracking - monitor TG groups, score by accuracy",
       "baseline_metrics": {}
+    },
+    {
+      "id": "OPT-012",
+      "title": "Build ML learning engine to identify high market cap conditions",
+      "description": "As a learning system, I want to understand what conditions lead to tokens hitting high market caps (100k+, 1M+, 10M+)",
+      "acceptanceCriteria": [
+        "Extract features from all tracked tokens: holder_concentration_top10, holder_concentration_top3, volume_to_mcap_ratio, kol_count, kol_tier_distribution, unique_buyers_first_hour, price_momentum_5m, price_momentum_1h, liquidity_depth, narrative_match_count, bundle_detected, early_buyer_count, avg_entry_time, holder_growth_rate",
+        "Label outcomes: 0=rug, 1=2x, 2=10x, 3=50x, 4=100x+",
+        "Train gradient boosting model (XGBoost) to predict outcome class",
+        "Feature importance analysis: which signals matter most for 100x?",
+        "Generate insights: 'Tokens with 3+ elite KOLs + <30% top-10 holders + AI narrative = 65% chance of 10x+'",
+        "Add ML predictions to conviction engine: +0-20 points based on predicted outcome",
+        "Retrain weekly on new data (continuous learning)",
+        "Monitor for 14 days",
+        "Keep if prediction accuracy >70% and signals improve >15%",
+        "Commit ML model, feature extractor, training pipeline, insights dashboard"
+      ],
+      "priority": 12,
+      "passes": false,
+      "notes": "Meta-learning: Learn what conditions = high mcap. Features: holders%, volume, KOLs, narratives, momentum, etc.",
+      "baseline_metrics": {}
     }
   ]
 }
