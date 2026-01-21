@@ -42,6 +42,16 @@ class GMGNWalletFetcher:
             logger.debug("Apify client not initialized - skipping metadata fetch")
             return None
 
+        # Validate address format - reject Ethereum addresses
+        if wallet_address.startswith('0x'):
+            logger.warning(f"⚠️ Skipping Ethereum address: {wallet_address[:10]}... (not Solana)")
+            return None
+
+        # Validate Solana address format (base58, 32-44 chars)
+        if chain == 'sol' and (len(wallet_address) < 32 or len(wallet_address) > 44):
+            logger.warning(f"⚠️ Invalid Solana address format: {wallet_address[:10]}...")
+            return None
+
         # Check cache first
         cache_key = f"{chain}:{wallet_address}"
         if cache_key in self.cache:
