@@ -377,7 +377,7 @@ async def startup():
     # Start holder polling task (NEW!)
     logger.info("🔄 Starting token polling task...")
     asyncio.create_task(smart_polling_task())
-    logger.info("✅ Polling started (30s interval)")
+    logger.info("✅ Polling started (dynamic: 5s at 90%+, 15s at 70%+, 30s otherwise)")
 
     # Log configuration
     logger.info("=" * 70)
@@ -389,6 +389,7 @@ async def startup():
     logger.info(f"💰 Data Sources: Helius + Bonding Curve + DexScreener")
     logger.info(f"⚡ PumpPortal: {'DISABLED' if config.DISABLE_PUMPPORTAL else 'ENABLED'} (saves resources)")
     logger.info(f"💎 Credit Optimization: {'ENABLED' if config.DISABLE_POLLING_BELOW_THRESHOLD else 'DISABLED'}")
+    logger.info(f"🚨 Exit Alerts: ✅ Enabled (momentum reversal detection)")
     logger.info(f"Performance Tracking: ✅ Enabled")
     logger.info(f"Milestones: {', '.join(f'{m}x' for m in config.MILESTONES)}")
     logger.info(f"Daily Reports: ✅ Midnight UTC")

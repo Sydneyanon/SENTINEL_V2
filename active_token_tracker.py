@@ -21,6 +21,11 @@ class TokenState:
     kol_buy_count: int
     last_holder_check: datetime
     last_holder_count: int
+    # Exit tracking
+    last_price: float = 0.0
+    last_buyer_count: int = 0
+    price_drop_count: int = 0  # Consecutive price drops
+    exit_alert_sent: bool = False
 
 
 class ActiveTokenTracker:
@@ -123,7 +128,11 @@ class ActiveTokenTracker:
                 last_updated=now,
                 kol_buy_count=1,  # Started because of KOL buy
                 last_holder_check=now,
-                last_holder_count=initial_data.get('holder_count', 0)
+                last_holder_count=initial_data.get('holder_count', 0),
+                last_price=initial_data.get('price_usd', 0),
+                last_buyer_count=0,
+                price_drop_count=0,
+                exit_alert_sent=False
             )
             
             self.tracked_tokens[token_address] = state
@@ -334,8 +343,15 @@ class ActiveTokenTracker:
                     logger.debug(f"⏭️  Skipping poll for {state.token_data.get('token_symbol', 'UNKNOWN')} (conviction={state.conviction_score} < 50)")
                     return
 
-            # Simple fixed interval (30s)
-            poll_interval = 30
+            # DYNAMIC POLLING: Aggressive near graduation
+            bonding_curve_pct = state.token_data.get('bonding_curve_pct', 0)
+
+            if bonding_curve_pct >= 90:
+                poll_interval = 5  # Hyper-mode at 90%+ (graduation imminent)
+            elif bonding_curve_pct >= 70:
+                poll_interval = 15  # Watch closely 70-90%
+            else:
+                poll_interval = 30  # Normal for early stage
 
             # Check if it's time to poll
             now = datetime.utcnow()
@@ -363,9 +379,78 @@ class ActiveTokenTracker:
                 # Re-analyze with fresh data
                 await self._reanalyze_token(token_address)
 
+                # Check for exit signals
+                await self._check_exit_conditions(token_address)
+
         except Exception as e:
             logger.error(f"❌ Error polling token: {e}")
-    
+
+    async def _check_exit_conditions(self, token_address: str) -> None:
+        """
+        Check if token meets exit/alert conditions (momentum reversal)
+
+        Exit conditions:
+        - Price drop >20% in 2 consecutive polls
+        - Buyer velocity stalls (new buyers <10 in recent period)
+
+        Args:
+            token_address: Token mint address
+        """
+        if token_address not in self.tracked_tokens:
+            return
+
+        try:
+            state = self.tracked_tokens[token_address]
+
+            # Only check exit conditions for tokens we've signaled
+            if not state.signal_sent or state.exit_alert_sent:
+                return
+
+            symbol = state.token_data.get('token_symbol', 'UNKNOWN')
+            current_price = state.token_data.get('price_usd', 0)
+            current_buyers = self.unique_buyers.get(token_address, set())
+            buyer_count = len(current_buyers)
+
+            # Initialize tracking on first check
+            if state.last_price == 0:
+                state.last_price = current_price
+                state.last_buyer_count = buyer_count
+                return
+
+            # Calculate price change
+            if state.last_price > 0 and current_price > 0:
+                price_change_pct = ((current_price - state.last_price) / state.last_price) * 100
+
+                # Track consecutive price drops >20%
+                if price_change_pct <= -20:
+                    state.price_drop_count += 1
+                    logger.warning(f"⚠️ {symbol}: Price drop {price_change_pct:.1f}% (drop #{state.price_drop_count})")
+                else:
+                    # Reset counter on recovery
+                    state.price_drop_count = 0
+
+                # Check buyer velocity stall
+                new_buyers = buyer_count - state.last_buyer_count
+                buyer_stalled = new_buyers < 10
+
+                # TRIGGER EXIT ALERT
+                if state.price_drop_count >= 2 or (price_change_pct <= -20 and buyer_stalled):
+                    reason = []
+                    if state.price_drop_count >= 2:
+                        reason.append(f"2+ consecutive drops (current: {price_change_pct:.1f}%)")
+                    if buyer_stalled:
+                        reason.append(f"buyer stall ({new_buyers} new buyers)")
+
+                    logger.warning(f"🚨 EXIT SIGNAL: {symbol} - {', '.join(reason)}")
+                    await self._send_exit_alert(token_address, price_change_pct, new_buyers)
+
+            # Update tracking state
+            state.last_price = current_price
+            state.last_buyer_count = buyer_count
+
+        except Exception as e:
+            logger.error(f"❌ Error checking exit conditions: {e}")
+
     async def _reanalyze_token(self, token_address: str) -> None:
         """
         Re-analyze a tracked token and send signal if threshold crossed
@@ -496,6 +581,46 @@ class ActiveTokenTracker:
             
         except Exception as e:
             logger.error(f"❌ Error sending signal: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+
+    async def _send_exit_alert(self, token_address: str, price_change_pct: float, new_buyers: int) -> None:
+        """
+        Send exit alert to Telegram
+
+        Args:
+            token_address: Token mint address
+            price_change_pct: Price change percentage
+            new_buyers: Number of new buyers since last check
+        """
+        try:
+            state = self.tracked_tokens[token_address]
+            symbol = state.token_data.get('token_symbol', 'UNKNOWN')
+            current_price = state.token_data.get('price_usd', 0)
+
+            logger.info(f"🚨 SENDING EXIT ALERT: ${symbol}")
+
+            # Build exit alert data
+            exit_data = {
+                'token_address': token_address,
+                'token_symbol': symbol,
+                'token_name': state.token_data.get('token_name', 'Unknown'),
+                'current_price': current_price,
+                'price_change_pct': price_change_pct,
+                'new_buyers': new_buyers,
+                'consecutive_drops': state.price_drop_count,
+            }
+
+            # Post to Telegram
+            await self.telegram_publisher.post_exit_alert(exit_data)
+
+            # Mark as sent
+            state.exit_alert_sent = True
+
+            logger.info(f"✅ Exit alert sent for ${symbol}")
+
+        except Exception as e:
+            logger.error(f"❌ Error sending exit alert: {e}")
             import traceback
             logger.error(traceback.format_exc())
 

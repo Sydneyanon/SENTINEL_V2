@@ -238,7 +238,73 @@ class TelegramPublisher:
             import traceback
             logger.error(traceback.format_exc())
             return None
-    
+
+    async def post_exit_alert(self, exit_data: Dict[str, Any]) -> Optional[int]:
+        """
+        Post exit alert to Telegram channel (momentum reversal warning)
+
+        Args:
+            exit_data: Exit alert data containing token info and reversal details
+
+        Returns:
+            Message ID if successful, None otherwise
+        """
+        if not self.enabled or not self.bot or not self.channel_id:
+            logger.debug("Telegram not enabled - skipping exit alert")
+            return None
+
+        try:
+            symbol = exit_data.get('token_symbol', 'UNKNOWN')
+            token_address = exit_data.get('token_address', 'N/A')
+            current_price = exit_data.get('current_price', 0)
+            price_change_pct = exit_data.get('price_change_pct', 0)
+            new_buyers = exit_data.get('new_buyers', 0)
+            consecutive_drops = exit_data.get('consecutive_drops', 0)
+
+            # Build exit alert message
+            message = f"""🚨 <b>EXIT SIGNAL - MOMENTUM REVERSAL</b>
+
+<b>${symbol}</b>
+
+⚠️ <b>Warning Signs Detected:</b>"""
+
+            if consecutive_drops >= 2:
+                message += f"\n• {consecutive_drops} consecutive price drops"
+
+            if price_change_pct <= -20:
+                message += f"\n• Price down {abs(price_change_pct):.1f}%"
+
+            if new_buyers < 10:
+                message += f"\n• Buyer velocity stalled ({new_buyers} new buyers)"
+
+            message += f"""
+
+💰 Current Price: ${current_price:.8f}
+
+🔗 <a href="https://dexscreener.com/solana/{token_address}">DexScreener</a> | <a href="https://pump.fun/{token_address}">Pump.fun</a>
+
+⚠️ Consider taking profits or reducing position size."""
+
+            # Send as regular message (no banner for exit alerts)
+            result = await self.bot.send_message(
+                chat_id=self.channel_id,
+                text=message,
+                parse_mode=ParseMode.HTML,
+                disable_web_page_preview=False
+            )
+
+            logger.info(f"📤 Posted exit alert to Telegram: ${symbol}")
+            return result.message_id
+
+        except TelegramError as e:
+            logger.error(f"❌ Telegram error posting exit alert: {e}")
+            return None
+        except Exception as e:
+            logger.error(f"❌ Unexpected error posting exit alert: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return None
+
     async def post_test_message(self) -> bool:
         """Post a test message to verify bot is working"""
         
