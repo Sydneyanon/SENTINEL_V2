@@ -62,37 +62,51 @@ telegram_publisher = TelegramPublisher()
 def extract_token_addresses_from_webhook(webhook_data: List[Dict]) -> List[str]:
     """
     Extract token addresses from Helius webhook data
-    
+
     Args:
         webhook_data: List of transactions from Helius
-        
+
     Returns:
-        List of unique token addresses that were bought
+        List of unique token addresses that were bought (filtered for memecoins only)
     """
+    # Known tokens to IGNORE (not memecoins)
+    IGNORE_TOKENS = {
+        'So11111111111111111111111111111111111111112',  # Wrapped SOL
+        'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',  # USDC
+        'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB',  # USDT
+        '7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs',  # BONK (established)
+        'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263',  # Bonk (alternate)
+    }
+
     token_addresses = set()
-    
+
     try:
         for transaction in webhook_data:
             fee_payer = transaction.get('feePayer', '')
-            
+
             # Only process if it's a tracked wallet
             if fee_payer not in smart_wallet_tracker.tracked_wallets:
                 continue
-            
+
             # Get token transfers
             token_transfers = transaction.get('tokenTransfers', [])
-            
+
             for transfer in token_transfers:
                 to_address = transfer.get('toUserAccount', '')
-                
+
                 # If the tracked wallet received tokens (bought)
                 if to_address == fee_payer:
                     token_address = transfer.get('mint', '')
-                    if token_address:
+
+                    # Filter out ignored tokens (SOL, USDC, etc.)
+                    if token_address and token_address not in IGNORE_TOKENS:
                         token_addresses.add(token_address)
-        
+                        logger.debug(f"   💰 KOL bought: {token_address[:8]}...")
+                    elif token_address in IGNORE_TOKENS:
+                        logger.debug(f"   ⏭️  Skipping known token: {token_address[:8]}...")
+
         return list(token_addresses)
-        
+
     except Exception as e:
         logger.error(f"❌ Error extracting token addresses: {e}")
         return []
