@@ -304,11 +304,11 @@ class ActiveTokenTracker:
     
     async def smart_poll_token(self, token_address: str) -> None:
         """
-        Poll token for updates (simplified - Birdseye includes everything in one call)
+        Poll token for updates
 
         Polling strategy:
-        - Fixed 30-second interval (Birdseye is fast and includes holder_count)
-        - No age-based complexity needed
+        - Fixed 30-second interval
+        - Uses Helius bonding curve + DexScreener
 
         Args:
             token_address: Token mint address
@@ -332,15 +332,15 @@ class ActiveTokenTracker:
             if time_since_last_poll < poll_interval:
                 return  # Not time yet
 
-            # Fetch fresh data (Birdseye returns EVERYTHING including holder_count!)
+            # Fetch fresh data
             symbol = state.token_data.get('token_symbol', 'UNKNOWN')
             logger.debug(f"🔄 Polling {symbol} (interval: {poll_interval}s)")
 
-            # get_token_data tries Birdseye first (includes price, mcap, liquidity, holder_count)
+            # get_token_data uses Helius + bonding curve decoder
             token_data = await self.helius_fetcher.get_token_data(token_address)
 
             if token_data:
-                # Update token data (holder_count already included from Birdseye!)
+                # Update token data
                 state.token_data.update(token_data)
                 state.last_updated = now
 

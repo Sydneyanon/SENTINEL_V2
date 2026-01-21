@@ -1,7 +1,7 @@
 """
 Helius Data Fetcher - Get token data from Helius RPC/API
-Now uses Birdseye API for reliable price/mcap data
-Falls back to bonding curve decoder if Birdseye fails
+Uses bonding curve decoder for pump.fun tokens
+Falls back to DexScreener for graduated tokens
 """
 from typing import Dict, Optional
 import aiohttp
@@ -10,7 +10,6 @@ import config
 import base64
 import struct
 from datetime import datetime, timedelta
-from birdseye_fetcher import get_birdseye_fetcher
 
 # Try to import solders - log if it fails
 try:
@@ -40,16 +39,14 @@ class HeliusDataFetcher:
         self.holder_cache = {}  # {token_address: {'data': {...}, 'timestamp': datetime}}
         self.cache_ttl_minutes = 60
 
-        # Initialize Birdseye fetcher for price/mcap data
-        birdseye_api_key = getattr(config, 'BIRDSEYE_API_KEY', None)
-        self.birdseye = get_birdseye_fetcher(api_key=birdseye_api_key)
-        logger.info("   🦅 Birdseye API initialized for price/mcap data")
-
+        # Log data source strategy
         if SOLDERS_AVAILABLE:
-            logger.info("   🔐 Bonding curve decoder enabled (fallback)")
+            logger.info("   🔐 Bonding curve decoder enabled (primary for pump.fun)")
+            logger.info("   📊 DexScreener fallback (for graduated tokens)")
         else:
             logger.warning("   ⚠️ Bonding curve decoder DISABLED (solders not installed)")
-            logger.warning("      Relying on Birdseye API only")
+            logger.warning("      Install solders for pump.fun token support: pip install solders")
+            logger.warning("      Will rely on DexScreener only")
         
     async def get_bonding_curve_data(self, token_address: str) -> Optional[Dict]:
         """
@@ -234,7 +231,8 @@ class HeliusDataFetcher:
         
     async def get_token_data(self, token_address: str) -> Optional[Dict]:
         """
-        Get complete token data (tries Birdseye first, falls back to Helius + bonding curve)
+        Get complete token data from Helius + bonding curve decoder
+        (Birdseye disabled - no longer has free tier)
 
         Args:
             token_address: Token mint address
@@ -243,23 +241,12 @@ class HeliusDataFetcher:
             Dict with token data or None
         """
         try:
-            # STRATEGY: Try Birdseye first (most reliable for price/mcap)
-            logger.debug(f"   🦅 Trying Birdseye first for {token_address[:8]}...")
-            birdseye_data = await self.birdseye.get_token_data(token_address)
-
-            if birdseye_data and birdseye_data.get('price_usd', 0) > 0:
-                # Birdseye has all the data we need!
-                logger.info(f"   ✅ Birdseye success: ${birdseye_data['token_symbol']} - ${birdseye_data['price_usd']:.8f}")
-                return birdseye_data
-
-            # FALLBACK: Birdseye failed, try Helius + bonding curve
-            logger.debug(f"   ⚠️ Birdseye returned no data, falling back to Helius...")
-
             # Get asset data from Helius DAS API
+            logger.debug(f"   📡 Fetching from Helius...")
             asset_data = await self._get_asset(token_address)
 
             if not asset_data:
-                logger.warning(f"   ⚠️ No data from either Birdseye or Helius for {token_address[:8]}")
+                logger.warning(f"   ⚠️ No data from Helius for {token_address[:8]}")
                 return None
 
             # Extract token info
@@ -271,9 +258,15 @@ class HeliusDataFetcher:
             if bonding_data:
                 # Update with bonding curve data
                 token_data.update(bonding_data)
-                logger.debug(f"   ✅ Got Helius data + bonding curve: {token_data.get('token_symbol', 'UNKNOWN')}")
+                logger.info(f"   ✅ Got token data: ${token_data.get('token_symbol', 'UNKNOWN')} - ${bonding_data.get('price_usd', 0):.8f}")
             else:
-                logger.warning(f"   ⚠️ Got Helius metadata only (no price/mcap): {token_data.get('token_symbol', 'UNKNOWN')}")
+                # Try DexScreener for graduated tokens
+                dex_data = await self.get_dexscreener_data(token_address)
+                if dex_data:
+                    token_data.update(dex_data)
+                    logger.info(f"   ✅ Got token data from DexScreener: ${token_data.get('token_symbol', 'UNKNOWN')}")
+                else:
+                    logger.warning(f"   ⚠️ Got metadata only (no price/mcap): {token_data.get('token_symbol', 'UNKNOWN')}")
 
             return token_data
 
@@ -558,7 +551,7 @@ class HeliusDataFetcher:
     async def enrich_token_data(self, token_data: Dict) -> Dict:
         """
         Enrich token data with price/mcap
-        Tries Birdseye first, then bonding curve, then DexScreener as fallbacks
+        Uses bonding curve for pump.fun tokens, DexScreener for graduated tokens
 
         Args:
             token_data: Base token data
@@ -568,31 +561,21 @@ class HeliusDataFetcher:
         """
         token_address = token_data.get('token_address')
 
-        # Try Birdseye first (works for all Solana tokens)
-        logger.debug(f"   🦅 Trying Birdseye for enrichment...")
-        birdseye_data = await self.birdseye.get_token_data(token_address)
-
-        if birdseye_data and birdseye_data.get('price_usd', 0) > 0:
-            token_data.update(birdseye_data)
-            logger.debug(f"   ✅ Enriched with Birdseye: ${birdseye_data['price_usd']:.8f}")
+        # Try bonding curve first (for pump.fun pre-graduation tokens)
+        logger.debug(f"   🔐 Trying bonding curve decode...")
+        bonding_data = await self.get_bonding_curve_data(token_address)
+        if bonding_data:
+            token_data.update(bonding_data)
+            logger.debug(f"   ✅ Enriched with bonding curve data")
             return token_data
 
-        # Fallback 1: Try bonding curve (for pump.fun pre-graduation tokens)
-        if token_data.get('bonding_curve_pct', 100) < 100:
-            logger.debug(f"   🔐 Trying bonding curve decode...")
-            bonding_data = await self.get_bonding_curve_data(token_address)
-            if bonding_data:
-                token_data.update(bonding_data)
-                logger.debug(f"   💰 Enriched with bonding curve data")
-                return token_data
-
-        # Fallback 2: Try DexScreener (for graduated tokens)
+        # Fallback: Try DexScreener (for graduated tokens)
         logger.debug(f"   📊 Trying DexScreener...")
         dex_data = await self.get_dexscreener_data(token_address)
 
         if dex_data:
             token_data.update(dex_data)
-            logger.debug(f"   💎 Enriched with DexScreener: ${dex_data['price_usd']:.8f}")
+            logger.debug(f"   ✅ Enriched with DexScreener: ${dex_data['price_usd']:.8f}")
         else:
             logger.warning(f"   ⚠️ No price data available from any source")
 

@@ -160,8 +160,8 @@ async def start_pumpportal_task():
 async def smart_polling_task():
     """
     Polling for actively tracked tokens
-    Fixed 30-second interval (Birdseye API includes all data in one call)
-    No age-based complexity needed - Birdseye returns price, mcap, liquidity, holder_count
+    Fixed 30-second interval for real-time updates
+    Uses Helius bonding curve decoder + DexScreener
     """
     while True:
         try:
@@ -354,7 +354,7 @@ async def startup():
     # Start holder polling task (NEW!)
     logger.info("🔄 Starting token polling task...")
     asyncio.create_task(smart_polling_task())
-    logger.info("✅ Polling started (30s interval via Birdseye)")
+    logger.info("✅ Polling started (30s interval)")
 
     # Log configuration
     logger.info("=" * 70)
@@ -363,7 +363,7 @@ async def startup():
     logger.info(f"🎯 KOL-Triggered Tracking: ENABLED")
     logger.info(f"Min Conviction Score: {config.MIN_CONVICTION_SCORE}/100")
     logger.info(f"Elite Wallets: {len(smart_wallet_tracker.tracked_wallets)} tracked")
-    logger.info(f"🦅 Birdseye API: Price + Holder Count (30s polling)")
+    logger.info(f"💰 Data Sources: Helius + Bonding Curve + DexScreener")
     logger.info(f"Performance Tracking: ✅ Enabled")
     logger.info(f"Milestones: {', '.join(f'{m}x' for m in config.MILESTONES)}")
     logger.info(f"Daily Reports: ✅ Midnight UTC")
@@ -373,7 +373,7 @@ async def startup():
     logger.info("=" * 70)
     logger.info("🔥 Watching all elite trader activity...")
     logger.info("⚡ Real-time analysis on every trade")
-    logger.info("🦅 Birdseye integration (price, mcap, holders in one call)")
+    logger.info("💰 Helius bonding curve decoder for pump.fun tokens")
     logger.info("🚀 Signals posted the moment threshold is crossed")
     logger.info("")
     logger.info("The fire has been stolen. Let it spread. 🔥")
