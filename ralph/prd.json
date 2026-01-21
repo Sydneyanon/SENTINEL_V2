@@ -179,6 +179,26 @@
       "passes": false,
       "notes": "Grok idea: ML-powered dynamic TP/SL for better exits",
       "baseline_metrics": {}
+    },
+    {
+      "id": "OPT-011",
+      "title": "Track Telegram call group accuracy (like outlight.fun)",
+      "description": "As a signal source, I want to monitor Telegram groups and score them by accuracy",
+      "acceptanceCriteria": [
+        "Use Telethon/Pyrogram to monitor 10-20 popular Solana call groups",
+        "Parse call messages: extract token CA, timestamp, entry price",
+        "Track outcomes: did it pump? max ROI reached?",
+        "Store to database: group_id, token, call_time, outcome, ROI",
+        "Calculate caller accuracy: % of calls that 2x'd, avg ROI",
+        "Add top 3 accurate groups as signal source in conviction engine (+5-15 pts)",
+        "Monitor for 7 days",
+        "Keep if group calls generate 2+ successful signals",
+        "Commit Telegram monitoring code + caller scoring"
+      ],
+      "priority": 11,
+      "passes": false,
+      "notes": "Replicate outlight.fun caller tracking - monitor TG groups, score by accuracy",
+      "baseline_metrics": {}
     }
   ]
 }
