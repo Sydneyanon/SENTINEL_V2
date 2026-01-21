@@ -29,6 +29,11 @@ async def enrich_smart_wallets() -> List[Dict]:
     logger.info(f"📚 Loading {len(KOL_WALLETS)} wallets from curated_wallets.py")
 
     for address, curated_info in KOL_WALLETS.items():
+        # Skip Ethereum addresses (safety check)
+        if address.startswith('0x'):
+            logger.warning(f"⚠️ Skipping Ethereum address in curated list: {address[:10]}...")
+            continue
+
         enriched_wallets.append({
             'address': address,
             'name': curated_info.get('name') or f"KOL_{address[:6]}",
@@ -44,7 +49,11 @@ async def enrich_smart_wallets() -> List[Dict]:
     # If config.SMART_WALLETS has additional addresses not in curated, add them
     if config.SMART_WALLETS:
         curated_addresses = set(KOL_WALLETS.keys())
-        config_only = [addr for addr in config.SMART_WALLETS if addr not in curated_addresses]
+        # Filter out Ethereum addresses and duplicates
+        config_only = [
+            addr for addr in config.SMART_WALLETS
+            if addr not in curated_addresses and not addr.startswith('0x')
+        ]
 
         if config_only:
             logger.info(f"📝 Found {len(config_only)} additional wallets in config.py")
