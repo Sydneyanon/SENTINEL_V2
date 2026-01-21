@@ -304,11 +304,12 @@ class ActiveTokenTracker:
     
     async def smart_poll_token(self, token_address: str) -> None:
         """
-        Poll token for updates
+        Poll token for updates (WITH CREDIT OPTIMIZATION)
 
         Polling strategy:
         - Fixed 30-second interval
         - Uses Helius bonding curve + DexScreener
+        - SKIPS tokens below conviction threshold (saves credits!)
 
         Args:
             token_address: Token mint address
@@ -320,7 +321,15 @@ class ActiveTokenTracker:
             return
 
         try:
+            import config
+
             state = self.tracked_tokens[token_address]
+
+            # CREDIT OPTIMIZATION: Skip polling low-conviction tokens
+            if config.DISABLE_POLLING_BELOW_THRESHOLD:
+                if state.conviction_score < 50 and not state.signal_sent:
+                    logger.debug(f"⏭️  Skipping poll for {state.token_data.get('token_symbol', 'UNKNOWN')} (conviction={state.conviction_score} < 50)")
+                    return
 
             # Simple fixed interval (30s)
             poll_interval = 30
@@ -334,7 +343,7 @@ class ActiveTokenTracker:
 
             # Fetch fresh data
             symbol = state.token_data.get('token_symbol', 'UNKNOWN')
-            logger.debug(f"🔄 Polling {symbol} (interval: {poll_interval}s)")
+            logger.debug(f"🔄 Polling {symbol} (interval: {poll_interval}s, conviction={state.conviction_score})")
 
             # get_token_data uses Helius + bonding curve decoder
             token_data = await self.helius_fetcher.get_token_data(token_address)
@@ -506,29 +515,38 @@ class ActiveTokenTracker:
     def cleanup_old_tokens(self, max_age_hours: int = 24):
         """
         Remove tokens that are too old or have been signaled
-        
+        CREDIT OPTIMIZATION: Remove low-conviction tokens quickly!
+
         Args:
             max_age_hours: Maximum age in hours before removal
         """
+        import config
+
         cutoff = datetime.utcnow() - timedelta(hours=max_age_hours)
-        
+        low_conviction_cutoff = datetime.utcnow() - timedelta(minutes=30)  # Remove low-conviction after 30 min
+
         tokens_to_remove = []
-        
+
         for token_address, state in self.tracked_tokens.items():
             # Remove if:
             # 1. Signal already sent AND been tracking for > 1 hour
             # 2. Been tracking for > max_age_hours with no signal
-            
+            # 3. CREDIT OPTIMIZATION: Low conviction (< 30) for > 30 minutes
+
             if state.signal_sent and (datetime.utcnow() - state.first_tracked_at).total_seconds() > 3600:
                 tokens_to_remove.append(token_address)
             elif state.first_tracked_at < cutoff:
                 tokens_to_remove.append(token_address)
-        
+            elif config.DISABLE_POLLING_BELOW_THRESHOLD and state.conviction_score < 30 and state.first_tracked_at < low_conviction_cutoff:
+                # Remove low-conviction tokens after 30 minutes to save credits
+                tokens_to_remove.append(token_address)
+
         for token_address in tokens_to_remove:
             symbol = self.tracked_tokens[token_address].token_data.get('token_symbol', 'UNKNOWN')
-            logger.debug(f"🧹 Removing {symbol} from tracking")
+            score = self.tracked_tokens[token_address].conviction_score
+            logger.debug(f"🧹 Removing {symbol} from tracking (conviction={score})")
             del self.tracked_tokens[token_address]
-        
+
         if tokens_to_remove:
             logger.info(f"🧹 Cleaned up {len(tokens_to_remove)} tokens, {self.get_active_count()} remain")
     

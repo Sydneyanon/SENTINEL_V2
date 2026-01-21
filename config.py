@@ -20,6 +20,18 @@ TELEGRAM_CHANNEL_ID = os.getenv('TELEGRAM_CHANNEL_ID')  # Should be like: -10012
 ENABLE_TELEGRAM = True  # Enable Telegram posting
 
 # =============================================================================
+# CREDIT OPTIMIZATION (CRITICAL!)
+# =============================================================================
+
+# STRICT MODE: Only track tokens bought by KOLs (saves massive API credits)
+# When True: Only tracks tokens from /webhook/smart-wallet (KOL buys)
+# When False: Also processes PumpPortal graduations (burns credits fast!)
+STRICT_KOL_ONLY_MODE = True  # ← SET TO TRUE TO SAVE CREDITS!
+
+# Disable polling for tokens below threshold (saves credits)
+DISABLE_POLLING_BELOW_THRESHOLD = True  # Only poll tokens >= 50 conviction
+
+# =============================================================================
 # CONVICTION SCORING THRESHOLDS
 # =============================================================================
 
