@@ -142,11 +142,101 @@ This bot auto-deploys when you push to `main`. The workflow:
 5. Wait monitoring duration
 6. Analyze & decide
 
+## Error Detection and Fixing
+
+**For OPT-013 (Auto-fix errors):**
+
+1. **Fetch Railway Logs**:
+   ```bash
+   railway logs --service prometheusbot-production --lines 1000 > logs.txt
+   ```
+
+2. **Parse for Errors**:
+   - Search for: ERROR, Exception, Failed, Traceback, WARNING
+   - Classify: API failures, data parsing, missing data, timeouts, validation
+
+3. **Fix Each Error**:
+   - **API failures**: Add retry logic with exponential backoff
+   - **Data parsing**: Add validation and default values
+   - **Missing data**: Add fallback data sources
+   - **Timeouts**: Increase timeout or add caching
+   - **Validation errors**: Add input validation before processing
+
+4. **Test Locally**:
+   ```bash
+   # Test the fix doesn't break existing functionality
+   python -m pytest tests/
+   ```
+
+5. **Deploy and Monitor**:
+   - Commit: `fix: [error type] - [what you fixed]`
+   - Push to Railway
+   - Monitor logs for 2 hours
+   - **Keep if error count drops >50%**
+
+## Data Collection Optimization
+
+**For OPT-014/OPT-015 (Optimize metadata/price fetching):**
+
+1. **Audit Current Sources**:
+   - Check helius_fetcher.py for data sources
+   - Measure: success rate, latency, cost per call
+   - Identify bottlenecks
+
+2. **Add Fallback Chain**:
+   - Primary: Helius DAS API (fast, 1 credit)
+   - Secondary: DexScreener (free, slower)
+   - Tertiary: Jupiter API (free)
+   - Last resort: Solscan (free)
+
+3. **Implement Caching**:
+   - Token metadata: 24h cache (name/symbol rarely change)
+   - Price data: 30s cache (balance freshness vs API calls)
+   - Use Python dict cache or Redis if available
+
+4. **Parallel Fetching**:
+   ```python
+   # Fetch metadata, price, holders simultaneously
+   results = await asyncio.gather(
+       fetch_metadata(token),
+       fetch_price(token),
+       fetch_holders(token)
+   )
+   ```
+
+## KOL Performance Tracking
+
+**For OPT-016 (Track KOL win rates):**
+
+1. **Create Database Schema**:
+   ```sql
+   CREATE TABLE kol_performance (
+       wallet_address TEXT PRIMARY KEY,
+       total_trades INT,
+       successful_trades INT,
+       win_rate FLOAT,
+       avg_roi FLOAT,
+       last_updated TIMESTAMP
+   );
+   ```
+
+2. **Track Outcomes**:
+   - When token is tracked, store: kol_wallet, token, entry_time
+   - After 24h, check outcome: rug (0x), 2x, 10x, 50x+
+   - Update win_rate and avg_roi for that KOL
+
+3. **Adjust Scoring**:
+   - High performers (>75% WR): +15 pts
+   - Medium performers (50-75% WR): +10 pts
+   - Low performers (<50% WR): +5 pts
+
 ## Important
 
 - **One optimization per iteration**
 - **Always collect baseline first**
 - **Wait full monitoring duration**
+- **For error-fixing, prioritize high-frequency errors**
+- **For data optimization, measure before and after**
 - **Revert if metrics don't improve**
 - **Document all learnings**
 
