@@ -7,6 +7,7 @@ from loguru import logger
 from typing import List, Dict
 import config
 from wallet_autodiscovery import auto_discover_wallets, discover_top_traders
+from data.curated_wallets import KOL_WALLETS
 
 
 async def enrich_smart_wallets() -> List[Dict]:
@@ -43,15 +44,29 @@ async def enrich_smart_wallets() -> List[Dict]:
             if address in metadata_dict:
                 enriched_wallets.append(metadata_dict[address])
             else:
-                # Fallback: create basic entry
-                enriched_wallets.append({
-                    'address': address,
-                    'name': f"Wallet_{address[:8]}",
-                    'tier': 'unknown',
-                    'win_rate': 0.50,
-                    'source': 'config',
-                    'active': True
-                })
+                # Fallback: Check curated_wallets.py first
+                if address in KOL_WALLETS:
+                    curated_info = KOL_WALLETS[address]
+                    enriched_wallets.append({
+                        'address': address,
+                        'name': curated_info.get('name') or f"KOL_{address[:6]}",
+                        'tier': curated_info.get('tier', 'top_kol'),
+                        'win_rate': 0.50,  # Will be fetched live when first used
+                        'source': 'curated',
+                        'active': True,
+                        'fetch_metadata': curated_info.get('fetch_metadata', True)
+                    })
+                    logger.debug(f"   ✅ Using curated data for {address[:8]} (tier: {curated_info.get('tier')})")
+                else:
+                    # Last resort: create basic entry
+                    enriched_wallets.append({
+                        'address': address,
+                        'name': f"Wallet_{address[:8]}",
+                        'tier': 'unknown',
+                        'win_rate': 0.50,
+                        'source': 'config',
+                        'active': True
+                    })
         
         logger.info(f"✅ Enriched {len(enriched_wallets)} wallets with metadata")
         
