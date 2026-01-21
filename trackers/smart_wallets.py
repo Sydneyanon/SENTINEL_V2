@@ -226,6 +226,11 @@ class SmartWalletTracker:
         # Try in-memory cache first (fast)
         if token_address in self.recent_buys and self.recent_buys[token_address]:
             buys = self.recent_buys[token_address]
+            # Update tiers from current tracked_wallets (in case they changed)
+            for buy in buys:
+                wallet_addr = buy['wallet']
+                if wallet_addr in self.tracked_wallets:
+                    buy['tier'] = self.tracked_wallets[wallet_addr].get('tier', buy['tier'])
             logger.debug(f"📊 Found {len(buys)} buys in memory for {token_address[:8]}")
         
         # Fall back to database
@@ -238,7 +243,8 @@ class SmartWalletTracker:
                     {
                         'wallet': row['wallet_address'],
                         'name': row['wallet_name'],
-                        'tier': row['wallet_tier'],
+                        # Use CURRENT tier from tracked_wallets (not stale DB tier)
+                        'tier': self.tracked_wallets.get(row['wallet_address'], {}).get('tier', row['wallet_tier']),
                         'win_rate': row.get('win_rate', 0),  # Get from DB or default to 0
                         'pnl_30d': row.get('pnl_30d', 0),    # Get from DB or default to 0
                         'amount': row['amount'],
