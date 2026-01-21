@@ -160,8 +160,8 @@ async def start_pumpportal_task():
 async def smart_polling_task():
     """
     Polling for actively tracked tokens
-    Fixed 30-second interval (Birdseye API includes all data in one call)
-    No age-based complexity needed - Birdseye returns price, mcap, liquidity, holder_count
+    Fixed 30-second interval for real-time updates
+    Uses Helius bonding curve decoder + DexScreener
     """
     while True:
         try:
@@ -334,27 +334,32 @@ async def startup():
     )
     logger.info("✅ Active token tracker initialized")
     
-    # Initialize PumpPortal monitor
-    logger.info("🔌 Initializing PumpPortal monitor...")
-    pumpportal_monitor = PumpMonitorV2(
-        on_signal_callback=handle_pumpportal_signal,
-        active_tracker=active_tracker  # Pass active tracker
-    )
-    logger.info("✅ PumpPortal monitor initialized")
-    
-    # Wait a bit for everything to stabilize before starting background task
-    logger.info("⏳ Waiting 2 seconds before starting PumpPortal task...")
-    await asyncio.sleep(2)
-    
-    # Start monitoring in background with error handling
-    logger.info("🚨 Creating PumpPortal background task...")
-    asyncio.create_task(start_pumpportal_task())
-    logger.info("✅ PumpPortal monitor task created")
+    # Initialize PumpPortal monitor (OPTIONAL - can be disabled to save resources)
+    if config.DISABLE_PUMPPORTAL:
+        logger.info("⏭️  PumpPortal DISABLED (strict KOL-only mode)")
+        logger.info("   Only tracking tokens from Helius webhook (KOL buys)")
+        pumpportal_monitor = None
+    else:
+        logger.info("🔌 Initializing PumpPortal monitor...")
+        pumpportal_monitor = PumpMonitorV2(
+            on_signal_callback=handle_pumpportal_signal,
+            active_tracker=active_tracker  # Pass active tracker
+        )
+        logger.info("✅ PumpPortal monitor initialized")
+
+        # Wait a bit for everything to stabilize before starting background task
+        logger.info("⏳ Waiting 2 seconds before starting PumpPortal task...")
+        await asyncio.sleep(2)
+
+        # Start monitoring in background with error handling
+        logger.info("🚨 Creating PumpPortal background task...")
+        asyncio.create_task(start_pumpportal_task())
+        logger.info("✅ PumpPortal monitor task created")
     
     # Start holder polling task (NEW!)
     logger.info("🔄 Starting token polling task...")
     asyncio.create_task(smart_polling_task())
-    logger.info("✅ Polling started (30s interval via Birdseye)")
+    logger.info("✅ Polling started (30s interval)")
 
     # Log configuration
     logger.info("=" * 70)
@@ -363,7 +368,9 @@ async def startup():
     logger.info(f"🎯 KOL-Triggered Tracking: ENABLED")
     logger.info(f"Min Conviction Score: {config.MIN_CONVICTION_SCORE}/100")
     logger.info(f"Elite Wallets: {len(smart_wallet_tracker.tracked_wallets)} tracked")
-    logger.info(f"🦅 Birdseye API: Price + Holder Count (30s polling)")
+    logger.info(f"💰 Data Sources: Helius + Bonding Curve + DexScreener")
+    logger.info(f"⚡ PumpPortal: {'DISABLED' if config.DISABLE_PUMPPORTAL else 'ENABLED'} (saves resources)")
+    logger.info(f"💎 Credit Optimization: {'ENABLED' if config.DISABLE_POLLING_BELOW_THRESHOLD else 'DISABLED'}")
     logger.info(f"Performance Tracking: ✅ Enabled")
     logger.info(f"Milestones: {', '.join(f'{m}x' for m in config.MILESTONES)}")
     logger.info(f"Daily Reports: ✅ Midnight UTC")
@@ -373,7 +380,7 @@ async def startup():
     logger.info("=" * 70)
     logger.info("🔥 Watching all elite trader activity...")
     logger.info("⚡ Real-time analysis on every trade")
-    logger.info("🦅 Birdseye integration (price, mcap, holders in one call)")
+    logger.info("💰 Helius bonding curve decoder for pump.fun tokens")
     logger.info("🚀 Signals posted the moment threshold is crossed")
     logger.info("")
     logger.info("The fire has been stolen. Let it spread. 🔥")
@@ -405,14 +412,17 @@ async def smart_wallet_webhook(request: Request):
         
         # Extract token addresses that were bought
         token_addresses = extract_token_addresses_from_webhook(data)
-        
+
         if token_addresses:
             logger.info(f"🎯 KOL bought {len(token_addresses)} token(s) - starting tracking...")
-            
+
             # Start tracking each token
             for token_address in token_addresses:
                 await active_tracker.start_tracking(token_address)
-        
+
+                # Track unique buyers from this webhook
+                active_tracker.track_buyers_from_webhook(token_address, data)
+
         return {"status": "success"}
         
     except Exception as e:

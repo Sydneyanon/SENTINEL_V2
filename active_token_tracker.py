@@ -34,15 +34,18 @@ class ActiveTokenTracker:
         self.telegram_publisher = telegram_publisher
         self.db = db
         self.helius_fetcher = helius_fetcher
-        
+
         # Active tokens being tracked
         self.tracked_tokens: Dict[str, TokenState] = {}
-        
+
+        # Unique buyer tracking (for conviction scoring)
+        self.unique_buyers: Dict[str, Set[str]] = {}  # {token_address: set(buyer_wallets)}
+
         # Metrics
         self.tokens_tracked_total = 0
         self.signals_sent_total = 0
         self.reanalyses_total = 0
-        
+
         logger.info("🎯 ActiveTokenTracker initialized")
     
     async def start_tracking(self, token_address: str, initial_data: Optional[Dict] = None) -> bool:
@@ -304,11 +307,12 @@ class ActiveTokenTracker:
     
     async def smart_poll_token(self, token_address: str) -> None:
         """
-        Poll token for updates (simplified - Birdseye includes everything in one call)
+        Poll token for updates (WITH CREDIT OPTIMIZATION)
 
         Polling strategy:
-        - Fixed 30-second interval (Birdseye is fast and includes holder_count)
-        - No age-based complexity needed
+        - Fixed 30-second interval
+        - Uses Helius bonding curve + DexScreener
+        - SKIPS tokens below conviction threshold (saves credits!)
 
         Args:
             token_address: Token mint address
@@ -320,7 +324,15 @@ class ActiveTokenTracker:
             return
 
         try:
+            import config
+
             state = self.tracked_tokens[token_address]
+
+            # CREDIT OPTIMIZATION: Skip polling low-conviction tokens
+            if config.DISABLE_POLLING_BELOW_THRESHOLD:
+                if state.conviction_score < 50 and not state.signal_sent:
+                    logger.debug(f"⏭️  Skipping poll for {state.token_data.get('token_symbol', 'UNKNOWN')} (conviction={state.conviction_score} < 50)")
+                    return
 
             # Simple fixed interval (30s)
             poll_interval = 30
@@ -332,15 +344,15 @@ class ActiveTokenTracker:
             if time_since_last_poll < poll_interval:
                 return  # Not time yet
 
-            # Fetch fresh data (Birdseye returns EVERYTHING including holder_count!)
+            # Fetch fresh data
             symbol = state.token_data.get('token_symbol', 'UNKNOWN')
-            logger.debug(f"🔄 Polling {symbol} (interval: {poll_interval}s)")
+            logger.debug(f"🔄 Polling {symbol} (interval: {poll_interval}s, conviction={state.conviction_score})")
 
-            # get_token_data tries Birdseye first (includes price, mcap, liquidity, holder_count)
+            # get_token_data uses Helius + bonding curve decoder
             token_data = await self.helius_fetcher.get_token_data(token_address)
 
             if token_data:
-                # Update token data (holder_count already included from Birdseye!)
+                # Update token data
                 state.token_data.update(token_data)
                 state.last_updated = now
 
@@ -486,7 +498,43 @@ class ActiveTokenTracker:
             logger.error(f"❌ Error sending signal: {e}")
             import traceback
             logger.error(traceback.format_exc())
-    
+
+    def track_buyers_from_webhook(self, token_address: str, webhook_transactions: List[Dict]) -> int:
+        """
+        Track unique buyers from Helius webhook transactions
+
+        Args:
+            token_address: Token mint address
+            webhook_transactions: List of Helius enhanced transactions
+
+        Returns:
+            Count of unique buyers for this token
+        """
+        try:
+            # Initialize set if needed
+            if token_address not in self.unique_buyers:
+                self.unique_buyers[token_address] = set()
+
+            # Extract buyer addresses from token transfers
+            for transaction in webhook_transactions:
+                token_transfers = transaction.get('tokenTransfers', [])
+
+                for transfer in token_transfers:
+                    # Check if this transfer is for our token
+                    if transfer.get('mint') == token_address:
+                        # Get the receiver (buyer)
+                        buyer = transfer.get('toUserAccount', '')
+                        if buyer:
+                            self.unique_buyers[token_address].add(buyer)
+
+            buyer_count = len(self.unique_buyers[token_address])
+            logger.debug(f"👥 {token_address[:8]}: {buyer_count} unique buyers")
+            return buyer_count
+
+        except Exception as e:
+            logger.error(f"❌ Error tracking buyers from webhook: {e}")
+            return 0
+
     def is_tracked(self, token_address: str) -> bool:
         """Check if token is being tracked"""
         return token_address in self.tracked_tokens
@@ -506,29 +554,42 @@ class ActiveTokenTracker:
     def cleanup_old_tokens(self, max_age_hours: int = 24):
         """
         Remove tokens that are too old or have been signaled
-        
+        CREDIT OPTIMIZATION: Remove low-conviction tokens quickly!
+
         Args:
             max_age_hours: Maximum age in hours before removal
         """
+        import config
+
         cutoff = datetime.utcnow() - timedelta(hours=max_age_hours)
-        
+        low_conviction_cutoff = datetime.utcnow() - timedelta(minutes=30)  # Remove low-conviction after 30 min
+
         tokens_to_remove = []
-        
+
         for token_address, state in self.tracked_tokens.items():
             # Remove if:
             # 1. Signal already sent AND been tracking for > 1 hour
             # 2. Been tracking for > max_age_hours with no signal
-            
+            # 3. CREDIT OPTIMIZATION: Low conviction (< 30) for > 30 minutes
+
             if state.signal_sent and (datetime.utcnow() - state.first_tracked_at).total_seconds() > 3600:
                 tokens_to_remove.append(token_address)
             elif state.first_tracked_at < cutoff:
                 tokens_to_remove.append(token_address)
-        
+            elif config.DISABLE_POLLING_BELOW_THRESHOLD and state.conviction_score < 30 and state.first_tracked_at < low_conviction_cutoff:
+                # Remove low-conviction tokens after 30 minutes to save credits
+                tokens_to_remove.append(token_address)
+
         for token_address in tokens_to_remove:
             symbol = self.tracked_tokens[token_address].token_data.get('token_symbol', 'UNKNOWN')
-            logger.debug(f"🧹 Removing {symbol} from tracking")
+            score = self.tracked_tokens[token_address].conviction_score
+            logger.debug(f"🧹 Removing {symbol} from tracking (conviction={score})")
             del self.tracked_tokens[token_address]
-        
+
+            # Also remove unique buyer data
+            if token_address in self.unique_buyers:
+                del self.unique_buyers[token_address]
+
         if tokens_to_remove:
             logger.info(f"🧹 Cleaned up {len(tokens_to_remove)} tokens, {self.get_active_count()} remain")
     
