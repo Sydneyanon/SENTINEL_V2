@@ -304,68 +304,53 @@ class ActiveTokenTracker:
     
     async def smart_poll_token(self, token_address: str) -> None:
         """
-        Smart polling - fetch fresh data from Helius based on token age
-        
+        Poll token for updates (simplified - Birdseye includes everything in one call)
+
         Polling strategy:
-        - New tokens (< 5 min): Every 5 seconds (fast updates)
-        - Young tokens (5-60 min): Every 30 seconds (medium updates)  
-        - Mature tokens (> 60 min): Every 60 seconds (slow updates)
-        
+        - Fixed 30-second interval (Birdseye is fast and includes holder_count)
+        - No age-based complexity needed
+
         Args:
             token_address: Token mint address
         """
         if token_address not in self.tracked_tokens:
             return
-        
+
         if not self.helius_fetcher:
             return
-        
+
         try:
             state = self.tracked_tokens[token_address]
-            
-            # Calculate token age
-            age_seconds = (datetime.utcnow() - state.first_tracked_at).total_seconds()
-            age_minutes = age_seconds / 60
-            
-            # Determine poll interval based on age
-            if age_minutes < 5:
-                poll_interval = 5  # Fast polling for new tokens
-            elif age_minutes < 60:
-                poll_interval = 30  # Medium polling
-            else:
-                poll_interval = 60  # Slow polling
-            
+
+            # Simple fixed interval (30s)
+            poll_interval = 30
+
             # Check if it's time to poll
             now = datetime.utcnow()
             time_since_last_poll = (now - state.last_updated).total_seconds()
-            
+
             if time_since_last_poll < poll_interval:
                 return  # Not time yet
-            
-            # Fetch fresh data from Helius
+
+            # Fetch fresh data (Birdseye returns EVERYTHING including holder_count!)
             symbol = state.token_data.get('token_symbol', 'UNKNOWN')
-            logger.debug(f"🔄 Polling {symbol} (age: {age_minutes:.1f}m)")
-            
-            helius_data = await self.helius_fetcher.get_token_data(token_address)
-            
-            if helius_data:
-                # Enrich with DexScreener if available
-                enriched_data = await self.helius_fetcher.enrich_token_data(helius_data)
-                
-                # Fetch holder count separately
-                holder_count = await self.helius_fetcher.get_holder_count(token_address)
-                if holder_count > 0:
-                    enriched_data['holder_count'] = holder_count
-                
-                # Update token data
-                state.token_data.update(enriched_data)
+            logger.debug(f"🔄 Polling {symbol} (interval: {poll_interval}s)")
+
+            # get_token_data tries Birdseye first (includes price, mcap, liquidity, holder_count)
+            token_data = await self.helius_fetcher.get_token_data(token_address)
+
+            if token_data:
+                # Update token data (holder_count already included from Birdseye!)
+                state.token_data.update(token_data)
                 state.last_updated = now
-                
-                logger.debug(f"   ✅ Updated: price=${enriched_data.get('price_usd', 0):.8f}, holders={holder_count}")
-                
+
+                price = token_data.get('price_usd', 0)
+                holders = token_data.get('holder_count', 0)
+                logger.debug(f"   ✅ Updated: price=${price:.8f}, holders={holders}")
+
                 # Re-analyze with fresh data
                 await self._reanalyze_token(token_address)
-            
+
         except Exception as e:
             logger.error(f"❌ Error polling token: {e}")
     

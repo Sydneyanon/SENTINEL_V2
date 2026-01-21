@@ -159,11 +159,9 @@ async def start_pumpportal_task():
 
 async def smart_polling_task():
     """
-    Smart polling for actively tracked tokens
-    Uses age-based intervals:
-    - New tokens (< 5 min): Every 5 seconds
-    - Young tokens (5-60 min): Every 30 seconds
-    - Mature tokens (> 60 min): Every 60 seconds
+    Polling for actively tracked tokens
+    Fixed 30-second interval (Birdseye API includes all data in one call)
+    No age-based complexity needed - Birdseye returns price, mcap, liquidity, holder_count
     """
     while True:
         try:
@@ -354,10 +352,10 @@ async def startup():
     logger.info("✅ PumpPortal monitor task created")
     
     # Start holder polling task (NEW!)
-    logger.info("👥 Starting holder polling task...")
+    logger.info("🔄 Starting token polling task...")
     asyncio.create_task(smart_polling_task())
-    logger.info("✅ Smart polling started (age-based intervals)")
-    
+    logger.info("✅ Polling started (30s interval via Birdseye)")
+
     # Log configuration
     logger.info("=" * 70)
     logger.info("⚙️  CONFIGURATION")
@@ -365,17 +363,17 @@ async def startup():
     logger.info(f"🎯 KOL-Triggered Tracking: ENABLED")
     logger.info(f"Min Conviction Score: {config.MIN_CONVICTION_SCORE}/100")
     logger.info(f"Elite Wallets: {len(smart_wallet_tracker.tracked_wallets)} tracked")
-    logger.info(f"Smart Polling: Age-based intervals")
+    logger.info(f"🦅 Birdseye API: Price + Holder Count (30s polling)")
     logger.info(f"Performance Tracking: ✅ Enabled")
     logger.info(f"Milestones: {', '.join(f'{m}x' for m in config.MILESTONES)}")
     logger.info(f"Daily Reports: ✅ Midnight UTC")
     logger.info("=" * 70)
-    
+
     logger.info("✅ PROMETHEUS READY")
     logger.info("=" * 70)
     logger.info("🔥 Watching all elite trader activity...")
     logger.info("⚡ Real-time analysis on every trade")
-    logger.info("👥 Smart polling for holder counts")
+    logger.info("🦅 Birdseye integration (price, mcap, holders in one call)")
     logger.info("🚀 Signals posted the moment threshold is crossed")
     logger.info("")
     logger.info("The fire has been stolen. Let it spread. 🔥")
