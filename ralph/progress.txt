@@ -1,0 +1,24 @@
+# Ralph Progress Log - Prometheus Bot Optimization
+Started: Not yet run
+---
+
+## Codebase Patterns
+- Bot auto-deploys to Railway when pushing to `main` branch
+- Conviction scoring happens in scoring/conviction_engine.py
+- Config values are in config.py
+- KOL wallet list is in data/curated_wallets.py
+- Database metrics available via database.py methods
+- Helius API credit usage: ~10 credits per holder check, cached for 60min
+
+## Metrics Collection
+- Use `python ralph/collect_metrics.py --duration 120` to collect 2-hour metrics
+- Baseline metrics stored in prd.json under each optimization
+- Compare with `--compare OPT-ID` flag
+
+## Deployment Notes
+- Push to feature branch first
+- Create PR and merge to main to trigger Railway deploy
+- Wait ~2 min for deployment
+- Monitor Railway logs for errors
+
+---
