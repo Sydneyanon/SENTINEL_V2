@@ -8,6 +8,16 @@ from loguru import logger
 from data.curated_wallets import get_all_tracked_wallets, get_wallet_info
 from gmgn_wallet_fetcher import get_gmgn_fetcher
 
+# Tokens to ignore (not memecoins)
+IGNORE_TOKENS = {
+    'So11111111111111111111111111111111111111112',  # Wrapped SOL
+    'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',  # USDC
+    'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB',  # USDT
+    'USD1ttGYdB3UVrGt5YGWiFaFzQnj5JR7rKdmDuz8Fhvt',  # USD1 (stablecoin)
+    '7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs',  # BONK (established)
+    'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263',  # Bonk (alternate)
+}
+
 
 class SmartWalletTracker:
     """Tracks wallet activity of known successful traders via Helius webhooks"""
@@ -84,8 +94,13 @@ class SmartWalletTracker:
                 if to_address == fee_payer:
                     token_address = transfer.get('mint', '')
                     amount = transfer.get('tokenAmount', 0)
-                    
+
                     if token_address and amount > 0:
+                        # Skip ignored tokens (SOL, stablecoins, etc.)
+                        if token_address in IGNORE_TOKENS:
+                            logger.debug(f"⏭️  Skipping ignored token: {token_address[:8]}...")
+                            continue
+
                         # Record the buy
                         success = await self._record_buy(
                             wallet_address=fee_payer,
@@ -95,7 +110,7 @@ class SmartWalletTracker:
                             timestamp=tx_time,
                             signature=signature
                         )
-                        
+
                         status_emoji = "✅" if success else "⚠️"
                         logger.info(f"👑 {wallet_info['name']} ({wallet_info['tier']}) bought {token_address[:8]}... {status_emoji}")
             

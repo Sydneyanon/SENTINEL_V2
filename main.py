@@ -347,7 +347,10 @@ async def startup():
         db=db,
         helius_fetcher=helius_fetcher  # Pass Helius fetcher
     )
-    logger.info("✅ Active token tracker initialized")
+
+    # CRITICAL: Assign active_tracker back to conviction_engine for unique buyers scoring
+    conviction_engine.active_tracker = active_tracker
+    logger.info("✅ Active token tracker initialized and linked to conviction engine")
     
     # Initialize PumpPortal monitor (OPTIONAL - can be disabled to save resources)
     if config.DISABLE_PUMPPORTAL:
