@@ -550,6 +550,13 @@ class ActiveTokenTracker:
     def get_state(self, token_address: str) -> Optional[TokenState]:
         """Get state of a tracked token"""
         return self.tracked_tokens.get(token_address)
+
+    def get_token_trades(self, token_address: str) -> List[Dict]:
+        """
+        Get trades for a token (returns empty list - trade tracking is done by PumpPortal).
+        This stub exists for compatibility with ConvictionEngine's bundle detection.
+        """
+        return []
     
     def cleanup_old_tokens(self, max_age_hours: int = 24):
         """
