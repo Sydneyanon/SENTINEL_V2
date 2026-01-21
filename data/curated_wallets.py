@@ -4,130 +4,195 @@ Data sourced from kolscan.io and GMGN.ai leaderboards (Jan 2026)
 """
 
 # High-PnL Smart Money Wallets (Snipers, Consistent Winners)
+# Add elite wallets here as you discover them
+# Set 'fetch_metadata': True to auto-fetch win_rate and pnl_30d from GMGN.ai
 SMART_MONEY_WALLETS = {
-    '9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM': {
-        'name': 'AlphaSniper1',
-        'tier': 'elite',
-        'win_rate': 0.85,
-        'pnl_30d': 125000
-    },
-    'H7vNP4r7cNnA2tLWYCEtZhyPBn3n7FfFo7MsEk3qYK5U': {
-        'name': 'PumpHunter',
-        'tier': 'elite',
-        'win_rate': 0.82,
-        'pnl_30d': 98000
-    },
-    'FjqQAQ8fmE3F5t7KJ9UxV5YcP8NmG3rZwTsN2D4vHk8L': {
-        'name': 'EarlyBird',
-        'tier': 'elite',
-        'win_rate': 0.88,
-        'pnl_30d': 156000
-    },
-    '3jK5r9mN8tF7hP2vQ6xL4bY8sW1nC5dR9mT7kH6jP3wX': {
-        'name': 'GemFinder',
-        'tier': 'elite',
-        'win_rate': 0.79,
-        'pnl_30d': 87000
-    },
-    '2sR7tK9nM5gH3pL8vX6bF4yQ7wD1cT9mP5kN8jH4rY2W': {
-        'name': 'SolanaSharks',
-        'tier': 'high',
-        'win_rate': 0.76,
-        'pnl_30d': 72000
-    },
-    '8xT4wK2nP7gL5mV9bN3sH6yR1cF8dQ5pM2jK7tL9nW3X': {
-        'name': 'QuickDraw',
-        'tier': 'high',
-        'win_rate': 0.74,
-        'pnl_30d': 65000
-    },
-    '5mN8tH3gP2vL7kR9bX4wF6yQ1sD3cK8pT5jM7nH9rY2W': {
-        'name': 'ProfitMax',
-        'tier': 'high',
-        'win_rate': 0.81,
-        'pnl_30d': 93000
-    },
-    '7gL5mV9bN3sH6yR1cF8dQ5pM2jK7tL9nW3X4wK2nP8xT': {
-        'name': 'AlphaDegen',
-        'tier': 'high',
-        'win_rate': 0.77,
-        'pnl_30d': 78000
-    },
+    # Add elite sniper wallets here
 }
 
 # High Win-Rate KOL Wallets (Known callers with proven track record)
+# Metadata (win_rate, pnl_30d) is auto-fetched from GMGN.ai when wallet first appears
+# Set 'fetch_metadata': True to enable live GMGN lookups
 KOL_WALLETS = {
-    'CyaE1VxvBrahnPWkqm5VsdCvyS2QmNht2UFrKJHga54o': {
-        'name': 'CENTED',
+    '3kebnKw7cPdSkLRfiMEALyZJGZ4wdiSRvmoN4rD1yPzV': {
+        'name': None,  # Auto-fetch from GMGN
         'tier': 'top_kol',
-        'win_rate': 0.72,
-        'pnl_30d': 45000
-    },
-    '8Dg8J8xSeKqtBvL1nBe9waX348w5FSFjVnQaRLMpf7eV': {
-        'name': 'BRADJAE',
-        'tier': 'top_kol',
-        'win_rate': 0.68,
-        'pnl_30d': 38000
-    },
-    'Be24Gbf5KisDk1LcWWZsBn8dvB816By7YzYF5zWZnRR6': {
-        'name': 'CHAIRMAN',
-        'tier': 'top_kol',
-        'win_rate': 0.70,
-        'pnl_30d': 41000
-    },
-    '4BdKaxN8G6ka4GYtQQWk4G4dZRUTX2vQH9GcXdBREFUk': {
-        'name': 'JIJO',
-        'tier': 'top_kol',
-        'win_rate': 0.65,
-        'pnl_30d': 32000
-    },
-    '2fg5QD1eD7rzNNCsvnhmXFm5hqNgwTTG8p7kQ6f3rx6f': {
-        'name': 'cupsey',
-        'tier': 'top_kol',
-        'win_rate': 0.75,
-        'pnl_30d': 52000
-    },
-    'FAicXNV5FVqtfbpn4Zccs71XcfGeyxBSGbqLDyDJZjke': {
-        'name': 'Radiance',
-        'tier': 'top_kol',
-        'win_rate': 0.67,
-        'pnl_30d': 35000
-    },
-    'DYAn4XpAkN5mhiXkRB7dGq4Jadnx6XYgu8L5b3WGhbrt': {
-        'name': 'The Doc',
-        'tier': 'top_kol',
-        'win_rate': 0.71,
-        'pnl_30d': 43000
-    },
-    'GJA1HEbxGnqBhBifH9uQauzXSB53to5rhDrzmKxhSU65': {
-        'name': 'Latuche',
-        'tier': 'top_kol',
-        'win_rate': 0.66,
-        'pnl_30d': 31000
-    },
-    'G6fUXjMKPJzCY1rveAE6Qm7wy5U3vZgKDJmN1VPAdiZC': {
-        'name': 'Clukz',
-        'tier': 'top_kol',
-        'win_rate': 0.69,
-        'pnl_30d': 37000
+        'fetch_metadata': True
     },
     '57rXqaQsvgyBKwebP2StfqQeCBjBS4jsrZFJN5aU2V9b': {
         'name': 'Ram',
         'tier': 'top_kol',
-        'win_rate': 0.73,
-        'pnl_30d': 48000
+        'fetch_metadata': True
     },
-    '4mN7tK8gP3vL6kR8bX5wF7yQ2sD4cK9pT6jM8nH0rY3W': {
-        'name': 'SolanaKing',
+    'FAicXNV5FVqtfbpn4Zccs71XcfGeyxBSGbqLDyDJZjke': {
+        'name': 'Radiance',
         'tier': 'top_kol',
-        'win_rate': 0.74,
-        'pnl_30d': 55000
+        'fetch_metadata': True
     },
-    '6gL4mV8bN2sH5yR0cF7dQ4pM1jK6tL8nW2X3wK1nP7xT': {
-        'name': 'MemeGuru',
+    'Bi4rd5FH5bYEN8scZ7wevxNZyNmKHdaBcvewdPFxYdLt': {
+        'name': None,
         'tier': 'top_kol',
-        'win_rate': 0.71,
-        'pnl_30d': 44000
+        'fetch_metadata': True
+    },
+    'G6fUXjMKPJzCY1rveAE6Qm7wy5U3vZgKDJmN1VPAdiZC': {
+        'name': 'Clukz',
+        'tier': 'top_kol',
+        'fetch_metadata': True
+    },
+    'Be24Gbf5KisDk1LcWWZsBn8dvB816By7YzYF5zWZnRR6': {
+        'name': 'CHAIRMAN',
+        'tier': 'top_kol',
+        'fetch_metadata': True
+    },
+    'GJA1HEbxGnqBhBifH9uQauzXSB53to5rhDrzmKxhSU65': {
+        'name': 'Latuche',
+        'tier': 'top_kol',
+        'fetch_metadata': True
+    },
+    'F5jWYuiDLTiaLYa54D88YbpXgEsA6NKHzWy4SN4bMYjt': {
+        'name': None,
+        'tier': 'top_kol',
+        'fetch_metadata': True
+    },
+    '4vw54BmAogeRV3vPKWyFet5yf8DTLcREzdSzx4rw9Ud9': {
+        'name': None,
+        'tier': 'top_kol',
+        'fetch_metadata': True
+    },
+    'CA4keXLtGJWBcsWivjtMFBghQ8pFsGRWFxLrRCtirzu5': {
+        'name': None,
+        'tier': 'top_kol',
+        'fetch_metadata': True
+    },
+    'JAmx4Wsh7cWXRzQuVt3TCKAyDfRm9HA7ztJa4f7RM8h9': {
+        'name': None,
+        'tier': 'top_kol',
+        'fetch_metadata': True
+    },
+    '2net6etAtTe3Rbq2gKECmQwnzcKVXRaLcHy2Zy1iCiWz': {
+        'name': None,
+        'tier': 'top_kol',
+        'fetch_metadata': True
+    },
+    'gangJEP5geDHjPVRhDS5dTF5e6GtRvtNogMEEVs91RV': {
+        'name': None,
+        'tier': 'top_kol',
+        'fetch_metadata': True
+    },
+    '5sNnKuWKUtZkdC1eFNyqz3XHpNoCRQ1D1DfHcNHMV7gn': {
+        'name': None,
+        'tier': 'top_kol',
+        'fetch_metadata': True
+    },
+    '39q2g5tTQn9n7KnuapzwS2smSx3NGYqBoea11tBjsGEt': {
+        'name': None,
+        'tier': 'top_kol',
+        'fetch_metadata': True
+    },
+    'G3gZWqrYkNmYFKYCyfRCNtGuxdyuE2wiYKkZpiZn4WSS': {
+        'name': None,
+        'tier': 'top_kol',
+        'fetch_metadata': True
+    },
+    '215nhcAHjQQGgwpQSJQ7zR26etbjjtVdW74NLzwEgQjP': {
+        'name': None,
+        'tier': 'top_kol',
+        'fetch_metadata': True
+    },
+    'EeXvxkcGqMDZeTaVeawzxm9mbzZwqDUMmfG3bF7uzumH': {
+        'name': None,
+        'tier': 'top_kol',
+        'fetch_metadata': True
+    },
+    '4nvNc7dDEqKKLM4Sr9Kgk3t1of6f8G66kT64VoC95LYh': {
+        'name': None,
+        'tier': 'top_kol',
+        'fetch_metadata': True
+    },
+    '4fZFcK8ms3bFMpo1ACzEUz8bH741fQW4zhAMGd5yZMHu': {
+        'name': None,
+        'tier': 'top_kol',
+        'fetch_metadata': True
+    },
+    '6mWEJG9LoRdto8TwTdZxmnJpkXpTsEerizcGiCNZvzXd': {
+        'name': None,
+        'tier': 'top_kol',
+        'fetch_metadata': True
+    },
+    'zhYnXqK3MNSmwS3yxSvPmY5kUa1n2WUaCJgYUDrAHkL': {
+        'name': None,
+        'tier': 'top_kol',
+        'fetch_metadata': True
+    },
+    '9RrKUhRpbPDNxR7x88ZsCgdtqPHUfwYPjj4JdpV4FBj9': {
+        'name': None,
+        'tier': 'top_kol',
+        'fetch_metadata': True
+    },
+    '5B52w1ZW9tuwUduueP5J7HXz5AcGfruGoX6YoAudvyxG': {
+        'name': None,
+        'tier': 'top_kol',
+        'fetch_metadata': True
+    },
+    'BTf4A2exGK9BCVDNzy65b9dUzXgMqB4weVkvTMFQsadd': {
+        'name': None,
+        'tier': 'top_kol',
+        'fetch_metadata': True
+    },
+    'DYAn4XpAkN5mhiXkRB7dGq4Jadnx6XYgu8L5b3WGhbrt': {
+        'name': 'The Doc',
+        'tier': 'top_kol',
+        'fetch_metadata': True
+    },
+    'sAdNbe1cKNMDqDsa4npB3TfL62T14uAo2MsUQfLvzLT': {
+        'name': None,
+        'tier': 'top_kol',
+        'fetch_metadata': True
+    },
+    'GNrmKZCxYyNiSUsjduwwPJzhed3LATjciiKVuSGrsHEC': {
+        'name': None,
+        'tier': 'top_kol',
+        'fetch_metadata': True
+    },
+    'DZAa55HwXgv5hStwaTEJGXZz1DhHejvpb7Yr762urXam': {
+        'name': None,
+        'tier': 'top_kol',
+        'fetch_metadata': True
+    },
+    'PMJA8UQDyWTFw2Smhyp9jGA6aTaP7jKHR7BPudrgyYN': {
+        'name': None,
+        'tier': 'top_kol',
+        'fetch_metadata': True
+    },
+    'BaLxyjXzATAnfm7cc5AFhWBpiwnsb71THcnofDLTWAPK': {
+        'name': None,
+        'tier': 'top_kol',
+        'fetch_metadata': True
+    },
+    'CxgPWvH2GoEDENELne2XKAR2z2Fr4shG2uaeyqZceGve': {
+        'name': None,
+        'tier': 'top_kol',
+        'fetch_metadata': True
+    },
+    '8oQoMhfBQnRspn7QtNAq2aPThRE4q94kLSTwaaFQvRgs': {
+        'name': None,
+        'tier': 'top_kol',
+        'fetch_metadata': True
+    },
+    '87rRdssFiTJKY4MGARa4G5vQ31hmR7MxSmhzeaJ5AAxJ': {
+        'name': None,
+        'tier': 'top_kol',
+        'fetch_metadata': True
+    },
+    '5B79fMkcFeRTiwm7ehsZsFiKsC7m7n1Bgv9yLxPp9q2X': {
+        'name': None,
+        'tier': 'top_kol',
+        'fetch_metadata': True
+    },
+    'AAMnoNo3TpezKcT7ah9puLFZ4D59muEhQHJJqpX16ccg': {
+        'name': None,
+        'tier': 'top_kol',
+        'fetch_metadata': True
     },
 }
 

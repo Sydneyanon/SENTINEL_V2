@@ -32,3 +32,6 @@ orjson>=3.9.10
 
 # Async Support
 asyncio>=3.4.3
+
+# GMGN Wallet Metadata (via Apify)
+apify-client>=1.7.0
