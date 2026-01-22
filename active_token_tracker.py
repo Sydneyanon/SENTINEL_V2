@@ -22,6 +22,7 @@ class TokenState:
     last_holder_check: datetime
     last_holder_count: int
     source: str = 'kol_buy'  # 'kol_buy' or 'telegram_call'
+    last_analyzed: datetime = None  # Prevent spam re-analysis
 
 
 class ActiveTokenTracker:
@@ -126,7 +127,8 @@ class ActiveTokenTracker:
                 kol_buy_count=1 if source == 'kol_buy' else 0,  # Only count as KOL buy if from KOL
                 last_holder_check=now,
                 last_holder_count=initial_data.get('holder_count', 0),
-                source=source
+                source=source,
+                last_analyzed=now  # Initialize cooldown timer
             )
             
             self.tracked_tokens[token_address] = state
@@ -379,11 +381,21 @@ class ActiveTokenTracker:
         """
         if token_address not in self.tracked_tokens:
             return
-        
+
         try:
             state = self.tracked_tokens[token_address]
+
+            # COOLDOWN: Prevent spam re-analysis (max once per 3 seconds)
+            now = datetime.utcnow()
+            if state.last_analyzed:
+                seconds_since_last = (now - state.last_analyzed).total_seconds()
+                if seconds_since_last < 3:
+                    logger.debug(f"⏭️  Skipping re-analysis (cooldown: {seconds_since_last:.1f}s < 3s)")
+                    return
+
+            state.last_analyzed = now
             self.reanalyses_total += 1
-            
+
             # Get fresh conviction score
             conviction_data = await self.conviction_engine.analyze_token(
                 token_address,
