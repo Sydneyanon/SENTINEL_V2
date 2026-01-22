@@ -23,6 +23,11 @@ ENABLE_TELEGRAM = True  # Enable Telegram posting
 LUNARCRUSH_API_KEY = os.getenv('LUNARCRUSH_API_KEY')  # Social sentiment aggregator
 TWITTER_BEARER_TOKEN = os.getenv('TWITTER_BEARER_TOKEN')  # Twitter API v2 (free tier)
 
+# Telegram Monitor (Built-in) - Alternative to solana-token-scraper
+TELEGRAM_API_ID = os.getenv('TELEGRAM_API_ID')  # From https://my.telegram.org
+TELEGRAM_API_HASH = os.getenv('TELEGRAM_API_HASH')  # From https://my.telegram.org
+TELEGRAM_PHONE = os.getenv('TELEGRAM_PHONE')  # Your phone number (optional, for first-time auth)
+
 # =============================================================================
 # CREDIT OPTIMIZATION (CRITICAL!)
 # =============================================================================
@@ -375,6 +380,7 @@ ENABLE_MILESTONE_ALERTS = True
 ENABLE_LUNARCRUSH = False   # LunarCrush disabled (use Twitter only)
 ENABLE_TWITTER = True       # Twitter buzz detection (free tier - ENABLED)
 ENABLE_TELEGRAM_SCRAPER = True  # Telegram alpha call scraper (FREE - ENABLED)
+ENABLE_BUILTIN_TELEGRAM_MONITOR = False  # Built-in Telegram monitor (alternative to external scraper)
 
 # =============================================================================
 # NARRATIVE DETECTION (2026 HOT TRENDS)
@@ -473,3 +479,23 @@ EXPECTED_DAILY_CREDITS = {
     'other': 2000,          # Misc RPC calls
     'total': 25000          # ~750k/month (well under 1M free tier)
 }
+
+# =============================================================================
+# TELEGRAM GROUPS TO MONITOR (Built-in Monitor)
+# =============================================================================
+
+# Run: python telegram_monitor.py to auto-generate this list from your groups
+# Then edit to keep only groups you want to monitor
+
+TELEGRAM_GROUPS = {
+    # Example format:
+    # 1234567890: 'bullish_bangers',  # Bullish's Bangers
+    # 9876543210: 'alpha_calls',      # Solana Alpha Calls
+    # 5555555555: 'pump_gems',        # Pump.fun Gems
+
+    # Add your groups here after running: python telegram_monitor.py
+}
+
+# Alternative: If using external solana-token-scraper (webhook mode)
+# You don't need to configure TELEGRAM_GROUPS
+# Just set ENABLE_BUILTIN_TELEGRAM_MONITOR = False

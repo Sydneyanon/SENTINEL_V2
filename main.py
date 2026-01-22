@@ -59,6 +59,9 @@ telegram_publisher = TelegramPublisher()
 # Format: {token_address: {'mentions': [{'timestamp': datetime, 'group': str}], 'first_seen': datetime}}
 telegram_calls_cache = {}
 
+# Telegram Monitor (Built-in) - optional alternative to external scraper
+telegram_monitor = None
+
 # ============================================================================
 # HELPER FUNCTIONS
 # ============================================================================
@@ -279,7 +282,7 @@ async def cleanup_task():
 @app.on_event("startup")
 async def startup():
     """Initialize all components"""
-    global conviction_engine, pumpportal_monitor, db, performance_tracker, active_tracker, helius_fetcher, smart_wallet_tracker
+    global conviction_engine, pumpportal_monitor, db, performance_tracker, active_tracker, helius_fetcher, smart_wallet_tracker, telegram_monitor
     
     logger.info("=" * 70)
     logger.info("🔥 PROMETHEUS - AUTONOMOUS SIGNAL SYSTEM")
@@ -408,6 +411,27 @@ async def startup():
     logger.info("The fire has been stolen. Let it spread. 🔥")
     logger.info("=" * 70)
     
+    # Start Telegram monitor (if enabled)
+    if config.ENABLE_BUILTIN_TELEGRAM_MONITOR:
+        if config.TELEGRAM_GROUPS:
+            logger.info("📱 Initializing built-in Telegram monitor...")
+            try:
+                from telegram_monitor import TelegramMonitor
+                telegram_monitor = TelegramMonitor(telegram_calls_cache)
+
+                success = await telegram_monitor.initialize(config.TELEGRAM_GROUPS)
+                if success:
+                    # Start monitor in background
+                    asyncio.create_task(telegram_monitor.run())
+                    logger.info(f"✅ Telegram monitor started ({len(config.TELEGRAM_GROUPS)} groups)")
+                else:
+                    logger.warning("⚠️ Telegram monitor failed to initialize")
+            except Exception as e:
+                logger.error(f"❌ Failed to start Telegram monitor: {e}")
+        else:
+            logger.warning("⚠️ ENABLE_BUILTIN_TELEGRAM_MONITOR=True but no TELEGRAM_GROUPS configured")
+            logger.info("   Run: python telegram_monitor.py to generate group list")
+
     # Start background tasks
     asyncio.create_task(cleanup_task())
 
@@ -593,16 +617,19 @@ async def pumpportal_diagnostic():
 async def shutdown():
     """Cleanup on shutdown"""
     logger.info("🛑 Shutting down Prometheus...")
-    
+
     if pumpportal_monitor:
         await pumpportal_monitor.stop()
-    
+
     if performance_tracker:
         await performance_tracker.stop()
-    
+
+    if telegram_monitor:
+        await telegram_monitor.stop()
+
     if db:
         await db.close()
-    
+
     logger.info("✅ Shutdown complete")
 
 # ============================================================================

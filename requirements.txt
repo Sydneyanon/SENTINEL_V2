@@ -39,4 +39,6 @@ apify-client>=1.7.0
 # Social Intelligence APIs
 # - LunarCrush: Social sentiment aggregator
 # - Twitter API v2: Direct Twitter mentions & engagement
-# Both use aiohttp (already included above)
+# - Telegram: Built-in monitor (alternative to external scraper)
+# Twitter/LunarCrush use aiohttp (already included above)
+telethon>=1.28.0  # Telegram client (only if using built-in monitor)
