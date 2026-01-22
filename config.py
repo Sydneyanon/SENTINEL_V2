@@ -379,8 +379,8 @@ ENABLE_PERFORMANCE_TRACKING = True
 ENABLE_MILESTONE_ALERTS = True
 ENABLE_LUNARCRUSH = False   # LunarCrush disabled (use Twitter only)
 ENABLE_TWITTER = True       # Twitter buzz detection (free tier - ENABLED)
-ENABLE_TELEGRAM_SCRAPER = True  # Telegram social confirmation - ENABLED!
-ENABLE_BUILTIN_TELEGRAM_MONITOR = True  # Built-in Telegram monitor - ENABLED!
+ENABLE_TELEGRAM_SCRAPER = False  # Telegram social confirmation - DISABLED (session file pending)
+ENABLE_BUILTIN_TELEGRAM_MONITOR = False  # Built-in Telegram monitor - DISABLED (session file pending)
 
 # =============================================================================
 # NARRATIVE DETECTION (2026 HOT TRENDS)
