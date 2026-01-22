@@ -391,12 +391,23 @@ class PerformanceTracker:
             message += "🎓 = Post-graduation signal (100%)\n\n"
             message += "⚠️ <i>Past performance ≠ future results</i>"
             
-            await self.telegram.bot.send_message(
+            result = await self.telegram.bot.send_message(
                 chat_id=self.telegram.channel_id,
                 text=message,
                 parse_mode='HTML'
             )
-            
+
+            # Pin the daily report
+            try:
+                await self.telegram.bot.pin_chat_message(
+                    chat_id=self.telegram.channel_id,
+                    message_id=result.message_id,
+                    disable_notification=False  # Notify subscribers
+                )
+                logger.info("📌 Daily report pinned")
+            except Exception as pin_error:
+                logger.warning(f"⚠️ Could not pin daily report: {pin_error}")
+
             logger.info("✅ Daily report posted")
             
         except Exception as e:
