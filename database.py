@@ -242,6 +242,15 @@ class Database:
             ''', hours)
             return [dict(row) for row in rows]
 
+    async def get_highest_milestone(self, token_address: str) -> Optional[float]:
+        """Get the highest milestone reached for a token"""
+        async with self.pool.acquire() as conn:
+            milestone = await conn.fetchval('''
+                SELECT MAX(milestone) FROM performance
+                WHERE token_address = $1
+            ''', token_address)
+            return milestone
+
     async def insert_smart_wallet_activity(
         self,
         wallet_address: str,
