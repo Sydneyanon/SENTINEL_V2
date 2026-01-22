@@ -96,14 +96,16 @@ class TelegramMonitor:
             if not text:
                 return
 
+            # Get group info for logging
+            chat_id = event.chat_id
+            group_name = self.monitored_groups.get(chat_id, f"group_{chat_id}")
+
             # Extract Solana CAs from message
             potential_cas = self.ca_pattern.findall(text)
             if not potential_cas:
                 return
 
-            # Get group name
-            chat_id = event.chat_id
-            group_name = self.monitored_groups.get(chat_id, f"group_{chat_id}")
+            logger.info(f"📨 Message from {group_name} has {len(potential_cas)} CA(s)")
 
             # Process each CA found
             for ca in potential_cas:
