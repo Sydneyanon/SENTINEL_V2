@@ -60,11 +60,22 @@ Send these commands to your Telegram bot (in a private message):
 
 ## Security Features
 
-✅ **Only you can use the bot** - Commands only work from your Telegram user ID
+✅ **Admin commands are locked** - Only your Telegram user ID can use /stats, /health, etc.
 
 ✅ **Unauthorized users are blocked** - Other users get no response (silent block)
 
-✅ **Cannot be added to other channels** - Bot only posts to your configured channel
+✅ **Channel locked** - Bot only posts signals to YOUR configured channel (TELEGRAM_CHANNEL_ID)
+
+✅ **Cannot be hijacked** - Even if someone adds your bot to their channel, it won't post there
+
+### How Channel Security Works
+
+The bot is hardcoded to only post to `TELEGRAM_CHANNEL_ID` from your environment variables. Even if someone:
+- Gets your bot username and adds it to their channel
+- Tries to trigger commands
+- Has the bot token
+
+The bot will ONLY post signals to YOUR channel. It verifies the channel ID before every post.
 
 ## Testing Admin Commands
 
@@ -77,18 +88,38 @@ Send these commands to your Telegram bot (in a private message):
 ## Troubleshooting
 
 **Bot doesn't respond to commands:**
-- Check that `ADMIN_TELEGRAM_USER_ID` is set correctly
-- Make sure you're using your numeric user ID (not username)
-- Check Railway logs for "Admin bot started" message
+1. Check Railway logs for these messages:
+   - `✅ Admin bot initialized`
+   - `✅ Admin bot polling started`
+   - `Authorized user ID: YOUR_ID`
+
+2. Verify `ADMIN_TELEGRAM_USER_ID` is set:
+   - Go to Railway → Variables
+   - Make sure it's your numeric ID (e.g., `123456789`)
+   - NOT your @username
+
+3. Test your user ID:
+   - Message @userinfobot to confirm your ID
+   - Make sure it matches what's in Railway
+
+4. Check bot chat:
+   - Make sure you're in a PRIVATE MESSAGE with the bot (not a group/channel)
+   - Try `/start` first to wake up the bot
+   - Then try `/help`
 
 **"Admin bot disabled" in logs:**
 - `ADMIN_TELEGRAM_USER_ID` is not set or is 0
 - Add the variable and redeploy
 
-**Bot responds to commands but shows errors:**
+**Commands work but show errors:**
 - Check Railway logs for specific error messages
 - Database connection might be down
 - Performance tracker might not be initialized
+
+**Someone else tries to use the bot:**
+- They get no response (silent block)
+- Only your user ID can see commands
+- Bot won't reveal itself to unauthorized users
 
 ## Example Usage
 
