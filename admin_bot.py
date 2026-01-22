@@ -2,6 +2,7 @@
 Admin Telegram Bot - Handle admin commands for monitoring and control
 """
 import asyncio
+import aiohttp
 from datetime import datetime, timedelta
 from typing import Optional
 from loguru import logger
@@ -128,6 +129,25 @@ class AdminBot:
             logger.error(f"❌ Error sending response: {e}")
             # Fallback to DM if channel post fails
             await update.message.reply_text(text, parse_mode=ParseMode.HTML)
+
+    async def _get_current_price(self, token_address: str) -> Optional[float]:
+        """Fetch current price from DexScreener"""
+        try:
+            url = f"https://api.dexscreener.com/latest/dex/tokens/{token_address}"
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=3)) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        pairs = data.get('pairs', [])
+                        if pairs:
+                            # Get first pair with price
+                            for pair in pairs:
+                                price = pair.get('priceUsd')
+                                if price:
+                                    return float(price)
+        except:
+            pass
+        return None
 
     async def _handle_unauthorized(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle unauthorized access attempts"""
@@ -293,7 +313,7 @@ class AdminBot:
             await update.message.reply_text(f"❌ Error getting active tokens: {str(e)}")
 
     async def _cmd_performance(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Show recent signal performance"""
+        """Show recent signal performance with gains"""
         try:
             if not self.database:
                 await self._send_response(update, context, "❌ Database not available")
@@ -309,33 +329,78 @@ class AdminBot:
             response = f"📈 <b>RECENT PERFORMANCE</b>\n\n"
             response += f"Signals (48h): {len(signals)}\n\n"
 
-            # Show last 8 signals
-            for signal in signals[:8]:
+            wins = 0
+            losses = 0
+
+            # Show last 10 signals with gains
+            for signal in signals[:10]:
                 symbol = signal.get('token_symbol', 'UNKNOWN')
                 score = signal.get('conviction_score', 0)
                 entry = signal.get('entry_price', 0)
+                token_address = signal.get('token_address', '')
                 timestamp = signal.get('created_at', '')
 
-                # Parse timestamp
+                # Parse age
                 try:
-                    dt = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
-                    age = datetime.utcnow().replace(tzinfo=dt.tzinfo) - dt
-                    age_str = f"{age.total_seconds() / 3600:.1f}h ago"
+                    if isinstance(timestamp, str):
+                        dt = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+                    else:
+                        dt = timestamp
+                    age = datetime.utcnow().replace(tzinfo=dt.tzinfo if dt.tzinfo else None) - dt
+                    age_str = f"{age.total_seconds() / 3600:.1f}h"
                 except:
-                    age_str = "unknown"
+                    age_str = "?"
 
-                response += f"<b>${symbol}</b> ({score}/100)\n"
-                response += f"   Entry: ${entry:.8f}\n"
-                response += f"   {age_str}\n\n"
+                # Fetch current price
+                current_price = await self._get_current_price(token_address) if token_address else None
 
-            if len(signals) > 8:
-                response += f"<i>...and {len(signals) - 8} more</i>"
+                if current_price and entry and entry > 0:
+                    gain_mult = current_price / entry
+                    gain_pct = (gain_mult - 1) * 100
+
+                    # Determine win/loss
+                    if gain_mult >= 1.5:
+                        emoji = "🟢"
+                        wins += 1
+                    elif gain_mult >= 1.0:
+                        emoji = "🟡"
+                        wins += 1
+                    else:
+                        emoji = "🔴"
+                        losses += 1
+
+                    # Format gain display
+                    if gain_mult >= 2.0:
+                        gain_str = f"{gain_mult:.1f}x"
+                    else:
+                        gain_str = f"{gain_pct:+.0f}%"
+
+                    response += f"{emoji} <b>${symbol}</b> {gain_str}\n"
+                    response += f"   Entry: ${entry:.8f} → Now: ${current_price:.8f}\n"
+                    response += f"   Score: {score}/100 | {age_str} ago\n\n"
+                else:
+                    # Can't get price or already dead
+                    response += f"⚫ <b>${symbol}</b> (dead/rugged)\n"
+                    response += f"   Entry: ${entry:.8f}\n"
+                    response += f"   Score: {score}/100 | {age_str} ago\n\n"
+                    losses += 1
+
+            if len(signals) > 10:
+                response += f"<i>...and {len(signals) - 10} more</i>\n\n"
+
+            # Add summary
+            total = wins + losses
+            if total > 0:
+                win_rate = (wins / total) * 100
+                response += f"📊 <b>Win Rate: {win_rate:.0f}%</b> ({wins}W / {losses}L)"
 
             await self._send_response(update, context, response)
 
         except Exception as e:
             logger.error(f"❌ Error in /performance: {e}")
-            await update.message.reply_text(f"❌ Error getting performance: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
+            await self._send_response(update, context, f"❌ Error getting performance: {str(e)}")
 
     async def _cmd_health(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Show system health"""
