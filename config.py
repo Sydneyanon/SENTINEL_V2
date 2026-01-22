@@ -379,8 +379,8 @@ ENABLE_PERFORMANCE_TRACKING = True
 ENABLE_MILESTONE_ALERTS = True
 ENABLE_LUNARCRUSH = False   # LunarCrush disabled (use Twitter only)
 ENABLE_TWITTER = True       # Twitter buzz detection (free tier - ENABLED)
-ENABLE_TELEGRAM_SCRAPER = False  # Telegram disabled - focus on core signals first
-ENABLE_BUILTIN_TELEGRAM_MONITOR = False  # Telegram disabled - focus on core signals first
+ENABLE_TELEGRAM_SCRAPER = True  # Telegram social confirmation - ENABLED!
+ENABLE_BUILTIN_TELEGRAM_MONITOR = True  # Built-in Telegram monitor - ENABLED!
 
 # =============================================================================
 # NARRATIVE DETECTION (2026 HOT TRENDS)
@@ -488,12 +488,28 @@ EXPECTED_DAILY_CREDITS = {
 # Then edit to keep only groups you want to monitor
 
 TELEGRAM_GROUPS = {
-    # Example format:
-    # 1234567890: 'bullish_bangers',  # Bullish's Bangers
-    # 9876543210: 'alpha_calls',      # Solana Alpha Calls
-    # 5555555555: 'pump_gems',        # Pump.fun Gems
-
-    # Add your groups here after running: python telegram_monitor.py
+    -1001758611100: 'mad_apes',  # Mad Apes (gambles)
+    -1001490374084: 'alpha_group_1',  # Alpha Group 1
+    -1001860996162: 'alpha_group_2',  # Alpha Group 2
+    -1002139128702: 'alpha_group_3',  # Alpha Group 3
+    -1002432801514: 'alpha_group_4',  # Alpha Group 4
+    -1001324535284: 'alpha_group_5',  # Alpha Group 5
+    -1001508785153: 'alpha_group_6',  # Alpha Group 6
+    -1001523240618: 'alpha_group_7',  # Alpha Group 7
+    -1001879023403: 'alpha_group_8',  # Alpha Group 8
+    -1002152633628: 'alpha_group_9',  # Alpha Group 9
+    -1002697838664: 'alpha_group_10',  # Alpha Group 10
+    -1002552682611: 'alpha_group_11',  # Alpha Group 11
+    -1002824908745: 'alpha_group_12',  # Alpha Group 12
+    -1002661048397: 'alpha_group_13',  # Alpha Group 13
+    -1001812989440: 'alpha_group_14',  # Alpha Group 14
+    -1002402275750: 'alpha_group_15',  # Alpha Group 15
+    -1001727197121: 'alpha_group_16',  # Alpha Group 16
+    -1001885421444: 'alpha_group_17',  # Alpha Group 17
+    -1001267600694: 'alpha_group_18',  # Alpha Group 18
+    -1001572364341: 'alpha_group_19',  # Alpha Group 19
+    -1002654543409: 'alpha_group_20',  # Alpha Group 20
+    -1001510769567: 'alpha_group_21',  # Alpha Group 21
 }
 
 # Alternative: If using external solana-token-scraper (webhook mode)
