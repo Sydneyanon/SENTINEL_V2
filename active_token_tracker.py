@@ -275,6 +275,9 @@ class ActiveTokenTracker:
             new_name = trade_data.get('name', '')
             new_symbol = trade_data.get('symbol', '')
 
+            # Debug: Log what PumpPortal is sending
+            logger.info(f"      🔍 PumpPortal metadata: name='{new_name}', symbol='{new_symbol}'")
+
             # Use new data if it's good, otherwise keep existing good data
             final_name = existing_name  # Start with what we have
             if new_name and new_name not in ['Unknown', '']:

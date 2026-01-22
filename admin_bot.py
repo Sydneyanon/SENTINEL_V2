@@ -198,7 +198,34 @@ class AdminBot:
             if self.telegram_calls_cache:
                 cache_size = len(self.telegram_calls_cache)
                 stats_text += f"<b>Telegram Cache:</b>\n"
-                stats_text += f"• Tokens called: {cache_size}\n"
+                stats_text += f"• Tokens called: {cache_size}\n\n"
+
+            # Recent signals list
+            if self.database:
+                try:
+                    recent_signals = await self.database.get_signals_in_last_hours(24)
+                    if recent_signals:
+                        stats_text += f"<b>Recent Signals (Last 24h):</b>\n"
+                        for signal in recent_signals[:5]:  # Show last 5
+                            symbol = signal.get('token_symbol', 'UNKNOWN')
+                            score = signal.get('conviction_score', 0)
+                            entry = signal.get('entry_price', 0)
+                            timestamp = signal.get('created_at', '')
+
+                            # Parse age
+                            try:
+                                dt = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+                                age = datetime.utcnow().replace(tzinfo=dt.tzinfo) - dt
+                                age_str = f"{age.total_seconds() / 3600:.1f}h ago"
+                            except:
+                                age_str = "unknown"
+
+                            stats_text += f"• <b>${symbol}</b> ({score}/100) - ${entry:.8f} - {age_str}\n"
+
+                        if len(recent_signals) > 5:
+                            stats_text += f"<i>...and {len(recent_signals) - 5} more (use /performance for full list)</i>\n"
+                except Exception as e:
+                    logger.error(f"Error fetching recent signals: {e}")
 
             stats_text += f"\n⏰ <i>Updated: {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}</i>"
 
