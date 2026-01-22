@@ -1,12 +1,12 @@
 """
 🔥 PROMETHEUS - Autonomous Signal System
-KOL-Triggered Real-Time Tracking with Conviction Scoring
+KOL-Triggered Real-Time Tracking with Conviction Scoring + Telegram Alpha Calls
 """
 import asyncio
 from typing import Dict, List
 from fastapi import FastAPI, Request
 from loguru import logger
-from datetime import datetime  # ← ADD THIS
+from datetime import datetime, timedelta
 import sys
 
 # Configure logging
@@ -54,6 +54,10 @@ conviction_engine = None
 
 # Publishers
 telegram_publisher = TelegramPublisher()
+
+# Telegram Alpha Calls Cache (tracks calls from Telegram scraper)
+# Format: {token_address: {'mentions': [{'timestamp': datetime, 'group': str}], 'first_seen': datetime}}
+telegram_calls_cache = {}
 
 # ============================================================================
 # HELPER FUNCTIONS
@@ -415,7 +419,7 @@ async def startup():
 async def smart_wallet_webhook(request: Request):
     """
     Helius webhook for smart wallet transactions
-    
+
     NEW BEHAVIOR:
     1. Process webhook to save KOL activity
     2. Extract tokens that were bought
@@ -424,10 +428,10 @@ async def smart_wallet_webhook(request: Request):
     try:
         data = await request.json()
         logger.info("📥 Received smart wallet webhook")
-        
+
         # Process through smart wallet tracker (saves to DB)
         await smart_wallet_tracker.process_webhook(data)
-        
+
         # Extract token addresses that were bought
         token_addresses = extract_token_addresses_from_webhook(data)
 
@@ -442,9 +446,91 @@ async def smart_wallet_webhook(request: Request):
                 active_tracker.track_buyers_from_webhook(token_address, data)
 
         return {"status": "success"}
-        
+
     except Exception as e:
         logger.error(f"❌ Error processing smart wallet webhook: {e}")
+        return {"status": "error", "message": str(e)}
+
+
+@app.get("/webhook/telegram-call")
+async def telegram_call_webhook(token: str, group: str = "unknown"):
+    """
+    Webhook for Telegram scraper (solana-token-scraper)
+    Receives CA when detected in alpha groups
+
+    Supports:
+    - Multiple mentions (stacking bonus)
+    - Group quality tracking (for future weighting)
+    - Call-triggered tracking (optional)
+
+    Args:
+        token: Contract address (Solana CA)
+        group: Group name/ID (optional, for quality tracking)
+
+    Example:
+        GET /webhook/telegram-call?token=GDfn...abc&group=bullish_bangers
+    """
+    try:
+        logger.info(f"🔥 TELEGRAM CALL detected: {token[:8]}... (group: {group})")
+
+        # Add to cache with timestamp
+        now = datetime.utcnow()
+
+        if token not in telegram_calls_cache:
+            telegram_calls_cache[token] = {
+                'mentions': [],
+                'first_seen': now,
+                'groups': set()
+            }
+
+        # Add this mention
+        telegram_calls_cache[token]['mentions'].append({
+            'timestamp': now,
+            'group': group
+        })
+        telegram_calls_cache[token]['groups'].add(group)
+
+        mention_count = len(telegram_calls_cache[token]['mentions'])
+        group_count = len(telegram_calls_cache[token]['groups'])
+
+        logger.info(f"   📊 Total mentions: {mention_count} from {group_count} group(s)")
+
+        # Cleanup old entries (>4 hours)
+        cutoff = now - timedelta(hours=4)
+        for ca in list(telegram_calls_cache.keys()):
+            # Remove old mentions
+            telegram_calls_cache[ca]['mentions'] = [
+                m for m in telegram_calls_cache[ca]['mentions']
+                if m['timestamp'] > cutoff
+            ]
+            # Remove token if no recent mentions
+            if not telegram_calls_cache[ca]['mentions']:
+                del telegram_calls_cache[ca]
+                logger.debug(f"   🧹 Cleaned up old call: {ca[:8]}")
+
+        # OPTIONAL: Call-triggered tracking (if enabled)
+        # Start tracking if mentioned in 2+ groups within 5 min
+        if config.TELEGRAM_CALL_TRIGGER_ENABLED and group_count >= 2:
+            # Check if mentions happened within 5 min window
+            first_mention = telegram_calls_cache[token]['first_seen']
+            time_spread = (now - first_mention).total_seconds()
+
+            if time_spread <= 300:  # 5 minutes
+                logger.info(f"   🚨 MULTI-GROUP CALL: {group_count} groups in {time_spread:.0f}s - starting tracking!")
+
+                # Start tracking (even without KOL buy)
+                if active_tracker and not active_tracker.is_tracked(token):
+                    await active_tracker.start_tracking(token, source='telegram_call')
+
+        return {
+            "status": "received",
+            "token": token,
+            "mentions": mention_count,
+            "groups": group_count
+        }
+
+    except Exception as e:
+        logger.error(f"❌ Error processing Telegram call: {e}")
         return {"status": "error", "message": str(e)}
 
 # ============================================================================

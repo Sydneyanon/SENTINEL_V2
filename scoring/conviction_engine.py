@@ -215,6 +215,87 @@ class ConvictionEngine:
             mid_total += twitter_score
 
             # ================================================================
+            # PHASE 3.7: SOCIAL CONFIRMATION (TELEGRAM CALLS) - FREE
+            # ================================================================
+            # SELECTIVE: Only check if token is already tracked (KOL bought)
+            # AND mid_total >= 60 (promising token)
+            # Variable scoring based on mention intensity and recency
+
+            social_confirmation_score = 0
+            telegram_call_data = {}
+
+            if config.ENABLE_TELEGRAM_SCRAPER and mid_total >= 60:
+                # Import from main
+                from main import telegram_calls_cache
+
+                if token_address in telegram_calls_cache:
+                    call_data = telegram_calls_cache[token_address]
+                    now = datetime.now()
+
+                    # Get recent mentions (last 10 min)
+                    recent_cutoff = now - timedelta(minutes=10)
+                    recent_mentions = [
+                        m for m in call_data['mentions']
+                        if m['timestamp'] > recent_cutoff
+                    ]
+
+                    # Get very recent mentions (last 5 min) for intensity check
+                    very_recent_cutoff = now - timedelta(minutes=5)
+                    very_recent_mentions = [
+                        m for m in call_data['mentions']
+                        if m['timestamp'] > very_recent_cutoff
+                    ]
+
+                    mention_count = len(recent_mentions)
+                    very_recent_count = len(very_recent_mentions)
+                    group_count = len(call_data['groups'])
+
+                    # Calculate call age (time since first mention)
+                    call_age = now - call_data['first_seen']
+                    call_age_minutes = call_age.total_seconds() / 60
+
+                    # Variable scoring based on Grok's recommendations
+                    if mention_count >= 6 or group_count >= 3:
+                        # High intensity: 6+ mentions OR 3+ groups
+                        social_confirmation_score = 15
+                        telegram_call_data['intensity'] = 'high'
+                    elif mention_count >= 3 or (very_recent_count >= 2 and group_count >= 2):
+                        # Medium intensity: 3-5 mentions OR growing buzz
+                        social_confirmation_score = 10
+                        telegram_call_data['intensity'] = 'medium'
+                    elif mention_count >= 1:
+                        # Low intensity: 1-2 mentions
+                        social_confirmation_score = 5
+                        telegram_call_data['intensity'] = 'low'
+
+                    # Age decay: reduce points if call is old
+                    if call_age_minutes > 120:  # >2 hours old
+                        social_confirmation_score = int(social_confirmation_score * 0.5)
+                        telegram_call_data['aged'] = True
+
+                    if social_confirmation_score > 0:
+                        logger.info(f"   🔥 TELEGRAM CALL BONUS: +{social_confirmation_score} pts")
+                        logger.info(f"      {mention_count} mention(s) from {group_count} group(s) ({call_age_minutes:.0f}m ago)")
+
+                        telegram_call_data.update({
+                            'mentions': mention_count,
+                            'groups': group_count,
+                            'call_age_minutes': call_age_minutes,
+                            'score': social_confirmation_score
+                        })
+
+            # Cap total social score (Twitter + Telegram) at 25 pts
+            # This prevents over-scoring noisy hype
+            total_social = twitter_score + social_confirmation_score
+            if total_social > 25:
+                excess = total_social - 25
+                social_confirmation_score -= excess
+                logger.info(f"   ⚖️  Social cap applied: reduced Telegram by {excess} pts (max 25 total)")
+                telegram_call_data['capped'] = True
+
+            mid_total += social_confirmation_score
+
+            # ================================================================
             # PHASE 4: HOLDER CONCENTRATION CHECK (10 CREDITS) ⭐
             # ================================================================
             
@@ -287,6 +368,7 @@ class ConvictionEngine:
                     'unique_buyers': unique_buyers_score,
                     'social_sentiment': social_score,
                     'twitter_buzz': twitter_score,
+                    'telegram_calls': social_confirmation_score,
                     'holder_penalty': holder_result['penalty'],
                     'kol_bonus': holder_result['kol_bonus'],
                     'total': final_score
@@ -296,7 +378,8 @@ class ConvictionEngine:
                     'holder_concentration': holder_result
                 },
                 'social_data': social_data,
-                'twitter_data': twitter_data
+                'twitter_data': twitter_data,
+                'telegram_call_data': telegram_call_data
             }
             
         except Exception as e:

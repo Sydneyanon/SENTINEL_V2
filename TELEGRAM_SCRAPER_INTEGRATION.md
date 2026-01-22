@@ -140,67 +140,133 @@ async def telegram_call_webhook(token: str):
         return {"status": "error", "message": str(e)}
 ```
 
-### Add Scoring Bonus
+### Add Variable Scoring Bonus (Grok's Enhanced System)
 
-Modify `scoring/conviction_engine.py`:
+SENTINEL now uses **variable scoring** based on mention intensity and recency:
+
+**Scoring Breakdown (0-15 points):**
+- **+15 pts**: High intensity (6+ mentions OR 3+ groups)
+- **+10 pts**: Medium intensity (3-5 mentions OR growing buzz)
+- **+5 pts**: Low intensity (1-2 mentions)
+- **Age decay**: 50% reduction if call is >2 hours old
+- **Stacking cap**: Total social score (Twitter + Telegram) capped at 25 pts
+
+**Implementation in `scoring/conviction_engine.py`:**
+
+The system automatically:
+1. Counts mentions in last 10 minutes
+2. Tracks unique groups calling the token
+3. Applies variable scoring based on intensity
+4. Reduces points for older calls (age decay)
+5. Caps total social score to prevent over-scoring hype
 
 ```python
-async def calculate_conviction(self, token_data, ...):
-    # ... existing scoring ...
+# Phase 3.7: SOCIAL CONFIRMATION (TELEGRAM CALLS) - FREE
+# Only checks tokens already tracked by KOLs (social confirmation)
+# Gates behind mid_total >= 60 to save resources
 
-    # After calculating mid_total, check for Telegram call
-    token_address = token_data.get('token_address')
-
-    # Import from main
+if config.ENABLE_TELEGRAM_SCRAPER and mid_total >= 60:
     from main import telegram_calls_cache
 
     if token_address in telegram_calls_cache:
-        call_data = telegram_calls_cache[token_address]
-        call_age = datetime.utcnow() - call_data['detected_at']
-
-        if call_age < timedelta(hours=2):  # Recent call (within 2h)
-            telegram_bonus = 10
-            mid_total += telegram_bonus
-            logger.info(f"   🔥 TELEGRAM CALL BONUS: +{telegram_bonus} pts (called {call_age.seconds//60}m ago)")
-
-    # ... continue with Twitter check, etc.
+        # Variable scoring: 5-15 pts based on mention intensity
+        # See conviction_engine.py for full implementation
 ```
+
+**Why Variable Scoring?**
+- Rewards **convergence** between on-chain (KOL buys) and off-chain (calls)
+- High-confidence signal when multiple groups call the same token
+- Similar to Maestro bot's "call channel scraping" strategy
+- Prevents over-scoring single-group shills
 
 ## Configuration
 
-### Telegram Call Bonus Weight
+### Telegram Settings (config.py)
 
-Add to `config.py`:
-
+**Feature Flag:**
 ```python
-# Telegram Alpha Call Bonus (0-10 pts)
-TELEGRAM_CALL_BONUS = 10  # Points added if token was called in alpha group
-TELEGRAM_CALL_MAX_AGE_HOURS = 2  # Only count if called within 2 hours
+ENABLE_TELEGRAM_SCRAPER = True  # Enable Telegram call tracking (FREE)
+```
+
+**Variable Scoring Weights:**
+```python
+TELEGRAM_CONFIRMATION_WEIGHTS = {
+    'high_intensity': 15,   # 6+ mentions OR 3+ groups
+    'medium_intensity': 10, # 3-5 mentions OR growing buzz
+    'low_intensity': 5,     # 1-2 mentions
+    'age_decay': 0.5,       # 50% reduction if call >2 hours old
+    'max_social_total': 25  # Cap total social score (Twitter + Telegram)
+}
+```
+
+**Optional: Call-Triggered Tracking** (Start tracking based on calls alone)
+```python
+TELEGRAM_CALL_TRIGGER_ENABLED = False  # Disabled by default (KOL-only mode)
+
+TELEGRAM_CALL_TRIGGER_SETTINGS = {
+    'min_groups': 2,              # Require 2+ groups mentioning
+    'time_window_seconds': 300,   # Within 5 minutes
+    'base_score': 15,             # Lower than KOL-triggered (riskier)
+    'signal_threshold': 85        # Higher threshold (vs 80 for KOL)
+}
 ```
 
 ## Expected Impact
 
-### Conservative Estimate
-- **Usage:** 5-10 tokens called per day in alpha groups
-- **Hit rate:** 30-50% of calls are legit (others are rugs/fades)
-- **Boost:** +10 pts when KOL buys within 2 hours of call
-- **Value:** Pushes borderline tokens (70-75) over 80 threshold
+### Conservative Estimate (Grok's Analysis)
+- **Usage:** 15-30 alpha calls per day across multiple groups
+- **Hit rate:** 30-50% of calls align with KOL buys (quality signal)
+- **Boost:** +5-15 pts variable scoring (intensity-based)
+- **Value:** Catches multi-group convergence = high-confidence plays
+- **Accuracy improvement:** +20-30% more signals when social aligns with on-chain
 
-### Example Flow
+### Example Flows
 
+**Scenario 1: Single-Group Call (Low Intensity)**
 ```
-12:00 PM: Token called in Telegram alpha group
+12:00 PM: Token called in 1 Telegram group
 └─ Scraper detects CA → sends to SENTINEL
-   └─ Added to telegram_calls_cache
+   └─ Added to telegram_calls_cache (1 mention)
 
 12:05 PM: KOL buys same token
 └─ SENTINEL starts tracking (KOL buy trigger)
-   ├─ Base score: 70 pts (KOL + buyers + volume)
-   ├─ Telegram bonus: +10 pts (called 5 min ago)
-   └─ Total: 80 pts → SIGNAL! 🚀
-
-Without Telegram: Would have scored 70, missed threshold
+   ├─ Base score: 72 pts (KOL + buyers + volume)
+   ├─ Telegram bonus: +5 pts (1 mention, recent)
+   └─ Total: 77 pts → NO SIGNAL (below 80)
 ```
+
+**Scenario 2: Multi-Group Call (High Intensity)**
+```
+12:00 PM: Token called in "Bullish Bangers" group
+12:02 PM: Same token called in "Alpha Calls" group
+12:04 PM: Same token called in "Solana Gems" group
+└─ Scraper detects 3 mentions in 4 minutes
+   └─ Added to telegram_calls_cache (3 mentions, 3 groups)
+
+12:06 PM: KOL buys same token
+└─ SENTINEL starts tracking (KOL buy trigger)
+   ├─ Base score: 68 pts (KOL + volume)
+   ├─ Telegram bonus: +15 pts (3 groups = HIGH INTENSITY)
+   └─ Total: 83 pts → SIGNAL! 🚀
+
+Without Telegram: Would have scored 68, MISSED
+```
+
+**Scenario 3: Age Decay**
+```
+10:00 AM: Token called in Telegram group
+└─ Added to cache
+
+2:30 PM: KOL buys same token (4.5 hours later)
+└─ SENTINEL starts tracking
+   ├─ Base score: 74 pts
+   ├─ Telegram bonus: +5 pts → 2.5 pts (age decay applied)
+   └─ Total: 76.5 pts → NO SIGNAL (below 80)
+
+Call too old - faded already
+```
+
+**Key Insight:** System rewards **convergence** (multiple groups + KOL buy = high confidence)
 
 ## Monitoring
 
