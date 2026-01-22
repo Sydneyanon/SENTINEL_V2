@@ -74,20 +74,37 @@ class ActiveTokenTracker:
                 return False
             
             logger.info(f"🎯 START TRACKING: {token_address[:8]}...")
-            
+
+            # FIXED: Preserve PumpPortal metadata if provided
+            pumpportal_name = initial_data.get('token_name') if initial_data else None
+            pumpportal_symbol = initial_data.get('token_symbol') if initial_data else None
+
             # Fetch initial token data from Helius
             if self.helius_fetcher:
                 logger.info(f"   📡 Fetching data from Helius...")
                 try:
                     helius_data = await self.helius_fetcher.get_token_data(token_address)
-                    
+
                     if helius_data:
                         logger.info(f"   ✅ Helius returned data!")
                         logger.info(f"      Symbol: {helius_data.get('token_symbol')}")
                         logger.info(f"      Name: {helius_data.get('token_name')}")
-                        
+
                         # Enrich with DexScreener price data if available
-                        initial_data = await self.helius_fetcher.enrich_token_data(helius_data)
+                        merged_data = await self.helius_fetcher.enrich_token_data(helius_data)
+
+                        # FIXED: Restore PumpPortal metadata if Helius returned Unknown/UNKNOWN
+                        if pumpportal_name and pumpportal_name not in ['Unknown', '']:
+                            if merged_data.get('token_name') in ['Unknown', '']:
+                                merged_data['token_name'] = pumpportal_name
+                                logger.info(f"      🔄 Using PumpPortal name: {pumpportal_name}")
+
+                        if pumpportal_symbol and pumpportal_symbol not in ['UNKNOWN', '']:
+                            if merged_data.get('token_symbol') in ['UNKNOWN', '']:
+                                merged_data['token_symbol'] = pumpportal_symbol
+                                logger.info(f"      🔄 Using PumpPortal symbol: {pumpportal_symbol}")
+
+                        initial_data = merged_data
                         logger.info(f"   ✅ Got complete data: ${initial_data.get('token_symbol', 'UNKNOWN')}")
                     else:
                         logger.warning(f"   ⚠️ Helius returned None - trying metadata only...")
@@ -358,8 +375,25 @@ class ActiveTokenTracker:
             token_data = await self.helius_fetcher.get_token_data(token_address)
 
             if token_data:
+                # FIXED: Preserve existing good metadata (don't overwrite with UNKNOWN)
+                existing_name = state.token_data.get('token_name', '')
+                existing_symbol = state.token_data.get('token_symbol', '')
+
                 # Update token data
                 state.token_data.update(token_data)
+
+                # Restore good metadata if Helius returned Unknown/UNKNOWN
+                new_name = token_data.get('token_name', '')
+                new_symbol = token_data.get('token_symbol', '')
+
+                if new_name in ['Unknown', ''] and existing_name and existing_name not in ['Unknown', '']:
+                    state.token_data['token_name'] = existing_name
+                    logger.debug(f"   📛 Preserved existing name: {existing_name}")
+
+                if new_symbol in ['UNKNOWN', ''] and existing_symbol and existing_symbol not in ['UNKNOWN', '']:
+                    state.token_data['token_symbol'] = existing_symbol
+                    logger.debug(f"   🏷️  Preserved existing symbol: {existing_symbol}")
+
                 state.last_updated = now
 
                 price = token_data.get('price_usd', 0)
