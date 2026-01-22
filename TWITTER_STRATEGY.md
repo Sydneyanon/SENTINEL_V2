@@ -26,8 +26,8 @@ SENTINEL now uses Twitter API (free tier) to boost conviction scores for high-po
 
 Twitter is only checked when **ALL** conditions are met:
 
-1. ✅ **Bonding Curve:** Token is at **70%+ bonding** (very close to graduation)
-2. ✅ **Conviction Score:** Token already has **75+ conviction** (high-conviction only)
+1. ✅ **Bonding Curve:** Token is at **60%+ bonding** (close to graduation)
+2. ✅ **Conviction Score:** Token already has **70+ conviction** (promising tokens)
 3. ✅ **Not Cached:** Token hasn't been checked in last 24 hours
 4. ✅ **Rate Limit:** Haven't hit weekly limit (5 calls/week)
 
@@ -40,15 +40,15 @@ Token at 40% bonding, 50 conviction
 └─ Twitter: SKIP (bonding too low)
 
 Token at 65% bonding, 72 conviction
-└─ Twitter: SKIP (bonding too low, conviction too low)
-
-Token at 75% bonding, 78 conviction
 └─ Twitter: ✅ CHECK! (both thresholds met)
    ├─ Found 8 mentions, 120 engagement
-   └─ +10 points → Final score: 88/100 → SIGNAL! 🚀
+   └─ +10 points → Final score: 82/100 → SIGNAL! 🚀
 
-Token at 80% bonding, 74 conviction
-└─ Twitter: SKIP (conviction too low, need 75+)
+Token at 75% bonding, 68 conviction
+└─ Twitter: SKIP (conviction too low, need 70+)
+
+Token at 55% bonding, 75 conviction
+└─ Twitter: SKIP (bonding too low, need 60%+)
 ```
 
 ---
@@ -91,9 +91,9 @@ Query: "$BONK (crypto OR token OR solana) -is:retweet"
 
 ```
 KOLs buy ~70-140 tokens per week
-└─ ~20-40 reach 70%+ bonding
-   └─ ~3-7 have 75+ conviction at that point
-      └─ Twitter checks: 3-5 per week ✅
+└─ ~20-40 reach 60%+ bonding
+   └─ ~5-10 have 70+ conviction at that point
+      └─ Twitter checks: 5-7 per week ✅
 ```
 
 **Monthly:** 12-20 API calls (uses 60-100 tweet reads) ✅
@@ -250,10 +250,10 @@ Adjust thresholds in `scoring/conviction_engine.py`:
 if config.ENABLE_TWITTER and bonding_pct >= 60 and mid_total >= 70:
 
 # Fewer checks (~2-3 per week) - ultra-conservative:
-if config.ENABLE_TWITTER and bonding_pct >= 80 and mid_total >= 80:
-
-# Current (4-5 per week) - recommended:
 if config.ENABLE_TWITTER and bonding_pct >= 70 and mid_total >= 75:
+
+# Current (5-7 per week) - recommended:
+if config.ENABLE_TWITTER and bonding_pct >= 60 and mid_total >= 70:
 ```
 
 **Or upgrade to Twitter Basic ($100/mo):**

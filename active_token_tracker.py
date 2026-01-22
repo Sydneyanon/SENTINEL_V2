@@ -21,6 +21,7 @@ class TokenState:
     kol_buy_count: int
     last_holder_check: datetime
     last_holder_count: int
+    source: str = 'kol_buy'  # 'kol_buy' or 'telegram_call'
 
 
 class ActiveTokenTracker:
@@ -48,14 +49,15 @@ class ActiveTokenTracker:
 
         logger.info("🎯 ActiveTokenTracker initialized")
     
-    async def start_tracking(self, token_address: str, initial_data: Optional[Dict] = None) -> bool:
+    async def start_tracking(self, token_address: str, initial_data: Optional[Dict] = None, source: str = 'kol_buy') -> bool:
         """
-        Start tracking a token (triggered by KOL buy)
-        
+        Start tracking a token (triggered by KOL buy or Telegram call)
+
         Args:
             token_address: Token mint address
             initial_data: Initial token data (optional, will fetch if not provided)
-            
+            source: Trigger source ('kol_buy' or 'telegram_call')
+
         Returns:
             True if tracking started, False if already tracking
         """
@@ -121,9 +123,10 @@ class ActiveTokenTracker:
                 signal_sent=False,
                 first_tracked_at=now,
                 last_updated=now,
-                kol_buy_count=1,  # Started because of KOL buy
+                kol_buy_count=1 if source == 'kol_buy' else 0,  # Only count as KOL buy if from KOL
                 last_holder_check=now,
-                last_holder_count=initial_data.get('holder_count', 0)
+                last_holder_count=initial_data.get('holder_count', 0),
+                source=source
             )
             
             self.tracked_tokens[token_address] = state

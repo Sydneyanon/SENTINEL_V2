@@ -23,6 +23,11 @@ ENABLE_TELEGRAM = True  # Enable Telegram posting
 LUNARCRUSH_API_KEY = os.getenv('LUNARCRUSH_API_KEY')  # Social sentiment aggregator
 TWITTER_BEARER_TOKEN = os.getenv('TWITTER_BEARER_TOKEN')  # Twitter API v2 (free tier)
 
+# Telegram Monitor (Built-in) - Alternative to solana-token-scraper
+TELEGRAM_API_ID = os.getenv('TELEGRAM_API_ID')  # From https://my.telegram.org
+TELEGRAM_API_HASH = os.getenv('TELEGRAM_API_HASH')  # From https://my.telegram.org
+TELEGRAM_PHONE = os.getenv('TELEGRAM_PHONE')  # Your phone number (optional, for first-time auth)
+
 # =============================================================================
 # CREDIT OPTIMIZATION (CRITICAL!)
 # =============================================================================
@@ -45,8 +50,8 @@ DISABLE_POLLING_BELOW_THRESHOLD = True  # Only poll tokens >= 50 conviction
 # =============================================================================
 
 # Signal thresholds based on graduation status
-MIN_CONVICTION_SCORE = 80  # Pre-graduation threshold (40%+ bonding curve)
-POST_GRAD_THRESHOLD = 75   # Post-graduation threshold (100% - on Raydium)
+MIN_CONVICTION_SCORE = 55  # Pre-graduation threshold (40%+ bonding curve) - AGGRESSIVE: catching current scores
+POST_GRAD_THRESHOLD = 50   # Post-graduation threshold (100% - on Raydium) - AGGRESSIVE: catching current scores
 
 # Base score threshold for distribution checks
 # Only check distribution if base score >= this value
@@ -156,6 +161,27 @@ TWITTER_WEIGHTS = {
     'medium_buzz': 10,      # 3+ mentions
     'low_buzz': 5,          # 1+ mentions
     'viral_tweet': 12       # Single tweet with 100+ likes (minimum)
+}
+
+# Telegram Social Confirmation Scoring (FREE - 0-15 points)
+# Only applies to tokens already tracked by KOLs (social confirmation)
+TELEGRAM_CONFIRMATION_WEIGHTS = {
+    'high_intensity': 15,   # 6+ mentions OR 3+ groups
+    'medium_intensity': 10, # 3-5 mentions OR growing buzz
+    'low_intensity': 5,     # 1-2 mentions
+    'age_decay': 0.5,       # 50% reduction if call >2 hours old
+    'max_social_total': 25  # Cap total social score (Twitter + Telegram)
+}
+
+# Telegram Call-Triggered Tracking (Optional)
+TELEGRAM_CALL_TRIGGER_ENABLED = False  # Start tracking based on calls alone (disabled by default)
+TELEGRAM_CALL_TRIGGER_SETTINGS = {
+    'min_groups': 2,              # Minimum groups mentioning token
+    'time_window_seconds': 300,   # Mentions must occur within 5 min
+    'base_score': 15,             # Initial score for call-triggered tokens (lower than KOL)
+    'require_kol_confirmation': True,  # Auto-kill if no KOL buy within X min
+    'kol_confirmation_window': 300,    # 5 minutes to get KOL confirmation
+    'signal_threshold': 85        # Higher threshold for call-only triggers (vs 80 for KOL)
 }
 
 # Phase 1 Refinements: Early Kill Switch
@@ -353,6 +379,8 @@ ENABLE_PERFORMANCE_TRACKING = True
 ENABLE_MILESTONE_ALERTS = True
 ENABLE_LUNARCRUSH = False   # LunarCrush disabled (use Twitter only)
 ENABLE_TWITTER = True       # Twitter buzz detection (free tier - ENABLED)
+ENABLE_TELEGRAM_SCRAPER = False  # Telegram disabled - focus on core signals first
+ENABLE_BUILTIN_TELEGRAM_MONITOR = False  # Telegram disabled - focus on core signals first
 
 # =============================================================================
 # NARRATIVE DETECTION (2026 HOT TRENDS)
@@ -451,3 +479,23 @@ EXPECTED_DAILY_CREDITS = {
     'other': 2000,          # Misc RPC calls
     'total': 25000          # ~750k/month (well under 1M free tier)
 }
+
+# =============================================================================
+# TELEGRAM GROUPS TO MONITOR (Built-in Monitor)
+# =============================================================================
+
+# Run: python telegram_monitor.py to auto-generate this list from your groups
+# Then edit to keep only groups you want to monitor
+
+TELEGRAM_GROUPS = {
+    # Example format:
+    # 1234567890: 'bullish_bangers',  # Bullish's Bangers
+    # 9876543210: 'alpha_calls',      # Solana Alpha Calls
+    # 5555555555: 'pump_gems',        # Pump.fun Gems
+
+    # Add your groups here after running: python telegram_monitor.py
+}
+
+# Alternative: If using external solana-token-scraper (webhook mode)
+# You don't need to configure TELEGRAM_GROUPS
+# Just set ENABLE_BUILTIN_TELEGRAM_MONITOR = False

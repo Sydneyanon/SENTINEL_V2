@@ -8,8 +8,8 @@ With max_results=5: 100 reads ÷ 5 = 20 API calls/month = ~5 calls/week
 Strategy:
 - 24-hour cache per token
 - Weekly rate limit (5 calls/week)
-- Only check tokens at 70%+ bonding with 75+ conviction
-- Use as final boost for highest-conviction tokens
+- Only check tokens at 60%+ bonding with 70+ conviction
+- Use as final boost for high-conviction tokens
 """
 import os
 import asyncio
