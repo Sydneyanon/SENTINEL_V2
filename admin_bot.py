@@ -30,9 +30,14 @@ class AdminBot:
 
         if not self.admin_user_id:
             logger.warning("⚠️ ADMIN_TELEGRAM_USER_ID not set - admin bot disabled")
+            logger.info("   Get your ID from @userinfobot and set ADMIN_TELEGRAM_USER_ID")
             return False
 
         try:
+            logger.info(f"🔧 Creating admin bot application...")
+            logger.info(f"   Bot token: {config.TELEGRAM_BOT_TOKEN[:20]}...")
+            logger.info(f"   Admin user ID: {self.admin_user_id}")
+
             # Create application
             self.app = Application.builder().token(config.TELEGRAM_BOT_TOKEN).build()
 
@@ -40,21 +45,26 @@ class AdminBot:
             admin_filter = filters.User(user_id=self.admin_user_id)
 
             # Register command handlers (admin only)
+            self.app.add_handler(CommandHandler("start", self._cmd_help, filters=admin_filter))
+            self.app.add_handler(CommandHandler("help", self._cmd_help, filters=admin_filter))
             self.app.add_handler(CommandHandler("stats", self._cmd_stats, filters=admin_filter))
             self.app.add_handler(CommandHandler("active", self._cmd_active, filters=admin_filter))
             self.app.add_handler(CommandHandler("performance", self._cmd_performance, filters=admin_filter))
             self.app.add_handler(CommandHandler("health", self._cmd_health, filters=admin_filter))
             self.app.add_handler(CommandHandler("cache", self._cmd_cache, filters=admin_filter))
-            self.app.add_handler(CommandHandler("help", self._cmd_help, filters=admin_filter))
 
             # Block all other users (unauthorized access attempts)
             self.app.add_handler(MessageHandler(~admin_filter, self._handle_unauthorized))
 
-            logger.info(f"✅ Admin bot initialized (authorized user: {self.admin_user_id})")
+            logger.info(f"✅ Admin bot initialized")
+            logger.info(f"   Commands registered: /start /help /stats /active /performance /health /cache")
+            logger.info(f"   Security: Only user {self.admin_user_id} can use commands")
             return True
 
         except Exception as e:
             logger.error(f"❌ Failed to initialize admin bot: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             return False
 
     async def start(self):
@@ -64,18 +74,29 @@ class AdminBot:
             return
 
         try:
-            logger.info("🤖 Admin bot starting...")
+            logger.info("🤖 Admin bot starting polling...")
+
+            # Initialize and start
             await self.app.initialize()
             await self.app.start()
-            await self.app.updater.start_polling(drop_pending_updates=True)
-            logger.info("✅ Admin bot running - send /help for commands")
+
+            # Start polling (this will run in background)
+            await self.app.updater.start_polling(
+                drop_pending_updates=True,
+                allowed_updates=["message", "callback_query"]
+            )
+
+            logger.info("✅ Admin bot polling started - send /help for commands")
+            logger.info(f"   Authorized user ID: {self.admin_user_id}")
 
             # Keep running
             while True:
-                await asyncio.sleep(1)
+                await asyncio.sleep(3600)  # Check every hour
 
         except Exception as e:
             logger.error(f"❌ Admin bot error: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
 
     async def stop(self):
         """Stop the admin bot"""

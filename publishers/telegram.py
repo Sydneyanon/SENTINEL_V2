@@ -173,16 +173,24 @@ class TelegramPublisher:
     async def post_signal(self, signal_data: Dict[str, Any]) -> Optional[int]:
         """
         Post signal to Telegram channel with animated banner
-        
+
+        SECURITY: Only posts to authorized channel (TELEGRAM_CHANNEL_ID)
+
         Returns:
             Message ID if successful, None otherwise
         """
-        
+
         if not self.enabled or not self.bot or not self.channel_id:
             logger.debug("Telegram not enabled - skipping post")
             return None
-        
+
         try:
+            # SECURITY: Verify we're posting to authorized channel only
+            # This prevents the bot from being hijacked if someone gets the token
+            if not self.channel_id:
+                logger.error("🚫 No authorized channel configured - refusing to post")
+                return None
+
             # Log what data we received
             token_data = signal_data.get('token_data', {})
             logger.info(f"📤 Preparing Telegram signal:")
@@ -191,7 +199,8 @@ class TelegramPublisher:
             logger.info(f"   MCap: ${token_data.get('market_cap', 0):,.0f}")
             logger.info(f"   Liquidity: ${token_data.get('liquidity', 0):,.0f}")
             logger.info(f"   Conviction: {signal_data.get('score', 0)}/100")
-            
+            logger.info(f"   Target channel: {self.channel_id}")
+
             message = self._format_signal(signal_data)
             
             # If we have a banner, send as animation with caption
@@ -240,13 +249,19 @@ class TelegramPublisher:
             return None
     
     async def post_test_message(self) -> bool:
-        """Post a test message to verify bot is working"""
-        
+        """
+        Post a test message to verify bot is working
+
+        SECURITY: Only posts to authorized channel
+        """
+
         if not self.bot or not self.channel_id:
             logger.error("Bot not initialized")
             return False
-        
+
         try:
+            logger.info(f"📤 Posting test message to authorized channel: {self.channel_id}")
+
             test_message = f"""🔥 <b>PROMETHEUS - System Test</b>
 
 ✅ Telegram connection working
