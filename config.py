@@ -379,8 +379,8 @@ ENABLE_PERFORMANCE_TRACKING = True
 ENABLE_MILESTONE_ALERTS = True
 ENABLE_LUNARCRUSH = False   # LunarCrush disabled (use Twitter only)
 ENABLE_TWITTER = True       # Twitter buzz detection (free tier - ENABLED)
-ENABLE_TELEGRAM_SCRAPER = False  # Telegram disabled - focus on core signals first
-ENABLE_BUILTIN_TELEGRAM_MONITOR = False  # Telegram disabled - focus on core signals first
+ENABLE_TELEGRAM_SCRAPER = True  # Telegram social confirmation - ENABLED!
+ENABLE_BUILTIN_TELEGRAM_MONITOR = True  # Built-in Telegram monitor - ENABLED!
 
 # =============================================================================
 # NARRATIVE DETECTION (2026 HOT TRENDS)
@@ -488,12 +488,7 @@ EXPECTED_DAILY_CREDITS = {
 # Then edit to keep only groups you want to monitor
 
 TELEGRAM_GROUPS = {
-    # Example format:
-    # 1234567890: 'bullish_bangers',  # Bullish's Bangers
-    # 9876543210: 'alpha_calls',      # Solana Alpha Calls
-    # 5555555555: 'pump_gems',        # Pump.fun Gems
-
-    # Add your groups here after running: python telegram_monitor.py
+    -1001758611100: 'mad_apes',  # Mad Apes (gambles)
 }
 
 # Alternative: If using external solana-token-scraper (webhook mode)
