@@ -336,15 +336,39 @@ async def startup():
     # Initialize Telegram
     logger.info("📱 Initializing Telegram...")
     telegram_initialized = await telegram_publisher.initialize()
-    
+
     if telegram_initialized:
         await telegram_publisher.post_test_message()
-    
+
+    # Initialize Admin Bot (for admin commands)
+    admin_bot = None
+    admin_bot_initialized = False
+    if config.ADMIN_TELEGRAM_USER_ID:
+        logger.info("🤖 Initializing admin bot...")
+        from admin_bot import AdminBot
+        admin_bot = AdminBot(
+            active_tracker=None,  # Will be set after active_tracker is created
+            database=db,
+            performance_tracker=None,  # Will be set after performance_tracker is created
+            telegram_calls_cache=telegram_calls_cache
+        )
+        admin_bot_initialized = await admin_bot.initialize()
+        if admin_bot_initialized:
+            # Start admin bot in background
+            asyncio.create_task(admin_bot.start())
+            logger.info("✅ Admin bot started - send /help for commands")
+    else:
+        logger.info("ℹ️ Admin bot disabled (ADMIN_TELEGRAM_USER_ID not set)")
+
     # Initialize Performance Tracker
     logger.info("📊 Initializing performance tracker...")
     performance_tracker = PerformanceTracker(db=db, telegram_publisher=telegram_publisher)
     await performance_tracker.start()
     logger.info("✅ Performance tracker started")
+
+    # Link performance tracker to admin bot
+    if admin_bot_initialized:
+        admin_bot.performance_tracker = performance_tracker
     
     # Initialize Active Token Tracker (NEW!)
     logger.info("🎯 Initializing active token tracker...")
@@ -358,6 +382,10 @@ async def startup():
     # CRITICAL: Assign active_tracker back to conviction_engine for unique buyers scoring
     conviction_engine.active_tracker = active_tracker
     logger.info("✅ Active token tracker initialized and linked to conviction engine")
+
+    # Link active tracker to admin bot
+    if admin_bot_initialized:
+        admin_bot.active_tracker = active_tracker
     
     # Initialize PumpPortal monitor (OPTIONAL - can be disabled to save resources)
     if config.DISABLE_PUMPPORTAL:

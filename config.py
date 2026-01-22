@@ -17,6 +17,7 @@ DATABASE_URL = os.getenv('DATABASE_URL')
 # Telegram Bot (PROMETHEUS)
 TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 TELEGRAM_CHANNEL_ID = os.getenv('TELEGRAM_CHANNEL_ID')  # Should be like: -1001234567890
+ADMIN_TELEGRAM_USER_ID = int(os.getenv('ADMIN_TELEGRAM_USER_ID', 0)) if os.getenv('ADMIN_TELEGRAM_USER_ID') else None  # Your Telegram user ID for admin commands
 ENABLE_TELEGRAM = True  # Enable Telegram posting
 
 # Social Intelligence APIs
