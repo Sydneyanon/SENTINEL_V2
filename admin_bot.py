@@ -21,6 +21,7 @@ class AdminBot:
         self.telegram_calls_cache = telegram_calls_cache
         self.app: Optional[Application] = None
         self.admin_user_id = config.ADMIN_TELEGRAM_USER_ID
+        self.admin_channel_id = config.ADMIN_CHANNEL_ID  # Optional: post to channel instead of DM
 
     async def initialize(self):
         """Initialize admin bot"""
@@ -59,6 +60,10 @@ class AdminBot:
             logger.info(f"✅ Admin bot initialized")
             logger.info(f"   Commands registered: /start /help /stats /active /performance /health /cache")
             logger.info(f"   Security: Only user {self.admin_user_id} can use commands")
+            if self.admin_channel_id:
+                logger.info(f"   Response mode: Admin channel ({self.admin_channel_id})")
+            else:
+                logger.info(f"   Response mode: Direct message (DM)")
             return True
 
         except Exception as e:
@@ -106,6 +111,24 @@ class AdminBot:
             await self.app.shutdown()
             logger.info("🛑 Admin bot stopped")
 
+    async def _send_response(self, update: Update, context: ContextTypes.DEFAULT_TYPE, text: str):
+        """Send response either to admin channel or DM"""
+        try:
+            if self.admin_channel_id:
+                # Post to admin channel
+                await context.bot.send_message(
+                    chat_id=self.admin_channel_id,
+                    text=text,
+                    parse_mode=ParseMode.HTML
+                )
+            else:
+                # Reply in DM
+                await update.message.reply_text(text, parse_mode=ParseMode.HTML)
+        except Exception as e:
+            logger.error(f"❌ Error sending response: {e}")
+            # Fallback to DM if channel post fails
+            await update.message.reply_text(text, parse_mode=ParseMode.HTML)
+
     async def _handle_unauthorized(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle unauthorized access attempts"""
         user = update.effective_user
@@ -129,7 +152,7 @@ class AdminBot:
 <b>Help:</b>
 /help - Show this message
 """
-        await update.message.reply_text(help_text, parse_mode=ParseMode.HTML)
+        await self._send_response(update, context, help_text)
 
     async def _cmd_stats(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Show system statistics"""
@@ -179,7 +202,7 @@ class AdminBot:
 
             stats_text += f"\n⏰ <i>Updated: {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}</i>"
 
-            await update.message.reply_text(stats_text, parse_mode=ParseMode.HTML)
+            await self._send_response(update, context, stats_text)
 
         except Exception as e:
             logger.error(f"❌ Error in /stats: {e}")
@@ -189,7 +212,7 @@ class AdminBot:
         """Show currently tracked tokens"""
         try:
             if not self.active_tracker:
-                await update.message.reply_text("❌ Active tracker not available")
+                await self._send_response(update, context, "❌ Active tracker not available")
                 return
 
             active_tokens = []
@@ -213,7 +236,7 @@ class AdminBot:
                 })
 
             if not active_tokens:
-                await update.message.reply_text("ℹ️ No tokens currently tracked")
+                await self._send_response(update, context, "ℹ️ No tokens currently tracked")
                 return
 
             # Sort by conviction score
@@ -234,7 +257,7 @@ class AdminBot:
             if len(active_tokens) > 10:
                 response += f"<i>...and {len(active_tokens) - 10} more</i>"
 
-            await update.message.reply_text(response, parse_mode=ParseMode.HTML)
+            await self._send_response(update, context, response)
 
         except Exception as e:
             logger.error(f"❌ Error in /active: {e}")
@@ -246,14 +269,14 @@ class AdminBot:
         """Show recent signal performance"""
         try:
             if not self.database:
-                await update.message.reply_text("❌ Database not available")
+                await self._send_response(update, context, "❌ Database not available")
                 return
 
             # Get recent signals
             signals = await self.database.get_signals_in_last_hours(48)
 
             if not signals:
-                await update.message.reply_text("ℹ️ No signals in last 48 hours")
+                await self._send_response(update, context, "ℹ️ No signals in last 48 hours")
                 return
 
             response = f"📈 <b>RECENT PERFORMANCE</b>\n\n"
@@ -281,7 +304,7 @@ class AdminBot:
             if len(signals) > 8:
                 response += f"<i>...and {len(signals) - 8} more</i>"
 
-            await update.message.reply_text(response, parse_mode=ParseMode.HTML)
+            await self._send_response(update, context, response)
 
         except Exception as e:
             logger.error(f"❌ Error in /performance: {e}")
@@ -325,7 +348,7 @@ class AdminBot:
 
             health += f"\n⏰ {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}"
 
-            await update.message.reply_text(health, parse_mode=ParseMode.HTML)
+            await self._send_response(update, context, health)
 
         except Exception as e:
             logger.error(f"❌ Error in /health: {e}")
@@ -335,11 +358,11 @@ class AdminBot:
         """Show Telegram calls cache status"""
         try:
             if self.telegram_calls_cache is None:
-                await update.message.reply_text("❌ Telegram cache not available")
+                await self._send_response(update, context, "❌ Telegram cache not available")
                 return
 
             if not self.telegram_calls_cache:
-                await update.message.reply_text("ℹ️ Telegram cache is empty - no calls detected yet")
+                await self._send_response(update, context, "ℹ️ Telegram cache is empty - no calls detected yet")
                 return
 
             response = f"📱 <b>TELEGRAM CALLS CACHE</b>\n\n"
@@ -375,7 +398,7 @@ class AdminBot:
             if len(recent_calls) > 10:
                 response += f"<i>...and {len(recent_calls) - 10} more</i>"
 
-            await update.message.reply_text(response, parse_mode=ParseMode.HTML)
+            await self._send_response(update, context, response)
 
         except Exception as e:
             logger.error(f"❌ Error in /cache: {e}")

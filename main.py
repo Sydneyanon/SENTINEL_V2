@@ -354,9 +354,20 @@ async def startup():
         )
         admin_bot_initialized = await admin_bot.initialize()
         if admin_bot_initialized:
-            # Start admin bot in background
-            asyncio.create_task(admin_bot.start())
-            logger.info("✅ Admin bot started - send /help for commands")
+            # Start admin bot in background with error wrapper
+            async def start_admin_bot():
+                try:
+                    logger.info("🚀 Starting admin bot polling...")
+                    await admin_bot.start()
+                except Exception as e:
+                    logger.error(f"❌ Admin bot crashed: {e}")
+                    import traceback
+                    logger.error(traceback.format_exc())
+
+            asyncio.create_task(start_admin_bot())
+            # Give it a moment to start
+            await asyncio.sleep(2)
+            logger.info("✅ Admin bot task created")
     else:
         logger.info("ℹ️ Admin bot disabled (ADMIN_TELEGRAM_USER_ID not set)")
 
