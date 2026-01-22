@@ -193,11 +193,14 @@ class ConvictionEngine:
             # ================================================================
             # PHASE 3.6: TWITTER BUZZ (FREE TIER) - FREE
             # ================================================================
+            # ULTRA-SELECTIVE: Only check when token is at 60%+ bonding AND 70+ conviction
+            # Free tier: ~3 calls/day, so only use for high-potential tokens
 
             twitter_score = 0
             twitter_data = {}
 
-            if config.ENABLE_TWITTER and mid_total >= 60:  # Only check if score already promising
+            if config.ENABLE_TWITTER and bonding_pct >= 60 and mid_total >= 70:
+                logger.info(f"   🐦 Checking Twitter (bonding: {bonding_pct}%, score: {mid_total})...")
                 twitter_data = await self._score_twitter_buzz(token_symbol, token_address)
                 twitter_score = twitter_data.get('score', 0)
 
@@ -205,6 +208,8 @@ class ConvictionEngine:
                     logger.info(f"   🐦 Twitter: +{twitter_score} points")
                     if twitter_data.get('has_buzz'):
                         logger.info(f"      🔥 BUZZ: {twitter_data['mention_count']} mentions, {twitter_data['total_engagement']} engagement")
+                else:
+                    logger.info(f"   🐦 Twitter: No buzz detected")
 
             mid_total += twitter_score
 

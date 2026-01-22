@@ -348,11 +348,11 @@ LOG_FILE = "prometheus.log"
 # FEATURE FLAGS
 # =============================================================================
 
-ENABLE_NARRATIVES = True    # Narrative detection (AI agents, DeSci, etc.)
+ENABLE_NARRATIVES = False   # Narrative detection (disabled for now)
 ENABLE_PERFORMANCE_TRACKING = True
 ENABLE_MILESTONE_ALERTS = True
-ENABLE_LUNARCRUSH = True    # Social sentiment via LunarCrush API
-ENABLE_TWITTER = True       # Twitter buzz detection (free tier)
+ENABLE_LUNARCRUSH = False   # LunarCrush disabled (use Twitter only)
+ENABLE_TWITTER = True       # Twitter buzz detection (free tier - ENABLED)
 
 # =============================================================================
 # NARRATIVE DETECTION (2026 HOT TRENDS)

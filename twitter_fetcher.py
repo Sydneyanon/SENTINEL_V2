@@ -2,8 +2,8 @@
 Twitter API Integration (Free Tier Optimized)
 Fetches tweet mentions and engagement data for conviction scoring
 
-Free Tier Limits: 1,500 tweets/month (~50/day)
-Strategy: Smart caching + only check high-conviction tokens
+Conservative Limits: 100 calls/month (~3/day)
+Strategy: Ultra-aggressive caching + only check tokens at 60%+ bonding with 70+ conviction
 """
 import os
 import asyncio
@@ -23,13 +23,13 @@ class TwitterFetcher:
         if not self.bearer_token:
             logger.warning("⚠️ TWITTER_BEARER_TOKEN not set - Twitter sentiment disabled")
 
-        # Aggressive caching (2 hours) to conserve API calls
+        # Ultra-aggressive caching (6 hours) to conserve API calls
         self.cache = {}
-        self.cache_ttl_minutes = 120  # 2 hours
+        self.cache_ttl_minutes = 360  # 6 hours
 
-        # Rate limiting tracker
+        # Rate limiting tracker (conservative: 100 calls/month = ~3/day)
         self.daily_calls = 0
-        self.daily_limit = 45  # Stay under 50/day to be safe
+        self.daily_limit = 3  # Conservative limit for free tier
         self.last_reset = datetime.now()
 
     def _check_rate_limit(self) -> bool:
