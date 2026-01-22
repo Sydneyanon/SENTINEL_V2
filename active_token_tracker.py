@@ -269,10 +269,33 @@ class ActiveTokenTracker:
             if v_sol_reserves > 0:
                 logger.info(f"   💰 Calculated from PumpPortal: price=${price_usd:.8f}, mcap=${market_cap_usd:.0f}, bonding={bonding_pct:.1f}%")
             
+            # FIXED: Preserve good metadata - don't overwrite with Unknown/UNKNOWN
+            existing_name = state.token_data.get('token_name', '')
+            existing_symbol = state.token_data.get('token_symbol', '')
+            new_name = trade_data.get('name', '')
+            new_symbol = trade_data.get('symbol', '')
+
+            # Use new data if it's good, otherwise keep existing good data
+            final_name = existing_name  # Start with what we have
+            if new_name and new_name not in ['Unknown', '']:
+                final_name = new_name  # New data is good, use it
+                if existing_name and existing_name not in ['Unknown', ''] and existing_name != new_name:
+                    logger.info(f"      🔄 Updating name: '{existing_name}' -> '{new_name}'")
+            elif not existing_name or existing_name in ['Unknown', '']:
+                final_name = 'Unknown'  # Neither has good data
+
+            final_symbol = existing_symbol  # Start with what we have
+            if new_symbol and new_symbol not in ['UNKNOWN', '']:
+                final_symbol = new_symbol  # New data is good, use it
+                if existing_symbol and existing_symbol not in ['UNKNOWN', ''] and existing_symbol != new_symbol:
+                    logger.info(f"      🔄 Updating symbol: '{existing_symbol}' -> '{new_symbol}'")
+            elif not existing_symbol or existing_symbol in ['UNKNOWN', '']:
+                final_symbol = 'UNKNOWN'  # Neither has good data
+
             # Update token data with latest trade info
             state.token_data.update({
-                'token_name': trade_data.get('name', state.token_data.get('token_name', 'Unknown')),
-                'token_symbol': trade_data.get('symbol', state.token_data.get('token_symbol', 'UNKNOWN')),
+                'token_name': final_name,
+                'token_symbol': final_symbol,
                 'bonding_curve_pct': bonding_pct,
                 'volume_5m': trade_data.get('volume5m', state.token_data.get('volume_5m', 0)),
                 'volume_1h': trade_data.get('volume1h', state.token_data.get('volume_1h', 0)),
