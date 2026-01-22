@@ -351,37 +351,57 @@ class AdminBot:
                 except:
                     age_str = "?"
 
+                # Get highest milestone reached (the REAL win)
+                peak_milestone = await self.database.get_highest_milestone(token_address) if token_address else None
+
                 # Fetch current price
                 current_price = await self._get_current_price(token_address) if token_address else None
 
-                if current_price and entry and entry > 0:
-                    gain_mult = current_price / entry
-                    gain_pct = (gain_mult - 1) * 100
-
-                    # Determine win/loss
-                    if gain_mult >= 1.5:
+                if entry and entry > 0:
+                    # Determine win/loss based on PEAK, not current
+                    if peak_milestone and peak_milestone >= 1.5:
+                        # Hit at least 1.5x - it's a WIN
                         emoji = "🟢"
                         wins += 1
-                    elif gain_mult >= 1.0:
+                        peak_str = f"{peak_milestone:.1f}x"
+                    elif peak_milestone and peak_milestone >= 1.0:
+                        # Small profit
                         emoji = "🟡"
                         wins += 1
+                        peak_pct = (peak_milestone - 1) * 100
+                        peak_str = f"+{peak_pct:.0f}%"
                     else:
+                        # Never hit profit or rugged
                         emoji = "🔴"
                         losses += 1
+                        if peak_milestone:
+                            peak_pct = (peak_milestone - 1) * 100
+                            peak_str = f"{peak_pct:.0f}%"
+                        else:
+                            peak_str = "0x"
 
-                    # Format gain display
-                    if gain_mult >= 2.0:
-                        gain_str = f"{gain_mult:.1f}x"
+                    # Show Entry → Peak → Current
+                    if current_price:
+                        current_mult = current_price / entry
+                        if current_mult >= 2.0:
+                            current_str = f"{current_mult:.1f}x"
+                        else:
+                            current_pct = (current_mult - 1) * 100
+                            current_str = f"{current_pct:+.0f}%"
+
+                        response += f"{emoji} <b>${symbol}</b> Peak: {peak_str}\n"
+                        response += f"   Entry: ${entry:.8f}\n"
+                        response += f"   Peak: {peak_milestone}x | Now: {current_str}\n"
+                        response += f"   Score: {score}/100 | {age_str} ago\n\n"
                     else:
-                        gain_str = f"{gain_pct:+.0f}%"
-
-                    response += f"{emoji} <b>${symbol}</b> {gain_str}\n"
-                    response += f"   Entry: ${entry:.8f} → Now: ${current_price:.8f}\n"
-                    response += f"   Score: {score}/100 | {age_str} ago\n\n"
+                        # Dead token
+                        response += f"{emoji} <b>${symbol}</b> Peak: {peak_str}\n"
+                        response += f"   Entry: ${entry:.8f}\n"
+                        response += f"   Peak: {peak_milestone}x | Now: DEAD\n"
+                        response += f"   Score: {score}/100 | {age_str} ago\n\n"
                 else:
-                    # Can't get price or already dead
-                    response += f"⚫ <b>${symbol}</b> (dead/rugged)\n"
-                    response += f"   Entry: ${entry:.8f}\n"
+                    # Can't calculate
+                    response += f"⚫ <b>${symbol}</b> (no data)\n"
                     response += f"   Score: {score}/100 | {age_str} ago\n\n"
                     losses += 1
 
