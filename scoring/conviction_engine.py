@@ -163,6 +163,8 @@ class ConvictionEngine:
                     'score': mid_total,
                     'passed': False,
                     'reason': 'Score too low after unique buyers',
+                    'token_address': token_address,  # FIXED: Include for logging
+                    'token_data': token_data,  # FIXED: Include token data
                     'breakdown': {
                         **base_scores,
                         'bundle_penalty': bundle_result['penalty'],
@@ -322,6 +324,8 @@ class ConvictionEngine:
                             'score': 0,
                             'passed': False,
                             'reason': holder_result['reason'],
+                            'token_address': token_address,  # FIXED: Include token address
+                            'token_data': token_data,  # FIXED: Include token data
                             'breakdown': {
                                 **base_scores,
                                 'bundle_penalty': bundle_result['penalty'],
@@ -360,6 +364,8 @@ class ConvictionEngine:
                 'passed': passed,
                 'threshold': threshold,
                 'is_pre_grad': is_pre_grad,
+                'token_address': token_address,  # FIXED: Include token address for links
+                'token_data': token_data,  # FIXED: Include full token data
                 'breakdown': {
                     'smart_wallet': base_scores['smart_wallet'],
                     'narrative': base_scores['narrative'],
@@ -380,7 +386,8 @@ class ConvictionEngine:
                 },
                 'social_data': social_data,
                 'twitter_data': twitter_data,
-                'telegram_call_data': telegram_call_data
+                'telegram_call_data': telegram_call_data,
+                'smart_wallet_data': smart_wallet_data  # FIXED: Include wallet data for display
             }
             
         except Exception as e:
@@ -390,7 +397,9 @@ class ConvictionEngine:
             return {
                 'score': 0,
                 'passed': False,
-                'reason': f'Analysis error: {str(e)}'
+                'reason': f'Analysis error: {str(e)}',
+                'token_address': token_address if 'token_address' in locals() else 'N/A',  # FIXED: Include if available
+                'token_data': token_data if 'token_data' in locals() else {}  # FIXED: Include if available
             }
     
     def _score_volume_velocity(self, token_data: Dict) -> int:
