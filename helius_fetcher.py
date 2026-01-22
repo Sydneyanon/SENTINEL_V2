@@ -536,13 +536,26 @@ class HeliusDataFetcher:
                             pair = p
                             break
                     
-                    return {
+                    # Extract base token metadata
+                    base_token = pair.get('baseToken', {})
+                    token_name = base_token.get('name', '')
+                    token_symbol = base_token.get('symbol', '')
+
+                    result = {
                         'price_usd': float(pair.get('priceUsd', 0)),
                         'market_cap': float(pair.get('fdv', 0)),
                         'liquidity': float(pair.get('liquidity', {}).get('usd', 0)),
                         'volume_24h': float(pair.get('volume', {}).get('h24', 0)),
                         'price_change_5m': float(pair.get('priceChange', {}).get('m5', 0)),
                     }
+
+                    # Include name/symbol if available and not empty
+                    if token_name and token_symbol:
+                        result['token_name'] = token_name
+                        result['token_symbol'] = token_symbol
+                        logger.info(f"   ✅ Got token metadata from DexScreener: ${token_symbol} / {token_name}")
+
+                    return result
                     
         except Exception as e:
             logger.debug(f"   DexScreener error: {e}")

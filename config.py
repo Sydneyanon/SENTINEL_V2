@@ -229,7 +229,7 @@ RUG_DETECTION = {
         'credit_cost': 10,           # Helius credits per check
         'thresholds': {
             'check_pre_grad': 65,    # Only check if base score >= 65 (pre-grad)
-            'check_post_grad': 60,   # Only check if base score >= 60 (post-grad)
+            'check_post_grad': 0,    # ALWAYS check graduated tokens (mandatory rug protection)
         },
         'penalties': {
             'extreme': -999,         # Top 10 hold >80% = HARD DROP

@@ -32,18 +32,26 @@ class PumpPortalAPI:
                         data = await resp.json()
 
                         # Extract metadata
-                        metadata = {
-                            'token_name': data.get('name'),
-                            'token_symbol': data.get('symbol'),
-                            'description': data.get('description', ''),
-                            'image_uri': data.get('image'),
-                            'twitter': data.get('twitter'),
-                            'telegram': data.get('telegram'),
-                            'website': data.get('website'),
-                        }
+                        name = data.get('name', '').strip()
+                        symbol = data.get('symbol', '').strip()
 
-                        logger.info(f"✅ PumpPortal API: {metadata.get('token_symbol')} / {metadata.get('token_name')}")
-                        return metadata
+                        # Only return if we got actual data (not empty strings)
+                        if name and symbol:
+                            metadata = {
+                                'token_name': name,
+                                'token_symbol': symbol,
+                                'description': data.get('description', ''),
+                                'image_uri': data.get('image'),
+                                'twitter': data.get('twitter'),
+                                'telegram': data.get('telegram'),
+                                'website': data.get('website'),
+                            }
+
+                            logger.info(f"✅ PumpPortal API: ${symbol} / {name}")
+                            return metadata
+                        else:
+                            logger.warning(f"⚠️ PumpPortal API returned empty name/symbol for {token_address[:8]}")
+                            return None
                     else:
                         logger.warning(f"⚠️ PumpPortal API returned {resp.status} for {token_address[:8]}")
                         return None
