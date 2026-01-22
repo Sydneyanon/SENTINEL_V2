@@ -423,18 +423,17 @@ class ActiveTokenTracker:
             from config import MIN_CONVICTION_SCORE
             
             # Strict validation - don't send signal if token data is incomplete
+            # RELAXED: Allow UNKNOWN symbols (Helius often doesn't have metadata for new tokens)
             symbol = state.token_data.get('token_symbol', 'UNKNOWN')
             name = state.token_data.get('token_name', 'Unknown')
             price = state.token_data.get('price_usd', 0)
             mcap = state.token_data.get('market_cap', 0)
             liq = state.token_data.get('liquidity', 0)
-            
+
+            # Only require price + mcap (symbol can be UNKNOWN for very new tokens)
             has_real_data = (
-                symbol not in ['UNKNOWN', '', None] and
-                name not in ['Unknown', '', None] and
                 price > 0 and
-                mcap > 0 and
-                liq > 0
+                mcap > 0
             )
             
             if new_score >= MIN_CONVICTION_SCORE and not state.signal_sent:
