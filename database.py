@@ -216,13 +216,32 @@ class Database:
         """Get all signals posted today"""
         async with self.pool.acquire() as conn:
             rows = await conn.fetch('''
-                SELECT * FROM signals 
-                WHERE signal_posted = TRUE 
+                SELECT * FROM signals
+                WHERE signal_posted = TRUE
                 AND DATE(created_at) = CURRENT_DATE
                 ORDER BY created_at DESC
             ''')
             return [dict(row) for row in rows]
-    
+
+    async def get_total_signal_count(self) -> int:
+        """Get total count of all signals ever posted"""
+        async with self.pool.acquire() as conn:
+            count = await conn.fetchval(
+                'SELECT COUNT(*) FROM signals WHERE signal_posted = TRUE'
+            )
+            return count or 0
+
+    async def get_signals_in_last_hours(self, hours: int) -> List[Dict]:
+        """Get signals posted in the last N hours"""
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch('''
+                SELECT * FROM signals
+                WHERE signal_posted = TRUE
+                AND created_at >= NOW() - INTERVAL '%s hours'
+                ORDER BY created_at DESC
+            ''', hours)
+            return [dict(row) for row in rows]
+
     async def insert_smart_wallet_activity(
         self,
         wallet_address: str,
