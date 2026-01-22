@@ -489,6 +489,9 @@ EXPECTED_DAILY_CREDITS = {
 
 TELEGRAM_GROUPS = {
     -1001758611100: 'mad_apes',  # Mad Apes (gambles)
+    -1001490374084: 'alpha_group_1',  # Alpha Group 1
+    -1001860996162: 'alpha_group_2',  # Alpha Group 2
+    -1002139128702: 'alpha_group_3',  # Alpha Group 3
 }
 
 # Alternative: If using external solana-token-scraper (webhook mode)
