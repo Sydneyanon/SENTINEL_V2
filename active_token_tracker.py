@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 from dataclasses import dataclass
 from loguru import logger
 import asyncio
+from pumpportal_api import PumpPortalAPI
 
 
 @dataclass
@@ -36,6 +37,7 @@ class ActiveTokenTracker:
         self.telegram_publisher = telegram_publisher
         self.db = db
         self.helius_fetcher = helius_fetcher
+        self.pumpportal_api = PumpPortalAPI()  # For fetching token metadata
 
         # Active tokens being tracked
         self.tracked_tokens: Dict[str, TokenState] = {}
@@ -75,9 +77,24 @@ class ActiveTokenTracker:
             
             logger.info(f"🎯 START TRACKING: {token_address[:8]}...")
 
-            # FIXED: Preserve PumpPortal metadata if provided
+            # Try to get token metadata from PumpPortal API first
             pumpportal_name = initial_data.get('token_name') if initial_data else None
             pumpportal_symbol = initial_data.get('token_symbol') if initial_data else None
+
+            # If we don't have metadata yet, fetch from PumpPortal API
+            if (not pumpportal_name or pumpportal_name in ['Unknown', '']) or \
+               (not pumpportal_symbol or pumpportal_symbol in ['UNKNOWN', '']):
+                logger.info(f"   🔍 Fetching metadata from PumpPortal API...")
+                try:
+                    pump_metadata = await self.pumpportal_api.get_token_metadata(token_address)
+                    if pump_metadata:
+                        pumpportal_name = pump_metadata.get('token_name')
+                        pumpportal_symbol = pump_metadata.get('token_symbol')
+                        logger.info(f"      ✅ PumpPortal API: ${pumpportal_symbol} / {pumpportal_name}")
+                    else:
+                        logger.warning(f"      ⚠️ PumpPortal API returned no metadata")
+                except Exception as e:
+                    logger.warning(f"      ⚠️ PumpPortal API error: {e}")
 
             # Fetch initial token data from Helius
             if self.helius_fetcher:
