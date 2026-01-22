@@ -237,7 +237,7 @@ class Database:
             rows = await conn.fetch('''
                 SELECT * FROM signals
                 WHERE signal_posted = TRUE
-                AND created_at >= NOW() - INTERVAL '%s hours'
+                AND created_at >= NOW() - make_interval(hours => $1)
                 ORDER BY created_at DESC
             ''', hours)
             return [dict(row) for row in rows]
