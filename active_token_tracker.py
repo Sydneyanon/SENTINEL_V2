@@ -332,9 +332,10 @@ class ActiveTokenTracker:
             state = self.tracked_tokens[token_address]
 
             # CREDIT OPTIMIZATION: Skip polling low-conviction tokens
+            # LOWERED: Was 50, now 40 to match lowered signal thresholds (55)
             if config.DISABLE_POLLING_BELOW_THRESHOLD:
-                if state.conviction_score < 50 and not state.signal_sent:
-                    logger.debug(f"⏭️  Skipping poll for {state.token_data.get('token_symbol', 'UNKNOWN')} (conviction={state.conviction_score} < 50)")
+                if state.conviction_score < 40 and not state.signal_sent:
+                    logger.debug(f"⏭️  Skipping poll for {state.token_data.get('token_symbol', 'UNKNOWN')} (conviction={state.conviction_score} < 40)")
                     return
 
             # Simple fixed interval (30s)

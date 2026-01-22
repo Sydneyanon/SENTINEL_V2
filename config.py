@@ -50,8 +50,8 @@ DISABLE_POLLING_BELOW_THRESHOLD = True  # Only poll tokens >= 50 conviction
 # =============================================================================
 
 # Signal thresholds based on graduation status
-MIN_CONVICTION_SCORE = 55  # Pre-graduation threshold (40%+ bonding curve) - AGGRESSIVE: catching current scores
-POST_GRAD_THRESHOLD = 50   # Post-graduation threshold (100% - on Raydium) - AGGRESSIVE: catching current scores
+MIN_CONVICTION_SCORE = 45  # Pre-graduation threshold (40%+ bonding curve) - ULTRA AGGRESSIVE: 3 KOLs = signal!
+POST_GRAD_THRESHOLD = 45   # Post-graduation threshold (100% - on Raydium) - ULTRA AGGRESSIVE: match pre-grad
 
 # Base score threshold for distribution checks
 # Only check distribution if base score >= this value
