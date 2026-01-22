@@ -230,6 +230,9 @@ class ConvictionEngine:
                 # Import from main
                 from main import telegram_calls_cache
 
+                logger.info(f"   📡 Checking Telegram calls for {token_address[:8]}...")
+                logger.info(f"      Cache has {len(telegram_calls_cache)} token(s)")
+
                 if token_address in telegram_calls_cache:
                     call_data = telegram_calls_cache[token_address]
                     now = datetime.now()
@@ -285,6 +288,8 @@ class ConvictionEngine:
                             'call_age_minutes': call_age_minutes,
                             'score': social_confirmation_score
                         })
+                else:
+                    logger.info(f"      ❌ No Telegram calls found for this token")
 
             # Cap total social score (Twitter + Telegram) at 25 pts
             # This prevents over-scoring noisy hype
@@ -357,7 +362,10 @@ class ConvictionEngine:
             logger.info(f"   📊 Threshold: {threshold} ({'PRE-GRAD' if is_pre_grad else 'POST-GRAD'})")
             logger.info(f"   {'✅ SIGNAL!' if passed else '⏭️  Skip'}")
             logger.info("=" * 60)
-            
+
+            # Debug: Log token metadata being returned
+            logger.info(f"   🏷️  Token metadata: {token_data.get('token_symbol')} / {token_data.get('token_name')}")
+
             return {
                 'score': final_score,
                 'passed': passed,

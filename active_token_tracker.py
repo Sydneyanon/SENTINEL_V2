@@ -507,8 +507,11 @@ class ActiveTokenTracker:
             state = self.tracked_tokens[token_address]
             symbol = state.token_data.get('token_symbol', 'UNKNOWN')
             score = conviction_data.get('score', 0)
-            
+
+            # Debug: Log what we're about to send
             logger.info(f"🚀 SENDING SIGNAL: ${symbol} ({score}/100)")
+            logger.info(f"   🏷️  state.token_data symbol: {state.token_data.get('token_symbol')}")
+            logger.info(f"   🏷️  conviction_data token_data symbol: {conviction_data.get('token_data', {}).get('token_symbol')}")
             
             # Add signal metadata
             conviction_data['signal_type'] = 'KOL_TRIGGERED'
