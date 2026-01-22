@@ -19,6 +19,10 @@ TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 TELEGRAM_CHANNEL_ID = os.getenv('TELEGRAM_CHANNEL_ID')  # Should be like: -1001234567890
 ENABLE_TELEGRAM = True  # Enable Telegram posting
 
+# Social Intelligence APIs
+LUNARCRUSH_API_KEY = os.getenv('LUNARCRUSH_API_KEY')  # Social sentiment aggregator
+TWITTER_BEARER_TOKEN = os.getenv('TWITTER_BEARER_TOKEN')  # Twitter API v2 (free tier)
+
 # =============================================================================
 # CREDIT OPTIMIZATION (CRITICAL!)
 # =============================================================================
@@ -133,6 +137,25 @@ HOLDER_WEIGHTS = {
     'high': 15,             # 100+ holders
     'medium': 10,           # 50-99 holders
     'low': 5                # 20-49 holders
+}
+
+# Social Sentiment Scoring (LunarCrush - 0-20 points)
+LUNARCRUSH_WEIGHTS = {
+    'trending_top20': 10,   # Trending in top 20
+    'trending_top50': 7,    # Trending in top 50
+    'trending_top100': 3,   # Trending in top 100
+    'sentiment_high': 5,    # Sentiment >= 4.0
+    'sentiment_medium': 3,  # Sentiment >= 3.5
+    'volume_spike': 5,      # Social volume +100%
+    'volume_growth': 3      # Social volume +50%
+}
+
+# Twitter Buzz Scoring (Free Tier - 0-15 points)
+TWITTER_WEIGHTS = {
+    'high_buzz': 15,        # 5+ mentions, 10+ avg engagement
+    'medium_buzz': 10,      # 3+ mentions
+    'low_buzz': 5,          # 1+ mentions
+    'viral_tweet': 12       # Single tweet with 100+ likes (minimum)
 }
 
 # Phase 1 Refinements: Early Kill Switch
@@ -328,7 +351,8 @@ LOG_FILE = "prometheus.log"
 ENABLE_NARRATIVES = False   # Narrative detection (disabled for now)
 ENABLE_PERFORMANCE_TRACKING = True
 ENABLE_MILESTONE_ALERTS = True
-ENABLE_LUNARCRUSH = True    # Social sentiment via LunarCrush API
+ENABLE_LUNARCRUSH = False   # LunarCrush disabled (use Twitter only)
+ENABLE_TWITTER = True       # Twitter buzz detection (free tier - ENABLED)
 
 # =============================================================================
 # NARRATIVE DETECTION (2026 HOT TRENDS)
@@ -341,7 +365,7 @@ HOT_NARRATIVES = {
     'ai_agent': {
         'name': 'AI Agent',
         'keywords': ['ai', 'agent', 'autonomous', 'neural', 'gpt', 'bot', 'llm', 'cognition'],
-        'boost': 25,  # Maximum boost
+        'weight': 25,  # Maximum weight
         'active': True
     },
     
@@ -349,7 +373,7 @@ HOT_NARRATIVES = {
     'desci': {
         'name': 'DeSci',
         'keywords': ['desci', 'science', 'research', 'biotech', 'lab', 'molecule', 'data'],
-        'boost': 22,
+        'weight': 22,
         'active': True
     },
     
@@ -357,7 +381,7 @@ HOT_NARRATIVES = {
     'rwa': {
         'name': 'RWA',
         'keywords': ['rwa', 'real world', 'asset', 'tokenized', 'treasury', 'bond'],
-        'boost': 20,
+        'weight': 20,
         'active': True
     },
     
@@ -365,7 +389,7 @@ HOT_NARRATIVES = {
     'privacy': {
         'name': 'Privacy',
         'keywords': ['privacy', 'zk', 'zero knowledge', 'anonymous', 'private', 'stealth'],
-        'boost': 18,
+        'weight': 18,
         'active': True
     },
     
@@ -373,7 +397,7 @@ HOT_NARRATIVES = {
     'defi': {
         'name': 'DeFi',
         'keywords': ['defi', 'yield', 'stake', 'farm', 'swap', 'liquidity', 'dex'],
-        'boost': 15,
+        'weight': 15,
         'active': True
     },
     
@@ -381,7 +405,7 @@ HOT_NARRATIVES = {
     'mobile': {
         'name': 'Mobile',
         'keywords': ['mobile', 'saga', 'phone', 'seeker', 'dapp'],
-        'boost': 15,
+        'weight': 15,
         'active': True
     },
     
@@ -389,7 +413,7 @@ HOT_NARRATIVES = {
     'gamefi': {
         'name': 'GameFi',
         'keywords': ['game', 'play', 'nft', 'metaverse', 'gaming', 'p2e'],
-        'boost': 12,
+        'weight': 12,
         'active': True
     },
     
@@ -397,7 +421,7 @@ HOT_NARRATIVES = {
     'meme': {
         'name': 'Meme',
         'keywords': ['meme', 'pepe', 'doge', 'shiba', 'wojak', 'frog', 'cat', 'dog'],
-        'boost': 10,
+        'weight': 10,
         'active': True
     }
 }

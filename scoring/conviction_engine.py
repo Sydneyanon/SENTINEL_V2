@@ -8,21 +8,24 @@ from loguru import logger
 import config
 from rug_detector import RugDetector
 from lunarcrush_fetcher import get_lunarcrush_fetcher
+from twitter_fetcher import get_twitter_fetcher
 
 
 class ConvictionEngine:
     """
     Analyzes tokens and calculates conviction scores (0-100)
-    
+
     Scoring breakdown (with rug detection):
     - Smart Wallet Activity: 0-40 points
     - Narrative Detection: 0-25 points (if enabled)
     - Unique Buyers: 0-15 points
     - Volume Velocity: 0-10 points
     - Price Momentum: 0-10 points
+    - LunarCrush Social: 0-20 points (if enabled)
+    - Twitter Buzz: 0-15 points (if enabled)
     - Bundle Penalty: -5 to -40 points (with overrides)
     - Holder Concentration: -15 to -40 points (with KOL bonus)
-    Total: 0-100+ points (can exceed 100 with bonuses)
+    Total: 0-135+ points (can exceed with bonuses)
     """
     
     def __init__(
@@ -42,6 +45,9 @@ class ConvictionEngine:
 
         # Initialize LunarCrush fetcher
         self.lunarcrush = get_lunarcrush_fetcher()
+
+        # Initialize Twitter fetcher
+        self.twitter = get_twitter_fetcher()
         
     async def analyze_token(
         self, 
@@ -185,6 +191,30 @@ class ConvictionEngine:
             mid_total += social_score
 
             # ================================================================
+            # PHASE 3.6: TWITTER BUZZ (FREE TIER) - FREE
+            # ================================================================
+            # HYPER-SELECTIVE: Only check when token is at 70%+ bonding AND 75+ conviction
+            # Free tier: 100 tweet reads/month with max_results=5 = ~5 calls/week
+            # Only use for highest-potential tokens right before graduation
+
+            twitter_score = 0
+            twitter_data = {}
+
+            if config.ENABLE_TWITTER and bonding_pct >= 70 and mid_total >= 75:
+                logger.info(f"   🐦 Checking Twitter (bonding: {bonding_pct}%, score: {mid_total})...")
+                twitter_data = await self._score_twitter_buzz(token_symbol, token_address)
+                twitter_score = twitter_data.get('score', 0)
+
+                if twitter_score > 0:
+                    logger.info(f"   🐦 Twitter: +{twitter_score} points")
+                    if twitter_data.get('has_buzz'):
+                        logger.info(f"      🔥 BUZZ: {twitter_data['mention_count']} mentions, {twitter_data['total_engagement']} engagement")
+                else:
+                    logger.info(f"   🐦 Twitter: No buzz detected")
+
+            mid_total += twitter_score
+
+            # ================================================================
             # PHASE 4: HOLDER CONCENTRATION CHECK (10 CREDITS) ⭐
             # ================================================================
             
@@ -256,6 +286,7 @@ class ConvictionEngine:
                     'bundle_penalty': bundle_result['penalty'],
                     'unique_buyers': unique_buyers_score,
                     'social_sentiment': social_score,
+                    'twitter_buzz': twitter_score,
                     'holder_penalty': holder_result['penalty'],
                     'kol_bonus': holder_result['kol_bonus'],
                     'total': final_score
@@ -264,7 +295,8 @@ class ConvictionEngine:
                     'bundle': bundle_result,
                     'holder_concentration': holder_result
                 },
-                'social_data': social_data
+                'social_data': social_data,
+                'twitter_data': twitter_data
             }
             
         except Exception as e:
@@ -381,4 +413,55 @@ class ConvictionEngine:
 
         except Exception as e:
             logger.error(f"❌ Error scoring social sentiment: {e}")
+            return {'score': 0}
+
+    async def _score_twitter_buzz(self, token_symbol: str, token_address: str) -> Dict:
+        """
+        Score based on Twitter buzz (0-15 points)
+
+        Scoring breakdown:
+        - High buzz (5+ mentions, 10+ avg engagement): +15 points
+        - Medium buzz (3+ mentions, decent engagement): +10 points
+        - Low buzz (some mentions): +5 points
+
+        Returns:
+            Dict with score and metrics
+        """
+        try:
+            metrics = await self.twitter.get_token_twitter_metrics(
+                token_symbol,
+                ca=token_address
+            )
+
+            if not metrics:
+                return {'score': 0}
+
+            score = 0
+
+            # 1. Buzz detection (0-15 points)
+            if metrics.get('has_buzz'):
+                # High engagement detected
+                score += 15
+            elif metrics['mention_count'] >= 3:
+                # Medium buzz
+                score += 10
+            elif metrics['mention_count'] >= 1:
+                # Low buzz
+                score += 5
+
+            # 2. Top tweet bonus (viral tweet detected)
+            if metrics['top_tweet_likes'] >= 100:
+                score = max(score, 12)  # At least 12 points if viral tweet
+
+            return {
+                'score': score,
+                'mention_count': metrics['mention_count'],
+                'total_engagement': metrics['total_engagement'],
+                'avg_engagement': metrics['avg_engagement'],
+                'has_buzz': metrics['has_buzz'],
+                'top_tweet_likes': metrics['top_tweet_likes']
+            }
+
+        except Exception as e:
+            logger.error(f"❌ Error scoring Twitter buzz: {e}")
             return {'score': 0}
