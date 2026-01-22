@@ -220,14 +220,13 @@ class ConvictionEngine:
             # ================================================================
             # PHASE 3.7: SOCIAL CONFIRMATION (TELEGRAM CALLS) - FREE
             # ================================================================
-            # SELECTIVE: Only check if token is already tracked (KOL bought)
-            # AND mid_total >= 60 (promising token)
+            # Check Telegram calls as soon as KOL buys any token
             # Variable scoring based on mention intensity and recency
 
             social_confirmation_score = 0
             telegram_call_data = {}
 
-            if config.ENABLE_TELEGRAM_SCRAPER and mid_total >= 60:
+            if config.ENABLE_TELEGRAM_SCRAPER:
                 # Import from main
                 from main import telegram_calls_cache
 
