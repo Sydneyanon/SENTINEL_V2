@@ -2,8 +2,14 @@
 Twitter API Integration (Free Tier Optimized)
 Fetches tweet mentions and engagement data for conviction scoring
 
-Conservative Limits: 100 calls/month (~3/day)
-Strategy: Ultra-aggressive caching + only check tokens at 60%+ bonding with 70+ conviction
+CRITICAL LIMITS: 100 tweet READS per month (not 100 calls!)
+With max_results=5: 100 reads ÷ 5 = 20 API calls/month = ~5 calls/week
+
+Strategy:
+- 24-hour cache per token
+- Weekly rate limit (5 calls/week)
+- Only check tokens at 70%+ bonding with 75+ conviction
+- Use as final boost for highest-conviction tokens
 """
 import os
 import asyncio
@@ -23,24 +29,29 @@ class TwitterFetcher:
         if not self.bearer_token:
             logger.warning("⚠️ TWITTER_BEARER_TOKEN not set - Twitter sentiment disabled")
 
-        # Ultra-aggressive caching (6 hours) to conserve API calls
+        # Ultra-aggressive caching (24 hours) to conserve API calls
         self.cache = {}
-        self.cache_ttl_minutes = 360  # 6 hours
+        self.cache_ttl_minutes = 1440  # 24 hours (1 day)
 
-        # Rate limiting tracker (conservative: 100 calls/month = ~3/day)
-        self.daily_calls = 0
-        self.daily_limit = 3  # Conservative limit for free tier
+        # Rate limiting tracker
+        # 100 tweet reads/month with max_results=5 = 20 API calls/month
+        # 20 calls/month ÷ 30 days = 0.66 calls/day
+        # Conservative: limit to 5 calls per week (average ~0.7/day)
+        self.weekly_calls = 0
+        self.weekly_limit = 5  # 5 calls per week = 20/month (uses 100 tweet reads)
         self.last_reset = datetime.now()
 
     def _check_rate_limit(self) -> bool:
         """Check if we're within rate limits"""
-        # Reset counter if new day
-        if (datetime.now() - self.last_reset).days >= 1:
-            self.daily_calls = 0
+        # Reset counter if new week (7 days)
+        days_since_reset = (datetime.now() - self.last_reset).days
+        if days_since_reset >= 7:
+            self.weekly_calls = 0
             self.last_reset = datetime.now()
+            logger.info(f"🔄 Twitter API weekly counter reset")
 
-        if self.daily_calls >= self.daily_limit:
-            logger.warning(f"🚨 Twitter API daily limit reached ({self.daily_calls}/{self.daily_limit})")
+        if self.weekly_calls >= self.weekly_limit:
+            logger.warning(f"🚨 Twitter API weekly limit reached ({self.weekly_calls}/{self.weekly_limit})")
             return False
 
         return True
@@ -49,7 +60,7 @@ class TwitterFetcher:
         self,
         symbol: str,
         ca: str = None,
-        max_results: int = 10
+        max_results: int = 5
     ) -> Optional[Dict]:
         """
         Get Twitter metrics for a token (optimized for free tier)
@@ -109,8 +120,8 @@ class TwitterFetcher:
 
                 async with session.get(url, headers=headers, params=params) as response:
                     # Increment call counter
-                    self.daily_calls += 1
-                    logger.debug(f"📊 Twitter API calls today: {self.daily_calls}/{self.daily_limit}")
+                    self.weekly_calls += 1
+                    logger.info(f"📊 Twitter API calls this week: {self.weekly_calls}/{self.weekly_limit}")
 
                     if response.status == 429:  # Rate limited
                         logger.warning("⚠️ Twitter API rate limit hit")
@@ -219,10 +230,11 @@ class TwitterFetcher:
     def get_rate_limit_status(self) -> Dict:
         """Get current rate limit status"""
         return {
-            'daily_calls': self.daily_calls,
-            'daily_limit': self.daily_limit,
-            'remaining': self.daily_limit - self.daily_calls,
-            'reset_at': self.last_reset + timedelta(days=1)
+            'weekly_calls': self.weekly_calls,
+            'weekly_limit': self.weekly_limit,
+            'remaining': self.weekly_limit - self.weekly_calls,
+            'reset_at': self.last_reset + timedelta(days=7),
+            'days_until_reset': 7 - (datetime.now() - self.last_reset).days
         }
 
 

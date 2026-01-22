@@ -8,11 +8,17 @@ SENTINEL now uses Twitter API (free tier) to boost conviction scores for high-po
 
 ---
 
-## API Limits
+## API Limits (CRITICAL!)
 
-**Free Tier:** ~100 calls/month = **3 calls per day**
+**Free Tier:** 100 **tweet READS** per month (NOT 100 API calls!)
 
-**Strategy:** Ultra-selective checking with aggressive caching
+**What this means:**
+- Each API call fetches `max_results=5` tweets
+- 100 reads ÷ 5 tweets/call = **20 API calls per month**
+- 20 calls ÷ 4 weeks = **~5 calls per week**
+- That's roughly **1 token per day**
+
+**Strategy:** Hyper-selective checking with 24-hour caching
 
 ---
 
@@ -20,10 +26,10 @@ SENTINEL now uses Twitter API (free tier) to boost conviction scores for high-po
 
 Twitter is only checked when **ALL** conditions are met:
 
-1. ✅ **Bonding Curve:** Token is at **60%+ bonding** (close to graduation)
-2. ✅ **Conviction Score:** Token already has **70+ conviction** (promising)
-3. ✅ **Not Cached:** Token hasn't been checked in last 6 hours
-4. ✅ **Rate Limit:** Haven't hit daily limit (3 calls/day)
+1. ✅ **Bonding Curve:** Token is at **70%+ bonding** (very close to graduation)
+2. ✅ **Conviction Score:** Token already has **75+ conviction** (high-conviction only)
+3. ✅ **Not Cached:** Token hasn't been checked in last 24 hours
+4. ✅ **Rate Limit:** Haven't hit weekly limit (5 calls/week)
 
 ### Example Flow
 
@@ -33,13 +39,16 @@ KOL buys token → Start tracking
 Token at 40% bonding, 50 conviction
 └─ Twitter: SKIP (bonding too low)
 
-Token at 65% bonding, 60 conviction
-└─ Twitter: SKIP (conviction too low)
+Token at 65% bonding, 72 conviction
+└─ Twitter: SKIP (bonding too low, conviction too low)
 
-Token at 70% bonding, 75 conviction
+Token at 75% bonding, 78 conviction
 └─ Twitter: ✅ CHECK! (both thresholds met)
    ├─ Found 8 mentions, 120 engagement
-   └─ +10 points → Final score: 85/100 → SIGNAL! 🚀
+   └─ +10 points → Final score: 88/100 → SIGNAL! 🚀
+
+Token at 80% bonding, 74 conviction
+└─ Twitter: SKIP (conviction too low, need 75+)
 ```
 
 ---
@@ -72,22 +81,22 @@ Query: "$BONK (crypto OR token OR solana) -is:retweet"
 - Average engagement per tweet
 - Top tweet likes (viral detection)
 
-**Cache:** Results cached for **6 hours** per token
+**Cache:** Results cached for **24 hours** per token
 
 ---
 
 ## Expected Usage
 
-### Daily Usage (Conservative)
+### Weekly Usage (Conservative)
 
 ```
-KOLs buy ~10-20 tokens per day
-└─ ~5-10 reach 60%+ bonding
-   └─ ~1-3 have 70+ conviction at that point
-      └─ Twitter checks: 1-3 per day ✅
+KOLs buy ~70-140 tokens per week
+└─ ~20-40 reach 70%+ bonding
+   └─ ~3-7 have 75+ conviction at that point
+      └─ Twitter checks: 3-5 per week ✅
 ```
 
-**Monthly:** 30-90 calls (well under 100 limit)
+**Monthly:** 12-20 API calls (uses 60-100 tweet reads) ✅
 
 ---
 
@@ -95,17 +104,17 @@ KOLs buy ~10-20 tokens per day
 
 **Built-in protection:**
 
-1. **Daily limit:** 3 calls per day (hardcoded)
-2. **Resets:** Automatically resets every 24 hours
-3. **Cache:** 6-hour cache prevents duplicate checks
-4. **Logging:** Shows API usage: `"📊 Twitter API calls today: 2/3"`
+1. **Weekly limit:** 5 calls per week (hardcoded)
+2. **Resets:** Automatically resets every 7 days
+3. **Cache:** 24-hour cache prevents duplicate checks
+4. **Logging:** Shows API usage: `"📊 Twitter API calls this week: 3/5"`
 
 If limit hit:
 ```
-🚨 Twitter API daily limit reached (3/3)
+🚨 Twitter API weekly limit reached (5/5)
 └─ Skips Twitter check
 └─ Token still scored without Twitter boost
-└─ Resets tomorrow
+└─ Resets in X days
 ```
 
 ---
@@ -153,9 +162,9 @@ from twitter_fetcher import get_twitter_fetcher
 twitter = get_twitter_fetcher()
 status = twitter.get_rate_limit_status()
 
-print(f"Calls today: {status['daily_calls']}/{status['daily_limit']}")
+print(f"Calls this week: {status['weekly_calls']}/{status['weekly_limit']}")
 print(f"Remaining: {status['remaining']}")
-print(f"Resets at: {status['reset_at']}")
+print(f"Resets in: {status['days_until_reset']} days")
 ```
 
 ### Logs
@@ -164,19 +173,21 @@ Look for these in logs:
 
 ```
 ✅ Positive signal:
-🐦 Checking Twitter (bonding: 75%, score: 72)...
+🐦 Checking Twitter (bonding: 78%, score: 77)...
+📊 Twitter API calls this week: 3/5
 🐦 Twitter: +10 points
 🔥 BUZZ: 8 mentions, 120 engagement
 
 ❌ No buzz:
-🐦 Checking Twitter (bonding: 68%, score: 71)...
+🐦 Checking Twitter (bonding: 72%, score: 76)...
+📊 Twitter API calls this week: 4/5
 🐦 Twitter: No buzz detected
 
 ⏭️ Skipped (thresholds not met):
 (no log - silently skipped)
 
 🚨 Rate limit hit:
-🚨 Twitter API daily limit reached (3/3)
+🚨 Twitter API weekly limit reached (5/5)
 ```
 
 ---
@@ -213,10 +224,11 @@ Without Twitter: Would have missed this signal.
 
 ## Troubleshooting
 
-### "Twitter API daily limit reached"
-- Normal - resets in 24 hours
+### "Twitter API weekly limit reached"
+- Normal - resets in 7 days from first call
 - Token still scored without Twitter boost
-- Adjust thresholds if you want to save calls
+- Very restrictive limit (5 calls/week)
+- Consider Twitter Basic tier ($100/mo) for more calls
 
 ### "No Twitter mentions"
 - Normal for new/small tokens
@@ -229,18 +241,25 @@ Without Twitter: Would have missed this signal.
 
 ### Want more/fewer checks?
 
+**Warning:** Free tier is VERY limited (5 calls/week max)
+
 Adjust thresholds in `scoring/conviction_engine.py`:
 
 ```python
-# More checks (4-5 per day):
-if config.ENABLE_TWITTER and bonding_pct >= 50 and mid_total >= 60:
-
-# Fewer checks (1-2 per day):
-if config.ENABLE_TWITTER and bonding_pct >= 70 and mid_total >= 75:
-
-# Current (2-3 per day):
+# More checks (~7-10 per week) - will hit limit faster:
 if config.ENABLE_TWITTER and bonding_pct >= 60 and mid_total >= 70:
+
+# Fewer checks (~2-3 per week) - ultra-conservative:
+if config.ENABLE_TWITTER and bonding_pct >= 80 and mid_total >= 80:
+
+# Current (4-5 per week) - recommended:
+if config.ENABLE_TWITTER and bonding_pct >= 70 and mid_total >= 75:
 ```
+
+**Or upgrade to Twitter Basic ($100/mo):**
+- 10,000 tweet reads/month
+- With max_results=10: ~1,000 calls/month
+- Can check 30+ tokens/day instead of 1/day
 
 ---
 
