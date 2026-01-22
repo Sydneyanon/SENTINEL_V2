@@ -156,7 +156,8 @@ class ConvictionEngine:
             logger.info(f"   💎 MID SCORE: {mid_total}/100")
 
             # Early exit if mid score (base + bundle + unique buyers) too low
-            if mid_total < 50:
+            # LOWERED: Was 50, now 20 to allow Twitter/social checks on early tokens
+            if mid_total < 20:
                 logger.info(f"   ⏭️  Mid Score: {mid_total}/100 - Too low for further analysis")
                 return {
                     'score': mid_total,
@@ -193,14 +194,14 @@ class ConvictionEngine:
             # ================================================================
             # PHASE 3.6: TWITTER BUZZ (FREE TIER) - FREE
             # ================================================================
-            # SELECTIVE: Check when token is at 60%+ bonding AND 70+ conviction
+            # SELECTIVE: Check when token is at 40%+ bonding AND 25+ conviction
+            # LOWERED: Was 60%/70, now 40%/25 to catch early KOL plays
             # Free tier: 100 tweet reads/month with max_results=5 = ~5 calls/week
-            # Catches tokens earlier while still being selective
 
             twitter_score = 0
             twitter_data = {}
 
-            if config.ENABLE_TWITTER and bonding_pct >= 60 and mid_total >= 70:
+            if config.ENABLE_TWITTER and bonding_pct >= 40 and mid_total >= 25:
                 logger.info(f"   🐦 Checking Twitter (bonding: {bonding_pct}%, score: {mid_total})...")
                 twitter_data = await self._score_twitter_buzz(token_symbol, token_address)
                 twitter_score = twitter_data.get('score', 0)
