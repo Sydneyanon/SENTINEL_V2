@@ -52,5 +52,7 @@ RUN chmod +x /app/ralph/ralph.sh /app/ralph/ralph_api.py && \
 # Switch to non-root user
 USER ralph
 
-# Default command: run Ralph with Claude Code CLI (has Bash/Git/Edit tools for actual execution)
-CMD ["bash", "/app/ralph/ralph.sh", "--tool", "claude", "30"]
+# Default command: run Ralph with Anthropic API (uses ANTHROPIC_API_KEY env var)
+# NOTE: --tool api is the correct choice for Railway (non-interactive, uses API key from env)
+# --tool claude requires interactive /login and doesn't work in Railway containers
+CMD ["bash", "/app/ralph/ralph.sh", "--tool", "api", "30"]
