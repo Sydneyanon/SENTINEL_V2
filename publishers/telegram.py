@@ -321,12 +321,21 @@ The fire has been stolen. Watching for elite trader activity... 🔥"""
             
             if self.banner_file_id:
                 # Send with banner if available
-                await self.bot.send_animation(
-                    chat_id=self.channel_id,
-                    animation=self.banner_file_id,
-                    caption=test_message,
-                    parse_mode=ParseMode.HTML
-                )
+                try:
+                    await self.bot.send_animation(
+                        chat_id=self.channel_id,
+                        animation=self.banner_file_id,
+                        caption=test_message,
+                        parse_mode=ParseMode.HTML
+                    )
+                except TelegramError as e:
+                    logger.warning(f"⚠️ Banner failed ({e}), sending text-only")
+                    # Fallback to text-only if banner doesn't work
+                    await self.bot.send_message(
+                        chat_id=self.channel_id,
+                        text=test_message,
+                        parse_mode=ParseMode.HTML
+                    )
             else:
                 await self.bot.send_message(
                     chat_id=self.channel_id,
