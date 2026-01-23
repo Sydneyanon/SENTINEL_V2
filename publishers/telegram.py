@@ -134,6 +134,9 @@ class TelegramPublisher:
             
             for wallet in wallets[:3]:  # Show top 3
                 name = wallet.get('name', 'Unknown')
+                # Fallback for None or empty names
+                if not name or name == 'None' or name is None:
+                    name = 'KOL'
                 tier = wallet.get('tier', '')
                 win_rate = wallet.get('win_rate', 0)
                 pnl_30d = wallet.get('pnl_30d', 0)
