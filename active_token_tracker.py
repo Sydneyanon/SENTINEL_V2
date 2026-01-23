@@ -49,6 +49,7 @@ class ActiveTokenTracker:
         self.tokens_tracked_total = 0
         self.signals_sent_total = 0
         self.reanalyses_total = 0
+        self.signals_blocked_data_quality = 0  # OPT-036: Track blocked signals
 
         logger.info("🎯 ActiveTokenTracker initialized")
     
@@ -546,11 +547,24 @@ class ActiveTokenTracker:
             mcap = state.token_data.get('market_cap', 0)
             liq = state.token_data.get('liquidity', 0)
 
-            # Only require price + mcap (symbol can be UNKNOWN for very new tokens)
-            has_real_data = (
-                price > 0 and
-                mcap > 0
-            )
+            # OPT-036: Strict data quality checks
+            # Block signals with missing critical data to prevent posting garbage
+            bonding_pct = state.token_data.get('bonding_curve_pct', 0)
+            is_pre_grad = bonding_pct < 100
+
+            # Critical data requirements
+            data_quality_checks = {
+                'price': price > 0,
+                'liquidity': liq >= 1000,  # Min $1k liquidity
+                'mcap': mcap > 0,
+            }
+
+            # Holder count check (exempt pre-grad tokens since they're still building)
+            if not is_pre_grad:
+                holder_count = state.token_data.get('holder_count', 0)
+                data_quality_checks['holders'] = holder_count > 0
+
+            has_real_data = all(data_quality_checks.values())
             
             # DIAGNOSTIC: Log every threshold check
             logger.info(f"🔍 THRESHOLD CHECK for {symbol}:")
@@ -565,20 +579,22 @@ class ActiveTokenTracker:
                     logger.info(f"   📊 conviction_data['breakdown']['total'] = {conviction_data.get('breakdown', {}).get('total')}")
                     await self._send_signal(token_address, conviction_data)
                 else:
-                    # Log exactly what's missing
-                    missing = []
-                    if symbol in ['UNKNOWN', '', None]:
-                        missing.append(f"symbol={symbol}")
-                    if name in ['Unknown', '', None]:
-                        missing.append(f"name={name}")
-                    if price <= 0:
-                        missing.append(f"price=${price}")
-                    if mcap <= 0:
-                        missing.append(f"mcap=${mcap}")
-                    if liq <= 0:
-                        missing.append(f"liq=${liq}")
+                    # OPT-036: Log exactly what quality checks failed
+                    failed_checks = []
+                    if not data_quality_checks.get('price', True):
+                        failed_checks.append(f"price={price} (must be > 0)")
+                    if not data_quality_checks.get('liquidity', True):
+                        failed_checks.append(f"liquidity=${liq:.0f} (must be >= $1k)")
+                    if not data_quality_checks.get('mcap', True):
+                        failed_checks.append(f"mcap=${mcap:.0f} (must be > 0)")
+                    if not data_quality_checks.get('holders', True):
+                        holder_count = state.token_data.get('holder_count', 0)
+                        failed_checks.append(f"holders={holder_count} (post-grad must have holders)")
 
-                    logger.warning(f"⏳ {symbol}: Score {new_score} but missing data: {', '.join(missing)}")
+                    self.signals_blocked_data_quality += 1
+                    logger.warning(f"🚫 BLOCKED: ${symbol} scored {new_score} but failed data quality checks: {', '.join(failed_checks)}")
+                    logger.warning(f"   💡 This prevents posting low-quality signals that are likely rugs")
+                    logger.warning(f"   📊 Total blocked (data quality): {self.signals_blocked_data_quality}")
             else:
                 logger.info(f"   ⏭️  FAILS threshold check - not sending signal")
             
