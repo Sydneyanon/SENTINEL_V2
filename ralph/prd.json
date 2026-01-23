@@ -485,6 +485,128 @@
       "passes": false,
       "notes": "AGGRESSIVE: If one KOL is crushing it, copy them exactly",
       "baseline_metrics": {}
+    },
+    {
+      "id": "OPT-027",
+      "title": "UX: Display KOL names in Telegram posts",
+      "description": "As a trader, I want to see which KOLs bought so I know who's behind the signal",
+      "acceptanceCriteria": [
+        "Add KOL name/label to Telegram embed (e.g., 'Ansem', 'Machi Big Brother')",
+        "Show tier badge (🔥 Elite, 👑 God, etc.)",
+        "If multiple KOLs: show top 3 by tier",
+        "Pull names from curated_wallets.py metadata",
+        "Test Telegram formatting looks clean",
+        "Deploy and monitor for formatting issues"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": "USER REQUEST: Make signals more transparent and trustworthy",
+      "baseline_metrics": {}
+    },
+    {
+      "id": "OPT-028",
+      "title": "FIX: Telegram channel scraper calling issues",
+      "description": "As a monitor, I want reliable Telegram channel tracking without missing calls",
+      "acceptanceCriteria": [
+        "Debug telegram_monitor.py - check for connection drops, auth issues",
+        "Add reconnection logic with exponential backoff",
+        "Add health check: alert if no messages received in 10min",
+        "Log all calls to database with timestamp and channel",
+        "Monitor for 6 hours - ensure no missed calls",
+        "Keep if: no connection drops AND all channels tracked reliably"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": "USER REQUEST: Fix reliability issues with Telegram scraper",
+      "baseline_metrics": {}
+    },
+    {
+      "id": "OPT-029",
+      "title": "GROWTH: Auto-discover high win-rate Telegram channels",
+      "description": "As a researcher, I want to find new alpha channels with proven track records",
+      "acceptanceCriteria": [
+        "Scrape popular Solana Telegram directories for memecoin channels",
+        "Monitor each channel for 7 days, track all token calls",
+        "Calculate win rate per channel (track token price 6h/24h after call)",
+        "Auto-add channels with: win_rate >55% AND >20 calls tracked",
+        "Weight Telegram signals from high-performing channels higher",
+        "Keep if: new channels add >3 winning signals per week"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": "USER REQUEST: Find new high-quality alpha sources automatically",
+      "baseline_metrics": {}
+    },
+    {
+      "id": "OPT-030",
+      "title": "GROWTH: Auto-discover and add new KOL wallets",
+      "description": "As a wallet tracker, I want to find emerging KOLs before they're widely known",
+      "acceptanceCriteria": [
+        "Track wallets mentioned in high-performing Telegram channels",
+        "Monitor whale wallets from DexScreener top traders",
+        "Calculate 30-day performance: win_rate, avg_ROI, trade_frequency",
+        "Auto-promote wallets with: win_rate >65% AND avg_ROI >4x AND >15 trades",
+        "Start them at 'promising' tier (low points), upgrade if they maintain performance",
+        "Monitor for 14 days",
+        "Keep if: new KOLs contribute >2 winning signals per week"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": "USER REQUEST: Expand KOL list automatically with data-driven discovery",
+      "baseline_metrics": {}
+    },
+    {
+      "id": "OPT-031",
+      "title": "REAL-TIME: Automated narrative detection and updates",
+      "description": "As a narrative tracker, I want narratives to update automatically based on trending tokens",
+      "acceptanceCriteria": [
+        "Scan token names/descriptions for keywords every 15 minutes",
+        "Track keyword frequency: 'AI', 'cat', 'dog', 'pepe', 'degen', etc.",
+        "Auto-create new narrative if keyword appears in >5 tokens in 1 hour",
+        "Calculate narrative win_rate dynamically (last 24h performance)",
+        "Boost trending narratives (+15 conviction pts), suppress dead ones (-10 pts)",
+        "Monitor for 24 hours",
+        "Keep if: catches trending narratives >6 hours faster than manual"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": "USER REQUEST: Real-time narrative detection instead of static list",
+      "baseline_metrics": {}
+    },
+    {
+      "id": "OPT-032",
+      "title": "EXIT STRATEGY: Smart profit-taking system",
+      "description": "As a trader, I want the bot to tell me when to take profits based on data",
+      "acceptanceCriteria": [
+        "Track all posted signals: price, volume, holder count, liquidity",
+        "Define exit signals: volume drops >70%, holders drop >30%, or price 5x+",
+        "Calculate exit timing: if hit 5x within 2h, suggest 50% exit at 3x (take profits)",
+        "Build exit score: 0-100 based on sustainability indicators",
+        "Test on historical signals: would exit strategy improve realized gains?",
+        "Keep if: backtested exit strategy improves avg realized ROI >20%"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": "USER REQUEST: Help traders know when to exit, not just when to enter",
+      "baseline_metrics": {}
+    },
+    {
+      "id": "OPT-033",
+      "title": "EXIT ALERTS: Telegram posts for when to sell",
+      "description": "As a trader, I want Telegram alerts telling me when to take profits on active positions",
+      "acceptanceCriteria": [
+        "Monitor all posted signals continuously (price, volume, holders)",
+        "Post exit alert when: hit 3x ('Take 50% profits'), 5x ('Take 70%'), or red flags ('EXIT NOW')",
+        "Red flags: volume crashed >80%, holders down >40%, liquidity pulled >50%",
+        "Format: '🚨 EXIT SIGNAL: [TOKEN] hit 5x - Suggest taking 70% profits. Volume: -15%, Holders: +5%'",
+        "Track if users follow exit signals (measure via on-chain)",
+        "Monitor for 48 hours",
+        "Keep if: exit alerts would have improved avg ROI >15% (vs holding)"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": "USER REQUEST: Active management - tell traders when to exit positions",
+      "baseline_metrics": {}
     }
   ]
 }
