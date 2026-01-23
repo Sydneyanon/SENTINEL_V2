@@ -782,6 +782,136 @@
       "passes": false,
       "notes": "PSYCHOLOGICAL: Don't keep posting after losses. Be aggressive when hot, defensive when cold.",
       "baseline_metrics": {}
+    },
+    {
+      "id": "OPT-044",
+      "title": "RESEARCH: Reverse-engineer graduated tokens for success patterns",
+      "description": "As a researcher, I want to learn from ALL graduated tokens, not just our signals",
+      "acceptanceCriteria": [
+        "Scrape pump.fun API: all tokens that graduated bonding curve in last 30 days",
+        "For each graduated token, fetch full history: price, volume, holder growth, KOL buys during bonding",
+        "Classify WINNERS (10x+ post-grad) vs LOSERS (rug or <2x)",
+        "Extract features: KOL count during bonding, holder velocity, volume pattern, liquidity additions, narrative",
+        "Build success pattern database: 'Tokens with 3+ elite KOL buys during bonding + holder velocity >50/hr = 78% graduation success rate'",
+        "Add graduated_token_analyzer.py that scores new signals based on grad patterns",
+        "Monitor for 48 hours",
+        "Keep if: win_rate improves >12% by applying grad token learnings"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "USER INSIGHT: Learn from the entire pump.fun ecosystem, not just our small sample size. Massive data advantage.",
+      "baseline_metrics": {}
+    },
+    {
+      "id": "OPT-045",
+      "title": "RESEARCH: Analyze what DOESN'T work during bonding",
+      "description": "As a risk analyst, I want to know what patterns predict failure during bonding curve",
+      "acceptanceCriteria": [
+        "Scrape pump.fun: all tokens that FAILED to graduate (last 30 days)",
+        "Extract failure patterns: holder stagnation, volume drop-off, KOL exits, liquidity pulls",
+        "Calculate failure rates per pattern: 'Tokens with volume drop >80% in first hour = 92% fail rate'",
+        "Build failure fingerprint database",
+        "Add bonding_failure_detector.py that blocks signals matching failure patterns >75%",
+        "Monitor for 24 hours",
+        "Keep if: prevents >10 rugs OR rug_rate drops >25%"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "USER INSIGHT: Learn what doesn't work. If pattern fails 90% of time across all pump.fun, block it immediately.",
+      "baseline_metrics": {}
+    },
+    {
+      "id": "OPT-046",
+      "title": "RESEARCH: Build predictive model from graduated token dataset",
+      "description": "As a data scientist, I want to train ML on ALL graduated tokens for maximum accuracy",
+      "acceptanceCriteria": [
+        "Build dataset: 1000+ graduated tokens with full bonding curve history",
+        "Features: KOL count, holder velocity, volume curve, narrative, timing, liquidity pattern",
+        "Labels: SUCCESS (graduated + 5x post-grad) vs FAILURE (didn't graduate or rugged)",
+        "Train XGBoost/RandomForest on this massive dataset",
+        "Model predicts: P(graduation) and P(10x post-grad)",
+        "Apply to new signals: +30 conviction if P(graduation) > 80% AND P(10x) > 60%",
+        "Block signals if P(graduation) < 40%",
+        "Monitor for 7 days",
+        "Keep if: win_rate improves >18% AND model accuracy >72%"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "USER INSIGHT: Train on 1000+ graduated tokens = massive dataset advantage. Learn from entire ecosystem.",
+      "baseline_metrics": {}
+    },
+    {
+      "id": "OPT-047",
+      "title": "RESEARCH: Track top 100 graduated tokens for post-grad behavior",
+      "description": "As a strategist, I want to understand what happens AFTER graduation",
+      "acceptanceCriteria": [
+        "Identify top 100 graduated tokens by volume (last 90 days)",
+        "Track post-graduation behavior: price action, holder retention, KOL holds vs exits",
+        "Identify SUSTAINABLE patterns: 'Tokens where 70%+ KOLs held post-grad = 3.2x avg vs 1.4x when KOLs exited'",
+        "Add post_grad_predictor.py that estimates sustainability",
+        "Bonus points for signals likely to have sustainable post-grad run",
+        "Monitor for 14 days",
+        "Keep if: avg_ROI on graduated signals improves >25%"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": "USER INSIGHT: Graduation isn't the end - understand what makes tokens run POST-graduation.",
+      "baseline_metrics": {}
+    },
+    {
+      "id": "OPT-048",
+      "title": "RESEARCH: Auto-discover new KOLs from graduated token buyers",
+      "description": "As a KOL hunter, I want to find wallets that consistently buy tokens that graduate",
+      "acceptanceCriteria": [
+        "For all graduated tokens (last 60 days), identify wallets that bought during bonding",
+        "Calculate 'graduation rate' per wallet: % of their buys that graduated",
+        "Identify HIDDEN GEMS: wallets with >65% grad rate + >20 buys + not in our list",
+        "Auto-add to curated_wallets.py as 'grad_sniper' tier",
+        "Weight these wallets: +25 conviction pts (proven grad ability)",
+        "Monitor for 14 days",
+        "Keep if: new wallets contribute >5 winning signals OR win_rate improves >8%"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "USER INSIGHT: Find wallets we're missing by looking at who consistently buys winners. Data-driven KOL discovery.",
+      "baseline_metrics": {}
+    },
+    {
+      "id": "OPT-049",
+      "title": "RESEARCH: Bonding curve velocity as predictor",
+      "description": "As an analyst, I want to know if fast bonding = sustainable vs slow bonding = rug",
+      "acceptanceCriteria": [
+        "Analyze 500+ graduated tokens: time to graduate (fast <30min, medium 30-120min, slow >120min)",
+        "Compare post-grad performance by velocity: fast vs medium vs slow",
+        "Calculate win_rate and avg_ROI per velocity bucket",
+        "If pattern found (e.g., 'medium velocity 30-90min = 71% WR vs fast <30min = 48% WR')",
+        "Add bonding_velocity_scorer.py that adjusts conviction based on velocity",
+        "Monitor for 48 hours",
+        "Keep if: win_rate improves >10% by favoring optimal velocity range"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": "USER INSIGHT: Reverse-engineer timing - is fast bonding good or bad? Let data decide.",
+      "baseline_metrics": {}
+    },
+    {
+      "id": "OPT-050",
+      "title": "CONTINUOUS: Auto-update dataset weekly with new graduated tokens",
+      "description": "As a learning system, I want fresh data every week to stay current with meta",
+      "acceptanceCriteria": [
+        "Schedule weekly scrape: all new graduated tokens from last 7 days",
+        "Update success/failure pattern databases",
+        "Retrain ML models on updated dataset",
+        "Track meta shifts: 'narratives that worked last month vs this month'",
+        "Auto-adjust scoring weights based on recent data",
+        "Log changes to progress.txt: 'Meta shift detected: AI narrative win_rate dropped from 68% → 42%, reducing weight'",
+        "Monitor continuously",
+        "Keep permanently (continuous learning)"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": "USER INSIGHT: Meta changes weekly. Continuous learning from graduated tokens keeps us current.",
+      "baseline_metrics": {}
     }
   ]
 }
