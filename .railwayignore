@@ -1,0 +1,2 @@
+# Force Railway to use Dockerfile for Ralph service
+# This file prevents Railway from auto-detecting as Python project
