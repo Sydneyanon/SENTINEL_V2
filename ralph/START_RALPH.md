@@ -13,6 +13,9 @@ export ANTHROPIC_API_KEY="sk-ant-api03-..."
 # Set your database URL (same as the main bot)
 export DATABASE_URL="postgresql://..."
 
+# Optional: Enable debug logging (default: off to reduce log spam)
+export RALPH_DEBUG="true"
+
 # Run Ralph (10 iterations = ~20-40 hours total)
 cd /home/user/SENTINEL_V2/ralph
 ./ralph.sh --tool api 10
@@ -28,6 +31,7 @@ screen -S ralph
 cd /home/user/SENTINEL_V2/ralph
 export ANTHROPIC_API_KEY="sk-ant-api03-..."
 export DATABASE_URL="postgresql://..."
+export RALPH_DEBUG="false"  # Reduce log spam (Railway has 500 lines/sec limit)
 ./ralph.sh --tool api 10
 
 # Detach: Press Ctrl+A then D
@@ -63,6 +67,7 @@ railway service create ralph-optimizer
 # - GIT_AUTHOR_NAME: "Ralph Bot"
 # - GIT_AUTHOR_EMAIL: "ralph@prometheus.bot"
 # - GITHUB_TOKEN: Your GitHub token for pushing commits
+# - RALPH_DEBUG: "false" (keep logs minimal, Railway has 500 lines/sec limit)
 ```
 
 ### 4. Deploy
