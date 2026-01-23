@@ -77,6 +77,15 @@ class SmartWalletTracker:
             if not wallet_info:
                 logger.warning(f"⚠️ No wallet info for tracked wallet: {fee_payer[:8]}")
                 return
+
+            # Apply fallback for None/empty names immediately (for logging)
+            if not wallet_info.get('name') or wallet_info.get('name') is None:
+                wallet_info = {
+                    **wallet_info,
+                    'name': f"KOL_{fee_payer[:6]}",
+                    'win_rate': wallet_info.get('win_rate', 0),
+                    'pnl_30d': wallet_info.get('pnl_30d', 0)
+                }
             
             # Get token transfers
             token_transfers = tx_data.get('tokenTransfers', [])
