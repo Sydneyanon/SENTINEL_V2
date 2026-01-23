@@ -1,5 +1,8 @@
 # Prometheus Bot - Complete Dependencies
 
+# Ralph Autonomous Optimizer
+anthropic>=0.40.0
+
 # Web Framework (for FastAPI main.py)
 fastapi>=0.104.0
 uvicorn[standard]>=0.24.0
