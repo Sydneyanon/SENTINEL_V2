@@ -155,6 +155,15 @@ class SmartWalletTracker:
                     'pnl_30d': wallet_info.get('pnl_30d', 0)
                 }
 
+        # Always ensure name is set (even if fetch_metadata is False)
+        if not wallet_info.get('name') or wallet_info.get('name') is None:
+            wallet_info = {
+                **wallet_info,
+                'name': f"KOL_{wallet_address[:6]}",
+                'win_rate': wallet_info.get('win_rate', 0),
+                'pnl_30d': wallet_info.get('pnl_30d', 0)
+            }
+
         # Add to in-memory cache ALWAYS (this is fast)
         if token_address not in self.recent_buys:
             self.recent_buys[token_address] = []
@@ -334,6 +343,7 @@ class SmartWalletTracker:
                     'name': info['name'],
                     'tier': info['tier'],
                     'win_rate': info['win_rate'],
+                    'pnl_30d': info['pnl_30d'],
                     'minutes_ago': (datetime.utcnow() - info['first_buy']).total_seconds() / 60
                 }
                 for info in list(unique_wallets.values())[:5]  # Top 5
