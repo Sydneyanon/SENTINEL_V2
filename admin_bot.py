@@ -332,8 +332,8 @@ class AdminBot:
             wins = 0
             losses = 0
 
-            # Show last 10 signals with gains
-            for signal in signals[:10]:
+            # Show ALL signals with gains
+            for signal in signals:
                 symbol = signal.get('token_symbol', 'UNKNOWN')
                 score = signal.get('conviction_score', 0)
                 entry = signal.get('entry_price', 0)
@@ -404,9 +404,6 @@ class AdminBot:
                     response += f"⚫ <b>${symbol}</b> (no data)\n"
                     response += f"   Score: {score}/100 | {age_str} ago\n\n"
                     losses += 1
-
-            if len(signals) > 10:
-                response += f"<i>...and {len(signals) - 10} more</i>\n\n"
 
             # Add summary
             total = wins + losses
