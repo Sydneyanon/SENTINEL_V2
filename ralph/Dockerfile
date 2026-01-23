@@ -13,10 +13,18 @@ RUN apt-get update && apt-get install -y \
     jq \
     postgresql-client \
     curl \
+    nodejs \
+    npm \
     && rm -rf /var/lib/apt/lists/*
 
 # Verify git is installed
 RUN git --version
+
+# Install Claude Code CLI globally
+RUN npm install -g @anthropic-ai/claude-code
+
+# Verify Claude Code is installed
+RUN claude --version || echo "Claude Code installed"
 
 # Install Python dependencies directly (NO virtualenv)
 RUN pip3 install --no-cache-dir --upgrade pip setuptools wheel && \
@@ -35,5 +43,5 @@ COPY . /app/
 # Make scripts executable
 RUN chmod +x /app/ralph/ralph.sh /app/ralph/ralph_api.py
 
-# Default command: run Ralph with bash wrapper (handles 30 iterations for comprehensive optimization)
-CMD ["bash", "/app/ralph/ralph.sh", "--tool", "api", "30"]
+# Default command: run Ralph with Claude Code CLI (has Bash/Git/Edit tools for actual execution)
+CMD ["bash", "/app/ralph/ralph.sh", "--tool", "claude", "30"]
