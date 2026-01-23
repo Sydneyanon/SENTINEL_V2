@@ -1,12 +1,12 @@
 """
 Smart Wallet Tracker - Updated with GMGN metadata auto-fetching
-Auto-fetches wallet stats (win_rate, pnl_30d, name) from GMGN.ai via Apify
+Auto-fetches wallet stats (win_rate, pnl_30d, name) from GMGN.ai (direct HTML scraping, no Apify)
 """
 from typing import Dict, List
 from datetime import datetime, timedelta
 from loguru import logger
 from data.curated_wallets import get_all_tracked_wallets, get_wallet_info
-from gmgn_wallet_fetcher import get_gmgn_fetcher
+from gmgn_direct_fetcher import get_gmgn_direct_fetcher
 
 # Tokens to ignore (not memecoins)
 IGNORE_TOKENS = {
@@ -133,7 +133,7 @@ class SmartWalletTracker:
 
         # Auto-fetch metadata from GMGN if enabled
         if wallet_info.get('fetch_metadata', False):
-            gmgn = get_gmgn_fetcher()
+            gmgn = get_gmgn_direct_fetcher()
             live_metadata = await gmgn.get_wallet_metadata(wallet_address, chain='sol')
 
             if live_metadata:
