@@ -1,9 +1,6 @@
 # Ralph Autonomous Loop - Railway Deployment
 FROM node:20-slim
 
-# Set PATH to include npm global bins
-ENV PATH="/usr/local/bin:$PATH"
-
 # Install dependencies
 RUN apt-get update && apt-get install -y \
     bash \
@@ -15,12 +12,22 @@ RUN apt-get update && apt-get install -y \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Claude Code CLI and ensure it's in PATH
-RUN npm install -g @anthropic-ai/claude-code && \
-    npm list -g @anthropic-ai/claude-code && \
-    ls -la /usr/local/bin/ | grep claude || echo "Claude binary not found" && \
-    which claude || echo "Claude not in PATH - checking alternatives" && \
-    find /usr/local -name claude -type f 2>/dev/null || true
+# Install Claude Code CLI globally
+RUN npm install -g @anthropic-ai/claude-code
+
+# Find and symlink claude binary (npm sometimes doesn't create bin link properly)
+RUN CLAUDE_BIN=$(find /usr/local/lib/node_modules/@anthropic-ai/claude-code -name "claude" -type f 2>/dev/null | head -1) && \
+    if [ -n "$CLAUDE_BIN" ]; then \
+        echo "Found Claude at: $CLAUDE_BIN"; \
+        ln -sf "$CLAUDE_BIN" /usr/local/bin/claude; \
+        chmod +x /usr/local/bin/claude; \
+    else \
+        echo "ERROR: Claude binary not found after npm install"; \
+        exit 1; \
+    fi
+
+# Verify claude command works
+RUN claude --version || (echo "ERROR: claude command failed" && exit 1)
 
 # Install Python dependencies for metrics collection
 WORKDIR /app/ralph
