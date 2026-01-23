@@ -548,9 +548,17 @@ class ActiveTokenTracker:
                 mcap > 0
             )
             
+            # DIAGNOSTIC: Log every threshold check
+            logger.info(f"🔍 THRESHOLD CHECK for {symbol}:")
+            logger.info(f"   new_score={new_score}, threshold={MIN_CONVICTION_SCORE}, signal_sent={state.signal_sent}")
+            logger.info(f"   Passes: {new_score >= MIN_CONVICTION_SCORE and not state.signal_sent}")
+
             if new_score >= MIN_CONVICTION_SCORE and not state.signal_sent:
+                logger.info(f"   ✅ PASSES threshold check!")
                 if has_real_data:
-                    logger.info(f"✅ {symbol} ready to signal: score={new_score}, price=${price:.8f}, mcap=${mcap:.0f}")
+                    logger.info(f"   ✅ Has real data - SENDING SIGNAL")
+                    logger.info(f"   📊 conviction_data['score'] = {conviction_data.get('score')}")
+                    logger.info(f"   📊 conviction_data['breakdown']['total'] = {conviction_data.get('breakdown', {}).get('total')}")
                     await self._send_signal(token_address, conviction_data)
                 else:
                     # Log exactly what's missing
@@ -565,8 +573,10 @@ class ActiveTokenTracker:
                         missing.append(f"mcap=${mcap}")
                     if liq <= 0:
                         missing.append(f"liq=${liq}")
-                    
+
                     logger.warning(f"⏳ {symbol}: Score {new_score} but missing data: {', '.join(missing)}")
+            else:
+                logger.info(f"   ⏭️  FAILS threshold check - not sending signal")
             
         except Exception as e:
             logger.error(f"❌ Error re-analyzing token: {e}")
