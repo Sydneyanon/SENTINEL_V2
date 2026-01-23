@@ -172,10 +172,15 @@ class PumpMonitorV2:
             # NEW: Check if this trader is a KOL from our list
             kol_info = get_wallet_info(trader_wallet)
             if kol_info:
+                # Apply fallback for None/empty names
+                kol_name = kol_info.get('name')
+                if not kol_name or kol_name is None or kol_name == 'None':
+                    kol_name = f"KOL_{trader_wallet[:6]}"
+
                 buyer_count = len(self.unique_buyers[token_address])
                 tier_emoji = "🏆" if kol_info['tier'] == 'elite' else "👑" if kol_info['tier'] == 'top_kol' else "✅"
                 symbol = data.get('symbol', token_address[:8])
-                logger.info(f"{tier_emoji} {kol_info['name']} ({kol_info['tier']}) bought ${symbol} on PumpPortal ({buyer_count} unique buyers)")
+                logger.info(f"{tier_emoji} {kol_name} ({kol_info['tier']}) bought ${symbol} on PumpPortal ({buyer_count} unique buyers)")
 
             # Log milestone buyer counts
             buyer_count = len(self.unique_buyers[token_address])

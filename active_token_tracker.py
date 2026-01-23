@@ -314,6 +314,20 @@ class ActiveTokenTracker:
                     except Exception as e:
                         logger.debug(f"      ⚠️ PumpPortal API error: {e}")
 
+                    # If PumpPortal API failed, try DexScreener as final fallback
+                    if (not new_name or new_name == '') and self.helius_fetcher:
+                        logger.info(f"      🔄 PumpPortal failed, trying DexScreener...")
+                        try:
+                            helius_data = await self.helius_fetcher.get_token_data(token_address)
+                            if helius_data and helius_data.get('token_name') and helius_data.get('token_symbol'):
+                                new_name = helius_data.get('token_name', '')
+                                new_symbol = helius_data.get('token_symbol', '')
+                                logger.info(f"      ✅ Fetched from DexScreener: ${new_symbol} / {new_name}")
+                            else:
+                                logger.debug(f"      ⚠️ DexScreener also has no metadata")
+                        except Exception as e:
+                            logger.debug(f"      ⚠️ DexScreener error: {e}")
+
                     state.last_metadata_fetch = now
 
             # Use new data if it's good, otherwise keep existing good data
