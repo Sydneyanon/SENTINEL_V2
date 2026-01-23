@@ -11,13 +11,13 @@ SMART_MONEY_WALLETS = {
 }
 
 # High Win-Rate KOL Wallets (Known callers with proven track record)
-# Metadata fetching DISABLED to save API credits (all use tier='top_kol')
-# Set 'fetch_metadata': False to keep GMGN lookups disabled
+# Set 'fetch_metadata': True to fetch live stats from GMGN (direct scraper, free but rate-limited)
+# Set 'fetch_metadata': False to use static name only
 KOL_WALLETS = {
     '3kebnKw7cPdSkLRfiMEALyZJGZ4wdiSRvmoN4rD1yPzV': {
         'name': None,  # Auto-fetch from GMGN
         'tier': 'top_kol',
-        'fetch_metadata': False
+        'fetch_metadata': True  # ← Test direct fetcher
     },
     '57rXqaQsvgyBKwebP2StfqQeCBjBS4jsrZFJN5aU2V9b': {
         'name': 'Ram',
@@ -32,7 +32,7 @@ KOL_WALLETS = {
     'Bi4rd5FH5bYEN8scZ7wevxNZyNmKHdaBcvewdPFxYdLt': {
         'name': None,
         'tier': 'top_kol',
-        'fetch_metadata': False
+        'fetch_metadata': True  # ← Test direct fetcher
     },
     'G6fUXjMKPJzCY1rveAE6Qm7wy5U3vZgKDJmN1VPAdiZC': {
         'name': 'Clukz',
@@ -52,12 +52,12 @@ KOL_WALLETS = {
     'F5jWYuiDLTiaLYa54D88YbpXgEsA6NKHzWy4SN4bMYjt': {
         'name': None,
         'tier': 'top_kol',
-        'fetch_metadata': False
+        'fetch_metadata': True  # ← Test direct fetcher
     },
     '4vw54BmAogeRV3vPKWyFet5yf8DTLcREzdSzx4rw9Ud9': {
         'name': None,
         'tier': 'top_kol',
-        'fetch_metadata': False
+        'fetch_metadata': True  # ← Test direct fetcher
     },
     'CA4keXLtGJWBcsWivjtMFBghQ8pFsGRWFxLrRCtirzu5': {
         'name': None,
