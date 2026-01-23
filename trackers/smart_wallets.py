@@ -1,12 +1,12 @@
 """
 Smart Wallet Tracker - Updated with GMGN metadata auto-fetching
-Auto-fetches wallet stats (win_rate, pnl_30d, name) from GMGN.ai via Apify
+Auto-fetches wallet stats (win_rate, pnl_30d, name) from GMGN.ai (direct HTML scraping, no Apify)
 """
 from typing import Dict, List
 from datetime import datetime, timedelta
 from loguru import logger
 from data.curated_wallets import get_all_tracked_wallets, get_wallet_info
-from gmgn_wallet_fetcher import get_gmgn_fetcher
+from gmgn_direct_fetcher import get_gmgn_direct_fetcher
 
 # Tokens to ignore (not memecoins)
 IGNORE_TOKENS = {
@@ -133,7 +133,7 @@ class SmartWalletTracker:
 
         # Auto-fetch metadata from GMGN if enabled
         if wallet_info.get('fetch_metadata', False):
-            gmgn = get_gmgn_fetcher()
+            gmgn = get_gmgn_direct_fetcher()
             live_metadata = await gmgn.get_wallet_metadata(wallet_address, chain='sol')
 
             if live_metadata:
@@ -154,6 +154,15 @@ class SmartWalletTracker:
                     'win_rate': wallet_info.get('win_rate', 0),
                     'pnl_30d': wallet_info.get('pnl_30d', 0)
                 }
+
+        # Always ensure name is set (even if fetch_metadata is False)
+        if not wallet_info.get('name') or wallet_info.get('name') is None:
+            wallet_info = {
+                **wallet_info,
+                'name': f"KOL_{wallet_address[:6]}",
+                'win_rate': wallet_info.get('win_rate', 0),
+                'pnl_30d': wallet_info.get('pnl_30d', 0)
+            }
 
         # Add to in-memory cache ALWAYS (this is fast)
         if token_address not in self.recent_buys:
@@ -334,6 +343,7 @@ class SmartWalletTracker:
                     'name': info['name'],
                     'tier': info['tier'],
                     'win_rate': info['win_rate'],
+                    'pnl_30d': info['pnl_30d'],
                     'minutes_ago': (datetime.utcnow() - info['first_buy']).total_seconds() / 60
                 }
                 for info in list(unique_wallets.values())[:5]  # Top 5
