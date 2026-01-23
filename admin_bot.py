@@ -327,13 +327,22 @@ class AdminBot:
                 return
 
             response = f"📈 <b>RECENT PERFORMANCE</b>\n\n"
-            response += f"Signals (48h): {len(signals)}\n\n"
+            response += f"Signals (48h): {len(signals)}\n"
+
+            # Limit display to last 20 signals to avoid Telegram message length limit
+            MAX_DISPLAY = 20
+            signals_to_show = signals[:MAX_DISPLAY]
+
+            if len(signals) > MAX_DISPLAY:
+                response += f"<i>Showing {MAX_DISPLAY} most recent (+ {len(signals) - MAX_DISPLAY} older)</i>\n\n"
+            else:
+                response += "\n"
 
             wins = 0
             losses = 0
 
-            # Show ALL signals with gains
-            for signal in signals:
+            # Show limited signals with gains
+            for signal in signals_to_show:
                 symbol = signal.get('token_symbol', 'UNKNOWN')
                 score = signal.get('conviction_score', 0)
                 entry = signal.get('entry_price', 0)
@@ -405,11 +414,12 @@ class AdminBot:
                     response += f"   Score: {score}/100 | {age_str} ago\n\n"
                     losses += 1
 
-            # Add summary
+            # Add summary (based on displayed signals only)
             total = wins + losses
             if total > 0:
                 win_rate = (wins / total) * 100
-                response += f"📊 <b>Win Rate: {win_rate:.0f}%</b> ({wins}W / {losses}L)"
+                response += f"📊 <b>Win Rate: {win_rate:.0f}%</b> ({wins}W / {losses}L)\n"
+                response += f"<i>Based on {MAX_DISPLAY} most recent signals shown above</i>"
 
             await self._send_response(update, context, response)
 

@@ -56,14 +56,23 @@ class TelegramMonitor:
         Args:
             monitored_groups: {channel_id: group_name} to monitor
         """
+        logger.info("🔧 TELEGRAM MONITOR DIAGNOSTIC:")
+        logger.info(f"   API_ID present: {bool(self.api_id)}")
+        logger.info(f"   API_HASH present: {bool(self.api_hash)}")
+        logger.info(f"   Phone present: {bool(self.phone)}")
+        logger.info(f"   Groups to monitor: {len(monitored_groups)}")
+
         if not self.api_id or not self.api_hash:
             logger.warning("⚠️ Telegram monitor not initialized (missing credentials)")
+            logger.warning("   Set TELEGRAM_API_ID and TELEGRAM_API_HASH in Railway")
+            logger.warning("   Get credentials at: https://my.telegram.org")
             return False
 
         try:
             self.monitored_groups = monitored_groups
 
             # Create client
+            logger.info("📱 Creating Telegram client...")
             self.client = TelegramClient(
                 'sentinel_session',  # Session file
                 int(self.api_id),
@@ -71,21 +80,29 @@ class TelegramMonitor:
             )
 
             # Connect
+            logger.info("🔌 Connecting to Telegram...")
             await self.client.start(phone=self.phone)
 
             me = await self.client.get_me()
             logger.info(f"✅ Telegram connected: @{me.username or me.phone}")
-            logger.info(f"🔍 Monitoring {len(self.monitored_groups)} group(s)")
+            logger.info(f"🔍 Monitoring {len(self.monitored_groups)} group(s):")
+            for group_id, group_name in list(self.monitored_groups.items())[:5]:
+                logger.info(f"   - {group_name} ({group_id})")
+            if len(self.monitored_groups) > 5:
+                logger.info(f"   ... and {len(self.monitored_groups) - 5} more")
 
             # Set up message handler
             @self.client.on(events.NewMessage(chats=list(self.monitored_groups.keys())))
             async def message_handler(event: Message):
                 await self._handle_message(event)
 
+            logger.info("✅ Message handler registered - listening for calls!")
             return True
 
         except Exception as e:
             logger.error(f"❌ Failed to initialize Telegram monitor: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             return False
 
     async def _handle_message(self, event: Message):
@@ -95,6 +112,13 @@ class TelegramMonitor:
             text = event.message.message
             if not text:
                 return
+
+            # Debug: Log every 100th message to show monitor is active
+            if not hasattr(self, '_message_count'):
+                self._message_count = 0
+            self._message_count += 1
+            if self._message_count % 100 == 0:
+                logger.info(f"📬 Telegram monitor active: {self._message_count} messages processed")
 
             # Get group info for logging
             chat_id = event.chat_id

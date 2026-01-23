@@ -53,8 +53,8 @@ DISABLE_POLLING_BELOW_THRESHOLD = True  # Only poll tokens >= 50 conviction
 # =============================================================================
 
 # Signal thresholds based on graduation status
-MIN_CONVICTION_SCORE = 45  # Pre-graduation threshold (40%+ bonding curve) - ULTRA AGGRESSIVE: 3 KOLs = signal!
-POST_GRAD_THRESHOLD = 45   # Post-graduation threshold (100% - on Raydium) - ULTRA AGGRESSIVE: match pre-grad
+MIN_CONVICTION_SCORE = 45  # Pre-graduation threshold (40%+ bonding curve) - DIAGNOSTIC MODE: Finding why signals show low conviction
+POST_GRAD_THRESHOLD = 45   # Post-graduation threshold (100% - on Raydium) - DIAGNOSTIC MODE: Finding why signals show low conviction
 
 # Base score threshold for distribution checks
 # Only check distribution if base score >= this value
@@ -132,12 +132,13 @@ MOMENTUM_WEIGHTS = {
 
 # Distribution Scoring (0-15 points)
 # Pre-graduation: Based on unique buyers (FREE)
+# LOWERED: Catch early KOL plays before they get crowded
 UNIQUE_BUYER_WEIGHTS = {
-    'exceptional': 15,  # 100+ unique buyers (strong organic interest)
-    'high': 12,         # 70-99 unique buyers
-    'medium': 8,        # 40-69 unique buyers
-    'low': 5,           # 20-39 unique buyers
-    'minimal': 0        # <20 unique buyers (too risky)
+    'exceptional': 15,  # 50+ unique buyers (strong organic interest)
+    'high': 12,         # 30-49 unique buyers
+    'medium': 8,        # 15-29 unique buyers
+    'low': 5,           # 5-14 unique buyers (early stage)
+    'minimal': 0        # <5 unique buyers (too early/risky)
 }
 
 # Post-graduation: Based on real holders (10 credits)
@@ -391,7 +392,7 @@ LOG_FILE = "prometheus.log"
 # FEATURE FLAGS
 # =============================================================================
 
-ENABLE_NARRATIVES = False   # Narrative detection (disabled for now)
+ENABLE_NARRATIVES = False   # Narrative detection (disabled - narratives are static)
 ENABLE_PERFORMANCE_TRACKING = True
 ENABLE_MILESTONE_ALERTS = True
 ENABLE_LUNARCRUSH = False   # LunarCrush disabled (use Twitter only)

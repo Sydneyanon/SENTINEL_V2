@@ -67,9 +67,22 @@ class TelegramPublisher:
         price = token_data.get('price_usd', signal_data.get('price', 0))
         mcap = token_data.get('market_cap', signal_data.get('market_cap', 0))
         liquidity = token_data.get('liquidity', signal_data.get('liquidity', 0))
-        holders = token_data.get('holder_count', signal_data.get('holders', 0))
         bonding = token_data.get('bonding_curve_pct', 0)
-        
+
+        # Get buyer/holder count based on graduation status
+        # Pre-grad: use unique_buyers (from PumpPortal trades - FREE data)
+        # Post-grad: use holder_count (from Helius/DexScreener - 10 credits)
+        is_post_grad = bonding >= 100
+        unique_buyers_count = token_data.get('unique_buyers', 0)
+
+        if is_post_grad:
+            holders = token_data.get('holder_count', signal_data.get('holders', 0))
+            display_label = "Holders"
+        else:
+            # For pre-grad, show unique buyers (not holder_count which is always 0)
+            holders = unique_buyers_count
+            display_label = "Buyers"  # More accurate for pre-grad
+
         # Calculate age if we have created_timestamp
         age_minutes = 0
         created_ts = token_data.get('created_timestamp')
@@ -100,7 +113,7 @@ class TelegramPublisher:
 💰 Price: ${price:.8f}
 💎 MCap: ${mcap:,.0f}
 💧 Liquidity: ${liquidity:,.0f}
-👥 Holders: {holders}
+👥 {display_label}: {holders}
 📊 Bonding: {bonding:.1f}%
 """
         
@@ -109,19 +122,33 @@ class TelegramPublisher:
         
         message += "\n"
         
-        # Add conviction breakdown
+        # Add conviction breakdown (COMPLETE)
         if breakdown:
             message += "<b>📊 Score Breakdown:</b>\n"
-            if breakdown.get('smart_wallet', 0) > 0:
-                message += f"👑 Elite Wallets: {breakdown['smart_wallet']}\n"
-            if breakdown.get('narrative', 0) > 0:
-                message += f"📈 Narratives: {breakdown['narrative']}\n"
-            if breakdown.get('holders', 0) > 0:
-                message += f"👥 Holders: {breakdown['holders']}\n"
-            if breakdown.get('volume_velocity', 0) > 0:
-                message += f"📊 Volume: {breakdown['volume_velocity']}\n"
-            if breakdown.get('momentum', 0) > 0:
-                message += f"🚀 Momentum: {breakdown['momentum']}\n"
+            if breakdown.get('smart_wallet', 0) != 0:
+                message += f"👑 Elite Wallets: +{breakdown['smart_wallet']}\n"
+            if breakdown.get('narrative', 0) != 0:
+                message += f"📈 Narratives: +{breakdown['narrative']}\n"
+            if breakdown.get('unique_buyers', 0) != 0:
+                message += f"👥 Unique Buyers: +{breakdown['unique_buyers']}\n"
+            if breakdown.get('volume', 0) != 0:
+                message += f"📊 Volume: +{breakdown['volume']}\n"
+            if breakdown.get('momentum', 0) != 0:
+                message += f"🚀 Momentum: +{breakdown['momentum']}\n"
+            if breakdown.get('twitter_buzz', 0) != 0:
+                message += f"🐦 Twitter: +{breakdown['twitter_buzz']}\n"
+            if breakdown.get('telegram_calls', 0) != 0:
+                message += f"📱 Telegram: +{breakdown['telegram_calls']}\n"
+            # Show penalties/bonuses
+            if breakdown.get('bundle_penalty', 0) != 0:
+                message += f"⚠️ Bundle Penalty: {breakdown['bundle_penalty']}\n"
+            if breakdown.get('holder_penalty', 0) != 0:
+                message += f"⚠️ Holder Penalty: {breakdown['holder_penalty']}\n"
+            if breakdown.get('kol_bonus', 0) != 0:
+                message += f"🏆 KOL Bonus: +{breakdown['kol_bonus']}\n"
+            # Show total
+            message += f"<b>═══════════════</b>\n"
+            message += f"<b>TOTAL: {breakdown.get('total', conviction)}/100</b>\n"
             message += "\n"
         
         # Add smart wallet activity
@@ -160,7 +187,27 @@ class TelegramPublisher:
                 name = narrative.get('name', '').upper()
                 message += f"• {name}\n"
             message += "\n"
-        
+
+        # Add rug detection warnings (if any)
+        rug_checks = signal_data.get('rug_checks', {})
+        bundle_check = rug_checks.get('bundle', {})
+        holder_check = rug_checks.get('holder_concentration', {})
+
+        if bundle_check.get('severity') and bundle_check['severity'] != 'none':
+            severity = bundle_check['severity'].upper()
+            reason = bundle_check.get('reason', '')
+            message += f"⚠️  <b>{severity} BUNDLE DETECTED</b>\n"
+            if reason:
+                message += f"   {reason}\n"
+            message += "\n"
+
+        if holder_check.get('penalty', 0) < 0:
+            reason = holder_check.get('reason', '')
+            message += f"⚠️  <b>HOLDER CONCENTRATION</b>\n"
+            if reason:
+                message += f"   {reason}\n"
+            message += "\n"
+
         # Add links
         message += f"""🔗 <a href="https://dexscreener.com/solana/{token_address}">DexScreener</a>
 🔗 <a href="https://birdeye.so/token/{token_address}">Birdeye</a>
