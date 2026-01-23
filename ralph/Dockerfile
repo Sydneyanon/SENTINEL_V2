@@ -1,12 +1,12 @@
 # Ralph Autonomous Loop - Railway Deployment
-# Build: 2026-01-23T17:30 (force rebuild - no cache)
+# Build: 2026-01-23T19:00 (CRITICAL: git configuration fix)
 FROM python:3.11-slim
 
 # Disable Railway's auto-detection by removing any Python markers
 ENV NIXPACKS_NO_MUSL=1
 ENV PYTHONUNBUFFERED=1
 
-# Install system dependencies
+# Install system dependencies (CRITICAL: git is required for Ralph to commit)
 RUN apt-get update && apt-get install -y \
     bash \
     git \
@@ -14,6 +14,9 @@ RUN apt-get update && apt-get install -y \
     postgresql-client \
     curl \
     && rm -rf /var/lib/apt/lists/*
+
+# Verify git is installed
+RUN git --version
 
 # Install Python dependencies directly (NO virtualenv)
 RUN pip3 install --no-cache-dir --upgrade pip setuptools wheel && \
