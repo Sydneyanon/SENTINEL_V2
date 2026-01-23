@@ -295,6 +295,27 @@ class ActiveTokenTracker:
             # Debug: Log what PumpPortal is sending
             logger.info(f"      🔍 PumpPortal metadata: name='{new_name}', symbol='{new_symbol}'")
 
+            # If PumpPortal WebSocket sent empty strings, try to fetch from API
+            if (not new_name or new_name == '') and (not new_symbol or new_symbol == ''):
+                # Only try if we haven't already fetched recently (cache for 5 min)
+                last_fetch_time = getattr(state, 'last_metadata_fetch', None)
+                now = datetime.utcnow()
+
+                if not last_fetch_time or (now - last_fetch_time).total_seconds() > 300:
+                    logger.info(f"      🔄 PumpPortal WebSocket has no metadata, trying REST API...")
+                    try:
+                        pump_metadata = await self.pumpportal_api.get_token_metadata(token_address)
+                        if pump_metadata:
+                            new_name = pump_metadata.get('token_name', '')
+                            new_symbol = pump_metadata.get('token_symbol', '')
+                            logger.info(f"      ✅ Fetched from PumpPortal API: ${new_symbol} / {new_name}")
+                        else:
+                            logger.debug(f"      ⚠️ PumpPortal API also has no metadata")
+                    except Exception as e:
+                        logger.debug(f"      ⚠️ PumpPortal API error: {e}")
+
+                    state.last_metadata_fetch = now
+
             # Use new data if it's good, otherwise keep existing good data
             final_name = existing_name  # Start with what we have
             if new_name and new_name not in ['Unknown', '']:
