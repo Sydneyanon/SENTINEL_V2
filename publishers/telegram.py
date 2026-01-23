@@ -231,7 +231,7 @@ class TelegramPublisher:
         """
 
         if not self.enabled or not self.bot or not self.channel_id:
-            logger.debug("Telegram not enabled - skipping post")
+            logger.warning(f"⚠️ SIGNAL PASSED BUT NOT POSTED TO TELEGRAM - enabled={self.enabled}, bot={'initialized' if self.bot else 'None'}, channel_id={self.channel_id}")
             return None
 
         try:

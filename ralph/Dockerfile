@@ -32,5 +32,5 @@ COPY . /app/
 # Make scripts executable
 RUN chmod +x /app/ralph/ralph.sh /app/ralph/ralph_api.py
 
-# Default command: run Ralph with bash wrapper (handles 10 iterations)
-CMD ["bash", "/app/ralph/ralph.sh", "--tool", "api", "10"]
+# Default command: run Ralph with bash wrapper (handles 30 iterations for comprehensive optimization)
+CMD ["bash", "/app/ralph/ralph.sh", "--tool", "api", "30"]
