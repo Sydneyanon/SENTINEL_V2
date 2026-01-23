@@ -1,4 +1,5 @@
 # Ralph Autonomous Loop - Railway Deployment
+# Build: 2026-01-23 (force rebuild)
 FROM python:3.11-slim
 
 # Disable Railway's auto-detection by removing any Python markers
