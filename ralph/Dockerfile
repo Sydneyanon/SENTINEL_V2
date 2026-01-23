@@ -1,6 +1,9 @@
 # Ralph Autonomous Loop - Railway Deployment
 FROM node:20-slim
 
+# Set PATH to include npm global bins
+ENV PATH="/usr/local/bin:$PATH"
+
 # Install dependencies
 RUN apt-get update && apt-get install -y \
     bash \
@@ -12,8 +15,12 @@ RUN apt-get update && apt-get install -y \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Claude Code CLI
-RUN npm install -g @anthropic-ai/claude-code
+# Install Claude Code CLI and ensure it's in PATH
+RUN npm install -g @anthropic-ai/claude-code && \
+    npm list -g @anthropic-ai/claude-code && \
+    ls -la /usr/local/bin/ | grep claude || echo "Claude binary not found" && \
+    which claude || echo "Claude not in PATH - checking alternatives" && \
+    find /usr/local -name claude -type f 2>/dev/null || true
 
 # Install Python dependencies for metrics collection
 WORKDIR /app/ralph
