@@ -89,14 +89,17 @@ for i in $(seq 1 $MAX_ITERATIONS); do
 
   # Run the selected tool with the ralph prompt
   if [[ "$TOOL" == "amp" ]]; then
-    OUTPUT=$(cat "$SCRIPT_DIR/prompt.md" | amp --dangerously-allow-all 2>&1 | tee /dev/tty) || true
+    OUTPUT=$(cat "$SCRIPT_DIR/prompt.md" | amp --dangerously-allow-all 2>&1) || true
   elif [[ "$TOOL" == "api" ]]; then
     # Anthropic API: direct Python call
-    OUTPUT=$(python3 "$SCRIPT_DIR/ralph_api.py" 2>&1 | tee /dev/tty) || true
+    OUTPUT=$(python3 "$SCRIPT_DIR/ralph_api.py" 2>&1) || true
   else
     # Claude Code: use --dangerously-skip-permissions for autonomous operation, --print for output
-    OUTPUT=$(claude --dangerously-skip-permissions --print < "$SCRIPT_DIR/CLAUDE.md" 2>&1 | tee /dev/tty) || true
+    OUTPUT=$(claude --dangerously-skip-permissions --print < "$SCRIPT_DIR/CLAUDE.md" 2>&1) || true
   fi
+
+  # Display output (works in all environments)
+  echo "$OUTPUT"
   
   # Check for completion signal
   if echo "$OUTPUT" | grep -q "<promise>COMPLETE</promise>"; then
