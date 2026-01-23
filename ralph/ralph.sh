@@ -79,6 +79,25 @@ if [ ! -f "$PROGRESS_FILE" ]; then
   echo "---" >> "$PROGRESS_FILE"
 fi
 
+# Configure git for commits (uses Railway env vars)
+if [ -n "$GIT_AUTHOR_NAME" ] && [ -n "$GIT_AUTHOR_EMAIL" ]; then
+  echo "Configuring git: $GIT_AUTHOR_NAME <$GIT_AUTHOR_EMAIL>"
+  git config --global user.name "$GIT_AUTHOR_NAME"
+  git config --global user.email "$GIT_AUTHOR_EMAIL"
+else
+  echo "Warning: GIT_AUTHOR_NAME or GIT_AUTHOR_EMAIL not set. Using defaults."
+  git config --global user.name "Ralph Bot"
+  git config --global user.email "ralph@prometheus.bot"
+fi
+
+# Configure git credential helper for GITHUB_TOKEN
+if [ -n "$GITHUB_TOKEN" ]; then
+  echo "Git credentials configured for GitHub"
+  git config --global credential.helper store
+  # Create credentials file with token
+  echo "https://x-access-token:${GITHUB_TOKEN}@github.com" > ~/.git-credentials
+fi
+
 echo "Starting Ralph - Tool: $TOOL - Max iterations: $MAX_ITERATIONS"
 
 for i in $(seq 1 $MAX_ITERATIONS); do
