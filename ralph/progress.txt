@@ -1,5 +1,5 @@
 # Ralph Progress Log - Prometheus Bot Optimization
-Started: Not yet run
+Started: 2026-01-23
 ---
 
 ## Codebase Patterns
@@ -20,5 +20,155 @@ Started: Not yet run
 - Create PR and merge to main to trigger Railway deploy
 - Wait ~2 min for deployment
 - Monitor Railway logs for errors
+
+---
+
+## 2026-01-23 19:00 UTC - OPT-051: Fix Silent Telegram Posting Failures
+
+### Problem Identified
+User reported: Signal with 55 conviction passed threshold (55 > 45) but didn't post to Telegram
+- Logs showed "✅ SIGNAL!" indicating signal passed
+- No Telegram post occurred
+- No visible error in logs (silent failure)
+- **Critical issue: Silent failures kill user trust**
+
+### Root Cause Analysis
+**File:** `publishers/telegram.py`
+1. `post_signal()` method returned `None` on failures
+2. Only logged at DEBUG/WARNING level when not initialized
+3. No retry logic for transient failures
+4. No health check for consecutive failures
+5. No database fallback to preserve failed signal data
+
+**File:** `active_token_tracker.py`
+- Line 632: `if message_id:` silently skipped when posting failed
+- No error logging when `post_signal()` returned None
+- Signal passed conviction but user never knew it failed to post
+
+### Solution Implemented
+
+#### 1. Retry Logic (OPT-051 Requirement ✅)
+- **3 attempts with 2s delay** between retries
+- Handles both `TelegramError` and general exceptions
+- Clear logging: "⏳ Retrying in 2s..." on each attempt
+- Automatic recovery from transient network issues
+
+#### 2. Health Check System (OPT-051 Requirement ✅)
+- Track consecutive posting failures
+- **Alert if 3+ consecutive failures**
+- Critical log level alert with full diagnostic:
+  ```
+  🚨🚨🚨 TELEGRAM HEALTH CHECK FAILED 🚨🚨🚨
+  Consecutive posting failures: 3
+  Check: Bot token, channel ID, admin rights, network
+  ```
+
+#### 3. Database Fallback (OPT-051 Requirement ✅)
+- Added `posting_failed` BOOLEAN column to signals table
+- Added `posting_error` TEXT column to store error reason
+- New method: `database.mark_posting_failed()`
+- Failed signals logged to DB for later analysis or retry
+
+#### 4. Enhanced Error Logging (OPT-051 Requirement ✅)
+- Explicit error messages: "🚨 FAILED TO POST SIGNAL: {mint} - {error}"
+- Shows token, symbol, conviction, error reason
+- Tracks failed signals count per session
+- Visible at WARNING level (production compatible)
+
+### Changes Made
+
+**publishers/telegram.py:**
+```python
+# Added imports
+import asyncio  # For retry delay
+
+# Added to __init__
+self.consecutive_failures = 0
+self.failed_signals = []  # Track for fallback
+
+# Rewrote post_signal() with:
+- Retry loop (3 attempts, 2s delay)
+- Health check tracking
+- Fallback logging via _handle_posting_failure()
+- Clear error messages throughout
+```
+
+**database.py:**
+```python
+# Added schema migration
+ALTER TABLE signals ADD COLUMN posting_failed BOOLEAN DEFAULT FALSE
+ALTER TABLE signals ADD COLUMN posting_error TEXT
+
+# Added method
+async def mark_posting_failed(token_address, error_reason)
+```
+
+**active_token_tracker.py:**
+```python
+# Enhanced error handling (line 632)
+if message_id:
+    # ... mark as posted
+else:
+    logger.error(f"❌ Signal passed but failed to post: ${symbol}")
+    await self.db.mark_posting_failed(token_address, "telegram_posting_failed")
+```
+
+### Baseline Metrics (N/A for bug fix)
+This is an infrastructure fix, not a performance optimization. No baseline metrics needed.
+
+### Deployment Status
+- ✅ Code committed: commit 78d7c4e
+- ✅ Pushed to branch: ralph/optimize-v1
+- ⏳ **NEXT STEP: Merge PR to trigger Railway deployment**
+  - PR URL: https://github.com/Sydneyanon/SENTINEL_V2/compare/main...ralph/optimize-v1
+  - Merge to main → Railway auto-deploys (~2 min)
+  - Monitor logs for 2 hours
+
+### Acceptance Criteria Status
+✅ Retry logic: 3 attempts with 2s delay
+✅ Health check: Alert on 3+ consecutive failures
+✅ Fallback: Database logging of failed posts
+✅ Error logging: Clear FAILED TO POST messages
+⏳ **Monitor for 2 hours to verify 0 silent failures** (after deploy)
+
+### Decision: PENDING DEPLOYMENT
+**Will KEEP if:**
+- No silent failures in 2-hour monitoring window
+- All passing signals post successfully OR show clear error
+- Health check alerts work correctly if failures occur
+
+**Will REVERT if:**
+- Still experiencing silent failures
+- Errors not logged properly
+- Health check doesn't trigger
+
+### Expected Impact
+- **Primary Goal:** Eliminate silent failures (100% visibility)
+- **Secondary Goal:** Reduce transient failures via retry (estimate: 60% fewer failures)
+- **Tertiary Goal:** Catch systemic issues via health check
+- **User Trust:** Restored (transparency > silent failure)
+
+### Next Steps
+1. **User/Operator:** Merge PR on GitHub
+2. Railway will auto-deploy (watch logs: `railway logs --follow`)
+3. Monitor for 2 hours
+4. Check for:
+   - "📤 Posted Prometheus signal" (success)
+   - "🚨 FAILED TO POST SIGNAL" (visible failure)
+   - "🚨🚨🚨 TELEGRAM HEALTH CHECK FAILED" (systemic issue)
+5. Update PRD: set OPT-051 `passes: true` if successful
+
+### Learnings
+- **Silent failures are worse than visible errors:** Users need transparency
+- **Retry logic is essential for network services:** Telegram API can have transient issues
+- **Health checks catch patterns:** 3+ consecutive failures = systemic problem, not transient
+- **Database fallback preserves data:** Can analyze or retry failed signals later
+- **Log levels matter:** DEBUG logs invisible in production, use WARNING/ERROR for critical issues
+
+### Code Quality Notes
+- Added comprehensive error handling throughout
+- Clear separation of concerns (retry logic, health check, fallback)
+- Backward compatible (existing code paths preserved)
+- Database migration is safe (ADD COLUMN IF NOT EXISTS)
 
 ---
