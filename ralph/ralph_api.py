@@ -65,18 +65,32 @@ def run_ralph_iteration():
         )
 
         log_info("API call successful")
-        print("\n" + "="*60, flush=True)
-        print("RALPH'S RESPONSE:", flush=True)
-        print("="*60 + "\n", flush=True)
 
-        # Print response (important - keep this)
+        # Get response text
         response_text = message.content[0].text
-        print(response_text, flush=True)
 
         # Check for completion signal
         if "<promise>COMPLETE</promise>" in response_text:
             log_info("Ralph completed all optimizations!")
             return True
+
+        # In DEBUG mode, print full response
+        # In production, only print summary to avoid Railway 500 logs/sec limit
+        if DEBUG:
+            print("\n" + "="*60, flush=True)
+            print("RALPH'S RESPONSE:", flush=True)
+            print("="*60 + "\n", flush=True)
+            print(response_text, flush=True)
+        else:
+            # Production: Print brief summary only
+            lines = response_text.split('\n')
+            total_lines = len(lines)
+            if total_lines > 20:
+                # Show first 10 and last 10 lines
+                summary = '\n'.join(lines[:10]) + f"\n\n... ({total_lines - 20} lines omitted) ...\n\n" + '\n'.join(lines[-10:])
+                print(summary, flush=True)
+            else:
+                print(response_text, flush=True)
 
         return False
 
