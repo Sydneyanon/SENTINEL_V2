@@ -42,9 +42,12 @@ def run_ralph_iteration():
             return False
         print(f"✓ API key found (length: {len(api_key)})", flush=True)
 
-        print("Reading instructions from /app/ralph/CLAUDE.md...", flush=True)
-        # Read instructions
-        with open('/app/ralph/CLAUDE.md', 'r') as f:
+        print("Reading instructions from CLAUDE.md...", flush=True)
+        # Read instructions - use relative path that works both locally and in container
+        import os
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        claude_md_path = os.path.join(script_dir, 'CLAUDE.md')
+        with open(claude_md_path, 'r') as f:
             instructions = f.read()
         print(f"✓ Instructions loaded ({len(instructions)} chars)", flush=True)
 
