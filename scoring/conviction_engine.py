@@ -245,7 +245,7 @@ class ConvictionEngine:
 
                     if token_address in telegram_calls_cache:
                         call_data = telegram_calls_cache[token_address]
-                        now = datetime.now()
+                        now = datetime.utcnow()  # FIXED: Use UTC to match telegram_monitor
 
                         # Get recent mentions (last 10 min)
                         recent_cutoff = now - timedelta(minutes=10)
