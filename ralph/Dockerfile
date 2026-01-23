@@ -36,12 +36,21 @@ RUN pip3 install --no-cache-dir --upgrade pip setuptools wheel && \
 # Verify anthropic is installed in system Python
 RUN python3 -c "import anthropic; print(f'✓ Anthropic {anthropic.__version__} installed at {anthropic.__file__}')"
 
+# Create non-root user (Claude Code CLI won't run --dangerously-skip-permissions as root)
+RUN useradd -m -s /bin/bash ralph && \
+    mkdir -p /home/ralph/.cache && \
+    chown -R ralph:ralph /home/ralph
+
 # Copy entire project
 WORKDIR /app
 COPY . /app/
 
-# Make scripts executable
-RUN chmod +x /app/ralph/ralph.sh /app/ralph/ralph_api.py
+# Make scripts executable and set ownership
+RUN chmod +x /app/ralph/ralph.sh /app/ralph/ralph_api.py && \
+    chown -R ralph:ralph /app
+
+# Switch to non-root user
+USER ralph
 
 # Default command: run Ralph with Claude Code CLI (has Bash/Git/Edit tools for actual execution)
 CMD ["bash", "/app/ralph/ralph.sh", "--tool", "claude", "30"]
