@@ -109,19 +109,33 @@ class TelegramPublisher:
         
         message += "\n"
         
-        # Add conviction breakdown
+        # Add conviction breakdown (COMPLETE)
         if breakdown:
             message += "<b>📊 Score Breakdown:</b>\n"
-            if breakdown.get('smart_wallet', 0) > 0:
-                message += f"👑 Elite Wallets: {breakdown['smart_wallet']}\n"
-            if breakdown.get('narrative', 0) > 0:
-                message += f"📈 Narratives: {breakdown['narrative']}\n"
-            if breakdown.get('holders', 0) > 0:
-                message += f"👥 Holders: {breakdown['holders']}\n"
-            if breakdown.get('volume_velocity', 0) > 0:
-                message += f"📊 Volume: {breakdown['volume_velocity']}\n"
-            if breakdown.get('momentum', 0) > 0:
-                message += f"🚀 Momentum: {breakdown['momentum']}\n"
+            if breakdown.get('smart_wallet', 0) != 0:
+                message += f"👑 Elite Wallets: +{breakdown['smart_wallet']}\n"
+            if breakdown.get('narrative', 0) != 0:
+                message += f"📈 Narratives: +{breakdown['narrative']}\n"
+            if breakdown.get('unique_buyers', 0) != 0:
+                message += f"👥 Unique Buyers: +{breakdown['unique_buyers']}\n"
+            if breakdown.get('volume', 0) != 0:
+                message += f"📊 Volume: +{breakdown['volume']}\n"
+            if breakdown.get('momentum', 0) != 0:
+                message += f"🚀 Momentum: +{breakdown['momentum']}\n"
+            if breakdown.get('twitter_buzz', 0) != 0:
+                message += f"🐦 Twitter: +{breakdown['twitter_buzz']}\n"
+            if breakdown.get('telegram_calls', 0) != 0:
+                message += f"📱 Telegram: +{breakdown['telegram_calls']}\n"
+            # Show penalties/bonuses
+            if breakdown.get('bundle_penalty', 0) != 0:
+                message += f"⚠️ Bundle Penalty: {breakdown['bundle_penalty']}\n"
+            if breakdown.get('holder_penalty', 0) != 0:
+                message += f"⚠️ Holder Penalty: {breakdown['holder_penalty']}\n"
+            if breakdown.get('kol_bonus', 0) != 0:
+                message += f"🏆 KOL Bonus: +{breakdown['kol_bonus']}\n"
+            # Show total
+            message += f"<b>═══════════════</b>\n"
+            message += f"<b>TOTAL: {breakdown.get('total', conviction)}/100</b>\n"
             message += "\n"
         
         # Add smart wallet activity
