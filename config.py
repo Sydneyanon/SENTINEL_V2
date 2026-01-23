@@ -330,7 +330,21 @@ WALLET_SCORE_THRESHOLDS = {
 # =============================================================================
 
 # Milestone multipliers for performance alerts
-MILESTONES = [1.5, 2, 3, 5, 10, 20, 50, 100]
+# Granular tracking:
+# - 1-10x: every 1x
+# - 10-100x: every 1x
+# - 100-1000x: every 50x
+# - 1000x+: every 1000x
+MILESTONES = (
+    # 1-10x (every 1x)
+    [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] +
+    # 11-100x (every 1x)
+    list(range(11, 101)) +
+    # 100-1000x (every 50x)
+    [150, 200, 250, 300, 350, 400, 450, 500, 550, 600, 650, 700, 750, 800, 850, 900, 950, 1000] +
+    # 1000x+ (every 1000x)
+    [2000, 3000, 4000, 5000, 10000]
+)
 
 # How long to track token performance (hours)
 TRACKING_DURATION = 24
