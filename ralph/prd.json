@@ -1,8 +1,26 @@
 {
   "project": "Prometheus Signals Bot",
   "branchName": "ralph/optimize-v1",
-  "description": "Autonomous optimization of Prometheus memecoin signals bot",
+  "description": "Autonomous optimization of Prometheus memecoin signals bot - AGGRESSIVE MODE: Target 75% win rate",
+  "goal": "75% win rate using any optimization necessary",
   "userStories": [
+    {
+      "id": "OPT-000",
+      "title": "EMERGENCY: Kill all losing signals immediately",
+      "description": "As a trader, I want to stop posting signals that consistently lose so we only post winners",
+      "acceptanceCriteria": [
+        "Query database for all signals from last 7 days with outcomes",
+        "Calculate win rate per combination: (KOL tier + narrative + holder pattern)",
+        "Blacklist any pattern with <40% win rate",
+        "Add signal_pattern_filter.py that blocks low-performing patterns",
+        "Test for 2 hours: measure if blocked signals would have lost",
+        "Keep if prevents >3 losing signals OR improves win rate >5%"
+      ],
+      "priority": 0,
+      "passes": false,
+      "notes": "HIGHEST PRIORITY - Cut losses first before optimizing winners",
+      "baseline_metrics": {}
+    },
     {
       "id": "OPT-001",
       "title": "Optimize conviction score threshold",
@@ -317,6 +335,155 @@
       "priority": 17,
       "passes": false,
       "notes": "User request: Optimize scoring algorithm. Let ML find best weights.",
+      "baseline_metrics": {}
+    },
+    {
+      "id": "OPT-018",
+      "title": "SPEED: Rapid A/B test top 5 conviction thresholds",
+      "description": "As an optimizer, I want to test multiple thresholds in parallel to find the winner fast",
+      "acceptanceCriteria": [
+        "Test conviction thresholds: 60, 65, 70, 75, 80 simultaneously",
+        "Deploy 5 branches, collect metrics for 1 hour each in parallel",
+        "Compare: signal_count, win_rate, avg_ROI, false_positives",
+        "Pick winner = highest (win_rate * avg_ROI) with signal_count >= 5",
+        "Deploy winner to main immediately",
+        "Document in progress.txt with data table"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "AGGRESSIVE: Parallel testing to find optimal threshold in 1 hour instead of 10 hours",
+      "baseline_metrics": {}
+    },
+    {
+      "id": "OPT-019",
+      "title": "KILL: Auto-blacklist consistently wrong KOLs",
+      "description": "As a curator, I want to stop following KOLs who keep buying rugs",
+      "acceptanceCriteria": [
+        "Query last 30 days: KOL wallet performance (win_rate, avg_ROI, rug_rate)",
+        "Auto-demote KOLs with: win_rate < 35% OR rug_rate > 60%",
+        "Move them from elite/god tier to 'watchlist' (0 points)",
+        "Monitor for 24 hours",
+        "Keep if win_rate improves >8% OR rug_rate drops >15%",
+        "Log demoted wallets to progress.txt"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "AGGRESSIVE: Cut dead weight. Bad KOLs hurt win rate more than good KOLs help.",
+      "baseline_metrics": {}
+    },
+    {
+      "id": "OPT-020",
+      "title": "DOUBLE DOWN: 2x points for proven winners",
+      "description": "As a scoring system, I want to amplify signals from wallets with >70% win rate",
+      "acceptanceCriteria": [
+        "Calculate 30-day win rate for each KOL wallet",
+        "Wallets with win_rate >= 70%: DOUBLE their conviction points",
+        "Wallets with win_rate >= 80%: TRIPLE their points",
+        "Wallets with win_rate < 40%: HALVE their points",
+        "Monitor for 12 hours",
+        "Keep if overall win_rate improves >10%"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": "AGGRESSIVE: Amplify winners, suppress losers. Data-driven weighting.",
+      "baseline_metrics": {}
+    },
+    {
+      "id": "OPT-021",
+      "title": "NARRATIVE BOOST: 3x multiplier for hot narratives",
+      "description": "As a narrative detector, I want massive conviction boost for trending narratives",
+      "acceptanceCriteria": [
+        "Check which narratives generated 5+ winning signals in last 48h",
+        "Apply 3x conviction multiplier to those narratives",
+        "Narratives with 0 wins in 7 days: 0.5x penalty",
+        "Monitor for 6 hours",
+        "Keep if win_rate on narrative signals improves >15%"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": "AGGRESSIVE: Ride winning narratives hard, avoid dead narratives",
+      "baseline_metrics": {}
+    },
+    {
+      "id": "OPT-022",
+      "title": "TIMING: Only post signals in high-activity hours",
+      "description": "As a strategist, I want to post signals when degen traders are most active",
+      "acceptanceCriteria": [
+        "Analyze historical signal performance by hour of day (UTC)",
+        "Identify top 3 time windows with highest win_rate",
+        "Block signals outside these windows (queue for next window)",
+        "Monitor for 24 hours",
+        "Keep if win_rate improves >12%"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": "AGGRESSIVE: Timing matters. Post when market is hot.",
+      "baseline_metrics": {}
+    },
+    {
+      "id": "OPT-023",
+      "title": "EMERGENCY STOP: Kill signals with red flags",
+      "description": "As a risk manager, I want to block signals with obvious rug indicators",
+      "acceptanceCriteria": [
+        "Add instant blocklist: top 3 holders >80%, liquidity <$5k, no socials",
+        "Block if bonding curve shows suspicious pattern",
+        "Block if token age <2 minutes (too fresh)",
+        "Add early exit for KOL wallets that bought then sold in <5min",
+        "Monitor for 4 hours",
+        "Keep if rug_rate drops >25%"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "AGGRESSIVE: Paranoid filtering. Better to miss a winner than post a rug.",
+      "baseline_metrics": {}
+    },
+    {
+      "id": "OPT-024",
+      "title": "CONVICTION FLOOR: Raise minimum to 75",
+      "description": "As a quality filter, I want only the highest conviction signals",
+      "acceptanceCriteria": [
+        "Change MIN_CONVICTION_SCORE from current to 75",
+        "Monitor for 3 hours",
+        "Measure: signal_count (expect ~50% drop), win_rate (expect >60%), avg_ROI",
+        "Keep if: (win_rate > 60% AND avg_ROI > 3x) OR (win_rate > 70%)",
+        "Revert if signal_count < 2 per hour (too restrictive)"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "AGGRESSIVE: Quality over quantity. Aim for 75%+ win rate with high conviction only.",
+      "baseline_metrics": {}
+    },
+    {
+      "id": "OPT-025",
+      "title": "ML PREDICTIONS: Add XGBoost win probability",
+      "description": "As an AI system, I want ML predictions to boost high-probability winners",
+      "acceptanceCriteria": [
+        "Train XGBoost on last 100 signals with features: kol_count, holder_pattern, narrative_strength, volume, liquidity",
+        "Predict win probability (0-1) for each signal",
+        "Add conviction bonus: +20 pts if P(win) > 0.75, +0 if P(win) < 0.5",
+        "Only post signals with P(win) > 0.60",
+        "Monitor for 8 hours",
+        "Keep if win_rate improves >15% AND model accuracy >65%"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": "AGGRESSIVE: Use ML to filter out likely losers before posting",
+      "baseline_metrics": {}
+    },
+    {
+      "id": "OPT-026",
+      "title": "COPY TOP PERFORMERS: Mirror best KOL completely",
+      "description": "As a follower, I want to copy the single best KOL's every move",
+      "acceptanceCriteria": [
+        "Identify KOL with highest 30-day win_rate (min 10 trades)",
+        "Auto-post every token they buy within 60 seconds",
+        "Bypass conviction scoring for this wallet (instant signals)",
+        "Monitor for 24 hours",
+        "Keep if win_rate on these signals > 65%"
+      ],
+      "priority": 7,
+      "passes": false,
+      "notes": "AGGRESSIVE: If one KOL is crushing it, copy them exactly",
       "baseline_metrics": {}
     }
   ]
