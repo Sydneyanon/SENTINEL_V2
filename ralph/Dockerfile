@@ -1,6 +1,10 @@
 # Ralph Autonomous Loop - Railway Deployment
 FROM python:3.11-slim
 
+# Disable Railway's auto-detection by removing any Python markers
+ENV NIXPACKS_NO_MUSL=1
+ENV PYTHONUNBUFFERED=1
+
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
     bash \
@@ -10,31 +14,22 @@ RUN apt-get update && apt-get install -y \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Python dependencies FIRST (before copying code)
-RUN pip3 install --no-cache-dir --upgrade pip && \
+# Install Python dependencies directly (NO virtualenv)
+RUN pip3 install --no-cache-dir --upgrade pip setuptools wheel && \
     pip3 install --no-cache-dir \
         anthropic==0.40.0 \
         asyncpg \
         python-dotenv
 
-# Verify anthropic is installed
-RUN python3 -c "import anthropic; print(f'✓ Anthropic {anthropic.__version__} installed')" || \
-    (echo "ERROR: anthropic package not installed" && exit 1)
+# Verify anthropic is installed in system Python
+RUN python3 -c "import anthropic; print(f'✓ Anthropic {anthropic.__version__} installed at {anthropic.__file__}')"
 
 # Copy entire project
 WORKDIR /app
 COPY . /app/
 
-# Install any additional requirements if they exist
-RUN if [ -f /app/ralph/requirements.txt ]; then \
-        pip3 install --no-cache-dir -r /app/ralph/requirements.txt; \
-    fi
-
-# Make script executable
+# Make scripts executable
 RUN chmod +x /app/ralph/ralph.sh /app/ralph/ralph_api.py
 
-# Verify Python script can import anthropic
-RUN python3 -c "import sys; sys.path.insert(0, '/app/ralph'); from anthropic import Anthropic; print('✓ Import test passed')"
-
-# Default command: run Ralph with Python API, 10 iterations
+# Default command: run Ralph with bash wrapper (handles 10 iterations)
 CMD ["bash", "/app/ralph/ralph.sh", "--tool", "api", "10"]
