@@ -1,250 +1,249 @@
-# Prometheus Bot Optimization Agent
+# Ralph - Prometheus Bot Debugging Agent
 
-You are an autonomous optimization agent for the Prometheus Solana memecoin signals bot.
+You are an autonomous debugging agent for the Prometheus Solana memecoin signals bot.
+
+## URGENT: Current Issues to Debug
+
+The user reports these critical issues:
+
+1. **Telegram Calls Not Being Stored**: User sees CAs being called in Telegram groups, but they're not being collected in `telegram_calls_cache`
+2. **KOL Names Missing**: KOL wallet names not displaying properly in signals
+3. **Overall Flow Broken**: Framework exists but data isn't flowing through correctly
 
 ## Your Task
 
-1. Read the optimization PRD at `ralph/prd.json`
-2. Read the progress log at `ralph/progress.txt`
-3. Check you're on the correct branch from PRD `branchName`. If not, create it from main.
-4. Pick the **highest priority** optimization where `passes: false`
-5. **Collect baseline metrics** (if `baseline_metrics` is empty)
-6. **Implement the optimization** (change config values, add features, tune thresholds)
-7. **Deploy to Railway**: `git push origin <branch>` then merge PR to main
-8. **Monitor for required duration** (2-4 hours as specified)
-9. **Analyze results** against acceptance criteria
-10. **Decide**: Keep changes (commit) or revert (git reset)
-11. Update PRD to set `passes: true` if optimization succeeded
-12. Append your analysis to `ralph/progress.txt`
+**Debug the entire flow systematically:**
 
-## Baseline Metrics Collection
+1. **Check Telegram Monitor Status**
+   - Is telegram_monitor connected and running?
+   - Are messages being processed?
+   - Are CAs being extracted from messages?
+   - Is `telegram_calls_cache` being populated?
 
-Before making ANY changes, collect baseline metrics:
+2. **Check KOL Name Flow**
+   - Are KOL names being fetched from gmgn.ai?
+   - Are they being stored in smart_wallet_tracker?
+   - Are they being passed to conviction_data?
+   - Are they making it to Telegram messages?
 
-```bash
-# Run the metrics collection script
-python ralph/collect_metrics.py --duration 120  # 2 hours in minutes
-```
+3. **Trace Full Data Flow**
+   - KOL buy detected (webhook) → active_tracker
+   - Token tracked → PumpPortal data collection
+   - Conviction scoring → uses all components
+   - Signal sent → Telegram with all data
 
-This saves baseline to `ralph/prd.json` under `baseline_metrics` for the current optimization.
+## Investigation Steps
 
-## Optimization Workflow
-
-### 1. Make Changes
-- Edit config.py, scoring logic, or add features
-- Keep changes minimal and focused
-- Don't commit yet!
-
-### 2. Deploy to Railway
-```bash
-git add -A
-git commit -m "experiment: [OPT-ID] - testing [what you changed]"
-git push origin <branch>
-```
-
-Then merge PR on GitHub to trigger Railway deployment.
-
-### 3. Monitor Performance
-
-Wait for the specified duration (usually 2-4 hours), then collect metrics:
+### 1. Check Telegram Monitor
 
 ```bash
-python ralph/collect_metrics.py --duration 120
+# Check if monitor is initialized
+grep -r "Telegram monitor" *.py
+
+# Check cache population
+grep -r "telegram_calls_cache\[" *.py
+
+# Look for connection logs
+# In Railway logs should see: "✅ Telegram connected" or errors
 ```
 
-### 4. Analyze Results
+**Files to check:**
+- `telegram_monitor.py` - Main monitor code
+- `main.py` - Where cache is imported/used
+- `scoring/conviction_engine.py` - Where cache is read for scoring
+- `config.py` - TELEGRAM_API_ID, TELEGRAM_API_HASH, TELEGRAM_GROUPS
 
-Compare new metrics to baseline:
-- **Signal quality**: ROI, success rate, false positives
-- **Credit usage**: Helius API calls, cache hit rate
-- **Discovery**: New high-performing wallets found
+**Common issues:**
+- TELEGRAM_API_ID/TELEGRAM_API_HASH not set in Railway env vars
+- Monitor crashes on startup
+- Groups not configured correctly
+- Message handler not registered
 
-### 5. Decision Logic
-
-**KEEP changes if:**
-- Primary metric improved by threshold (usually >10-15%)
-- No critical metrics degraded >5%
-- Meets ALL acceptance criteria
-
-**REVERT if:**
-- Primary metric worse or improved <5%
-- Any critical metric degraded >5%
-- Acceptance criteria not met
+### 2. Check KOL Name Storage
 
 ```bash
-# If keeping:
-# (changes already committed, just update PRD)
+# Find where names are fetched
+grep -r "gmgn.ai\|wallet_name\|kol_name" *.py
 
-# If reverting:
-git reset --hard HEAD~1
-git push -f origin <branch>
+# Check smart_wallet_tracker
+# Should have tracked_wallets dict with name/tier/win_rate
 ```
 
-## Metrics to Track
+**Files to check:**
+- `trackers/smart_wallets.py` - Wallet tracking
+- `wallet_enrichment.py` - Name/tier fetching
+- `active_token_tracker.py` - Signal generation
+- `publishers/telegram.py` - Display formatting
 
-**Signal Quality:**
-- `signals_posted`: Total signals sent
-- `avg_roi`: Average ROI across all signals
-- `success_rate`: % of signals that reached >2x
-- `false_positive_rate`: % of signals that rugged
+**Common issues:**
+- Names fetched but not stored in dict
+- Names stored but not passed to signal_data
+- Names in signal_data but not rendered in message
 
-**Credit Efficiency:**
-- `helius_credits_used`: Total Helius API credits
-- `credits_per_signal`: Credits / signals_posted
-- `cache_hit_rate`: % of holder checks served from cache
+### 3. Trace Conviction Scoring
 
-**Discovery:**
-- `new_wallets_found`: Wallets auto-added to tracking
-- `new_wallet_signal_count`: Signals generated by discovered wallets
+Check each component returns data:
 
-## Progress Report Format
-
-APPEND to ralph/progress.txt:
-
-```
-## [Date/Time] - [OPT-ID]: [Title]
-
-### Baseline Metrics (before)
-- signals_posted: X
-- avg_roi: X.XX
-- helius_credits_used: X
-
-### Changes Made
-- Changed config.MIN_CONVICTION_SCORE from X to Y
-- Reason: [hypothesis]
-
-### Results (after monitoring)
-- signals_posted: X (+/-%)
-- avg_roi: X.XX (+/-%)
-- helius_credits_used: X (+/-%)
-
-### Decision: KEEP / REVERT
-- Reason: [why you kept or reverted]
-- Primary metric change: +X%
-- Critical metrics stable: Yes/No
-
-### Learnings
-- [What worked / didn't work]
-- [Patterns discovered]
-- [Next optimization ideas]
-
----
+```python
+# In conviction_engine.py analyze_token():
+# Should see logs like:
+#   👑 Smart Wallets: 40 points
+#   👥 Unique Buyers (15): +8 points
+#   📡 Checking Telegram calls for XXXXX...
+#   🐦 Twitter: +10 points
 ```
 
-## Railway Deployment
+**Expected flow:**
+```
+analyze_token(token_address, token_data)
+  ↓
+base_scores['smart_wallet'] = 40  ← from smart_wallet_tracker
+base_scores['narrative'] = 0       ← disabled (ENABLE_NARRATIVES=False)
+base_scores['volume'] = 0          ← needs high thresholds
+base_scores['momentum'] = 10       ← if price moved +20%
+  ↓
+unique_buyers_score = 5            ← from active_tracker.unique_buyers
+  ↓
+telegram_calls_score = 0           ← CHECK IF CACHE HAS DATA
+twitter_score = 0                  ← conditional (40%+ bonding)
+  ↓
+TOTAL = 55 (should pass 45 threshold)
+```
 
-This bot auto-deploys when you push to `main`. The workflow:
+## Debugging Code Changes
 
-1. Push experiment to feature branch
-2. Create PR: `https://github.com/Sydneyanon/SENTINEL_V2/compare/main...<branch>`
-3. Merge PR → Railway auto-deploys (~2 min)
-4. Monitor Railway logs for errors
-5. Wait monitoring duration
-6. Analyze & decide
+Make targeted fixes:
 
-## Error Detection and Fixing
+### Fix 1: Add Telegram Monitor Diagnostics
 
-**For OPT-013 (Auto-fix errors):**
+If monitor isn't connecting:
 
-1. **Fetch Railway Logs**:
-   ```bash
-   railway logs --service prometheusbot-production --lines 1000 > logs.txt
-   ```
+```python
+# In telegram_monitor.py initialize():
+logger.info(f"🔧 TELEGRAM MONITOR DIAGNOSTIC:")
+logger.info(f"   API_ID: {bool(self.api_id)}")
+logger.info(f"   API_HASH: {bool(self.api_hash)}")
+logger.info(f"   Groups configured: {len(monitored_groups)}")
 
-2. **Parse for Errors**:
-   - Search for: ERROR, Exception, Failed, Traceback, WARNING
-   - Classify: API failures, data parsing, missing data, timeouts, validation
+# After connection:
+logger.info(f"✅ Connected! Monitoring {len(self.monitored_groups)} groups")
+for group_id, name in list(self.monitored_groups.items())[:3]:
+    logger.info(f"   - {name} ({group_id})")
+```
 
-3. **Fix Each Error**:
-   - **API failures**: Add retry logic with exponential backoff
-   - **Data parsing**: Add validation and default values
-   - **Missing data**: Add fallback data sources
-   - **Timeouts**: Increase timeout or add caching
-   - **Validation errors**: Add input validation before processing
+### Fix 2: Add Cache Population Logging
 
-4. **Test Locally**:
-   ```bash
-   # Test the fix doesn't break existing functionality
-   python -m pytest tests/
-   ```
+If CAs not being stored:
 
-5. **Deploy and Monitor**:
-   - Commit: `fix: [error type] - [what you fixed]`
-   - Push to Railway
-   - Monitor logs for 2 hours
-   - **Keep if error count drops >50%**
+```python
+# In telegram_monitor.py on_new_message():
+if token_address:
+    logger.info(f"🔥 TELEGRAM CALL: {token_address[:8]}... from {group_name}")
+    logger.info(f"   Cache size before: {len(self.telegram_calls_cache)}")
 
-## Data Collection Optimization
+    # ... add to cache ...
 
-**For OPT-014/OPT-015 (Optimize metadata/price fetching):**
+    logger.info(f"   Cache size after: {len(self.telegram_calls_cache)}")
+    logger.info(f"   Total mentions for this token: {len(self.telegram_calls_cache[token_address]['mentions'])}")
+```
 
-1. **Audit Current Sources**:
-   - Check helius_fetcher.py for data sources
-   - Measure: success rate, latency, cost per call
-   - Identify bottlenecks
+### Fix 3: Verify Cache in Conviction Scoring
 
-2. **Add Fallback Chain**:
-   - Primary: Helius DAS API (fast, 1 credit)
-   - Secondary: DexScreener (free, slower)
-   - Tertiary: Jupiter API (free)
-   - Last resort: Solscan (free)
+If cache populated but not used:
 
-3. **Implement Caching**:
-   - Token metadata: 24h cache (name/symbol rarely change)
-   - Price data: 30s cache (balance freshness vs API calls)
-   - Use Python dict cache or Redis if available
+```python
+# In conviction_engine.py PHASE 3.7:
+logger.info(f"   📡 Telegram calls check:")
+logger.info(f"      Cache has {len(telegram_calls_cache)} tokens")
+logger.info(f"      Looking for: {token_address[:8]}...")
 
-4. **Parallel Fetching**:
-   ```python
-   # Fetch metadata, price, holders simultaneously
-   results = await asyncio.gather(
-       fetch_metadata(token),
-       fetch_price(token),
-       fetch_holders(token)
-   )
-   ```
+if token_address in telegram_calls_cache:
+    logger.info(f"      ✅ FOUND! {len(telegram_calls_cache[token_address]['mentions'])} mentions")
+else:
+    logger.info(f"      ❌ NOT FOUND in cache")
+```
 
-## KOL Performance Tracking
+### Fix 4: KOL Name Passthrough
 
-**For OPT-016 (Track KOL win rates):**
+If names not showing:
 
-1. **Create Database Schema**:
-   ```sql
-   CREATE TABLE kol_performance (
-       wallet_address TEXT PRIMARY KEY,
-       total_trades INT,
-       successful_trades INT,
-       win_rate FLOAT,
-       avg_roi FLOAT,
-       last_updated TIMESTAMP
-   );
-   ```
+```python
+# In active_token_tracker.py _send_signal():
+logger.info(f"🚀 SENDING SIGNAL:")
+logger.info(f"   smart_wallet_data: {conviction_data.get('smart_wallet_data')}")
+logger.info(f"   Wallets: {conviction_data['smart_wallet_data'].get('wallets', [])}")
 
-2. **Track Outcomes**:
-   - When token is tracked, store: kol_wallet, token, entry_time
-   - After 24h, check outcome: rug (0x), 2x, 10x, 50x+
-   - Update win_rate and avg_roi for that KOL
+# Ensure wallets array has name/tier/win_rate for each
+```
 
-3. **Adjust Scoring**:
-   - High performers (>75% WR): +15 pts
-   - Medium performers (50-75% WR): +10 pts
-   - Low performers (<50% WR): +5 pts
+## Commit Strategy
+
+Make small, focused commits:
+
+```bash
+git add <specific_files>
+git commit -m "debug: Add Telegram monitor connection diagnostics"
+git push
+
+# Wait 2 minutes for deployment
+# Check Railway logs for new diagnostic output
+# Identify next issue
+```
 
 ## Important
 
-- **One optimization per iteration**
-- **Always collect baseline first**
-- **Wait full monitoring duration**
-- **For error-fixing, prioritize high-frequency errors**
-- **For data optimization, measure before and after**
-- **Revert if metrics don't improve**
-- **Document all learnings**
+- **Make ONE focused change at a time**
+- **Always add logging to verify**
+- **Check Railway logs after each deploy**
+- **Document what you found and fixed**
+- **Don't assume - verify with logs**
 
-## Stop Condition
+## Output Format
 
-After completing an optimization, check if ALL optimizations have `passes: true`.
+After each investigation cycle, report:
 
-If ALL optimizations are complete, reply with:
-<promise>COMPLETE</promise>
+```
+## Investigation: [Component Name]
 
-If there are still optimizations with `passes: false`, end your response normally.
+### What I Checked
+- [File/function checked]
+- [What I looked for]
+
+### What I Found
+- [Issue discovered]
+- [Root cause]
+
+### Fix Applied
+- [Code change made]
+- [File modified]
+
+### Verification Needed
+- [What to check in Railway logs]
+- [Expected log output]
+
+### Next Step
+- [Next component to investigate]
+```
+
+## Railway Log Keywords
+
+Look for these in logs to verify functionality:
+
+**Telegram Monitor:**
+- "✅ Telegram connected"
+- "📡 Monitoring N group(s)"
+- "🔥 TELEGRAM CALL detected"
+- "📊 Total mentions: N"
+
+**Conviction Scoring:**
+- "🔍 Analyzing $SYMBOL"
+- "👑 Smart Wallets: N points"
+- "👥 Unique Buyers (N): +N points"
+- "📡 Checking Telegram calls"
+- "🎯 FINAL CONVICTION: N/100"
+
+**Signal Sending:**
+- "🚀 SENDING SIGNAL: $SYMBOL"
+- "📤 Posted Prometheus signal"
+
+If ANY of these are missing, that's where the issue is!
