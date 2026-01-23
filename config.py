@@ -132,12 +132,13 @@ MOMENTUM_WEIGHTS = {
 
 # Distribution Scoring (0-15 points)
 # Pre-graduation: Based on unique buyers (FREE)
+# LOWERED: Catch early KOL plays before they get crowded
 UNIQUE_BUYER_WEIGHTS = {
-    'exceptional': 15,  # 100+ unique buyers (strong organic interest)
-    'high': 12,         # 70-99 unique buyers
-    'medium': 8,        # 40-69 unique buyers
-    'low': 5,           # 20-39 unique buyers
-    'minimal': 0        # <20 unique buyers (too risky)
+    'exceptional': 15,  # 50+ unique buyers (strong organic interest)
+    'high': 12,         # 30-49 unique buyers
+    'medium': 8,        # 15-29 unique buyers
+    'low': 5,           # 5-14 unique buyers (early stage)
+    'minimal': 0        # <5 unique buyers (too early/risky)
 }
 
 # Post-graduation: Based on real holders (10 credits)
@@ -391,7 +392,7 @@ LOG_FILE = "prometheus.log"
 # FEATURE FLAGS
 # =============================================================================
 
-ENABLE_NARRATIVES = False   # Narrative detection (disabled for now)
+ENABLE_NARRATIVES = True   # Narrative detection - ENABLED to fix low convictions
 ENABLE_PERFORMANCE_TRACKING = True
 ENABLE_MILESTONE_ALERTS = True
 ENABLE_LUNARCRUSH = False   # LunarCrush disabled (use Twitter only)

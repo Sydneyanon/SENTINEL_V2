@@ -3,7 +3,7 @@ Conviction Engine - Scores tokens based on multiple signals
 UPDATED: Integrated rug detection + LunarCrush social sentiment
 """
 from typing import Dict, Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 from loguru import logger
 import config
 from rug_detector import RugDetector
@@ -96,9 +96,13 @@ class ConvictionEngine:
                     token_data.get('description', '')
                 )
                 base_scores['narrative'] = narrative_data.get('score', 0)
-                logger.info(f"   🎯 Narratives: {base_scores['narrative']} points")
+                if base_scores['narrative'] > 0:
+                    logger.info(f"   🎯 Narratives: {base_scores['narrative']} points (matched: {narrative_data.get('primary_narrative', 'N/A')})")
+                else:
+                    logger.info(f"   🎯 Narratives: 0 points (no narrative match)")
             else:
                 base_scores['narrative'] = 0
+                logger.info(f"   🎯 Narratives: DISABLED (0 points)")
             
             # 3. Volume Velocity (0-10 points)
             volume_score = self._score_volume_velocity(token_data)
@@ -150,7 +154,12 @@ class ConvictionEngine:
             if self.active_tracker:
                 unique_buyers = len(self.active_tracker.unique_buyers.get(token_address, set()))
                 unique_buyers_score = self._score_unique_buyers(unique_buyers)
-                logger.info(f"   👥 Unique Buyers ({unique_buyers}): {unique_buyers_score} points")
+                if unique_buyers_score > 0:
+                    logger.info(f"   👥 Unique Buyers ({unique_buyers}): +{unique_buyers_score} points")
+                else:
+                    logger.info(f"   👥 Unique Buyers ({unique_buyers}): 0 points (need 5+ for scoring)")
+            else:
+                logger.info(f"   👥 Unique Buyers: DISABLED (active_tracker not initialized)")
 
             mid_total = adjusted_base + unique_buyers_score
             logger.info(f"   💎 MID SCORE: {mid_total}/100")
@@ -227,69 +236,74 @@ class ConvictionEngine:
             telegram_call_data = {}
 
             if config.ENABLE_TELEGRAM_SCRAPER:
-                # Import from main
-                from main import telegram_calls_cache
+                try:
+                    # Import from main
+                    from main import telegram_calls_cache
 
-                logger.info(f"   📡 Checking Telegram calls for {token_address[:8]}...")
-                logger.info(f"      Cache has {len(telegram_calls_cache)} token(s)")
+                    logger.info(f"   📡 Checking Telegram calls for {token_address[:8]}...")
+                    logger.info(f"      Cache has {len(telegram_calls_cache)} token(s)")
 
-                if token_address in telegram_calls_cache:
-                    call_data = telegram_calls_cache[token_address]
-                    now = datetime.now()
+                    if token_address in telegram_calls_cache:
+                        call_data = telegram_calls_cache[token_address]
+                        now = datetime.now()
 
-                    # Get recent mentions (last 10 min)
-                    recent_cutoff = now - timedelta(minutes=10)
-                    recent_mentions = [
-                        m for m in call_data['mentions']
-                        if m['timestamp'] > recent_cutoff
-                    ]
+                        # Get recent mentions (last 10 min)
+                        recent_cutoff = now - timedelta(minutes=10)
+                        recent_mentions = [
+                            m for m in call_data['mentions']
+                            if m['timestamp'] > recent_cutoff
+                        ]
 
-                    # Get very recent mentions (last 5 min) for intensity check
-                    very_recent_cutoff = now - timedelta(minutes=5)
-                    very_recent_mentions = [
-                        m for m in call_data['mentions']
-                        if m['timestamp'] > very_recent_cutoff
-                    ]
+                        # Get very recent mentions (last 5 min) for intensity check
+                        very_recent_cutoff = now - timedelta(minutes=5)
+                        very_recent_mentions = [
+                            m for m in call_data['mentions']
+                            if m['timestamp'] > very_recent_cutoff
+                        ]
 
-                    mention_count = len(recent_mentions)
-                    very_recent_count = len(very_recent_mentions)
-                    group_count = len(call_data['groups'])
+                        mention_count = len(recent_mentions)
+                        very_recent_count = len(very_recent_mentions)
+                        group_count = len(call_data['groups'])
 
-                    # Calculate call age (time since first mention)
-                    call_age = now - call_data['first_seen']
-                    call_age_minutes = call_age.total_seconds() / 60
+                        # Calculate call age (time since first mention)
+                        call_age = now - call_data['first_seen']
+                        call_age_minutes = call_age.total_seconds() / 60
 
-                    # Variable scoring based on Grok's recommendations
-                    if mention_count >= 6 or group_count >= 3:
-                        # High intensity: 6+ mentions OR 3+ groups
-                        social_confirmation_score = 15
-                        telegram_call_data['intensity'] = 'high'
-                    elif mention_count >= 3 or (very_recent_count >= 2 and group_count >= 2):
-                        # Medium intensity: 3-5 mentions OR growing buzz
-                        social_confirmation_score = 10
-                        telegram_call_data['intensity'] = 'medium'
-                    elif mention_count >= 1:
-                        # Low intensity: 1-2 mentions
-                        social_confirmation_score = 5
-                        telegram_call_data['intensity'] = 'low'
+                        # Variable scoring based on Grok's recommendations
+                        if mention_count >= 6 or group_count >= 3:
+                            # High intensity: 6+ mentions OR 3+ groups
+                            social_confirmation_score = 15
+                            telegram_call_data['intensity'] = 'high'
+                        elif mention_count >= 3 or (very_recent_count >= 2 and group_count >= 2):
+                            # Medium intensity: 3-5 mentions OR growing buzz
+                            social_confirmation_score = 10
+                            telegram_call_data['intensity'] = 'medium'
+                        elif mention_count >= 1:
+                            # Low intensity: 1-2 mentions
+                            social_confirmation_score = 5
+                            telegram_call_data['intensity'] = 'low'
 
-                    # Age decay: reduce points if call is old
-                    if call_age_minutes > 120:  # >2 hours old
-                        social_confirmation_score = int(social_confirmation_score * 0.5)
-                        telegram_call_data['aged'] = True
+                        # Age decay: reduce points if call is old
+                        if call_age_minutes > 120:  # >2 hours old
+                            social_confirmation_score = int(social_confirmation_score * 0.5)
+                            telegram_call_data['aged'] = True
 
-                    if social_confirmation_score > 0:
-                        logger.info(f"   🔥 TELEGRAM CALL BONUS: +{social_confirmation_score} pts")
-                        logger.info(f"      {mention_count} mention(s) from {group_count} group(s) ({call_age_minutes:.0f}m ago)")
+                        if social_confirmation_score > 0:
+                            logger.info(f"   🔥 TELEGRAM CALL BONUS: +{social_confirmation_score} pts")
+                            logger.info(f"      {mention_count} mention(s) from {group_count} group(s) ({call_age_minutes:.0f}m ago)")
 
-                        telegram_call_data.update({
-                            'mentions': mention_count,
-                            'groups': group_count,
-                            'call_age_minutes': call_age_minutes,
-                            'score': social_confirmation_score
-                        })
-                else:
-                    logger.info(f"      ❌ No Telegram calls found for this token")
+                            telegram_call_data.update({
+                                'mentions': mention_count,
+                                'groups': group_count,
+                                'call_age_minutes': call_age_minutes,
+                                'score': social_confirmation_score
+                            })
+                    else:
+                        logger.info(f"      ❌ No Telegram calls found for this token")
+
+                except Exception as e:
+                    logger.error(f"   ❌ Error checking Telegram calls: {e}")
+                    social_confirmation_score = 0
 
             # Cap total social score (Twitter + Telegram) at 25 pts
             # This prevents over-scoring noisy hype
@@ -443,13 +457,13 @@ class ConvictionEngine:
         """Score based on unique buyer count (0-15 points)"""
         weights = config.UNIQUE_BUYER_WEIGHTS
 
-        if unique_buyers >= 100:
+        if unique_buyers >= 50:
             return weights['exceptional']
-        elif unique_buyers >= 70:
+        elif unique_buyers >= 30:
             return weights['high']
-        elif unique_buyers >= 40:
+        elif unique_buyers >= 15:
             return weights['medium']
-        elif unique_buyers >= 20:
+        elif unique_buyers >= 5:
             return weights['low']
         else:
             return weights['minimal']
