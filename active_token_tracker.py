@@ -50,6 +50,7 @@ class ActiveTokenTracker:
         self.signals_sent_total = 0
         self.reanalyses_total = 0
         self.signals_blocked_data_quality = 0  # OPT-036: Track blocked signals
+        self.signals_blocked_emergency_stop = 0  # OPT-023: Track emergency stops
 
         logger.info("🎯 ActiveTokenTracker initialized")
     
@@ -521,7 +522,17 @@ class ActiveTokenTracker:
             
             new_score = conviction_data.get('score', 0)
             old_score = state.conviction_score
-            
+
+            # OPT-023: Check for emergency stop
+            if conviction_data.get('emergency_stop', False):
+                self.signals_blocked_emergency_stop += 1
+                symbol = state.token_data.get('token_symbol', 'UNKNOWN')
+                reasons = conviction_data.get('emergency_reasons', [])
+                logger.warning(f"🚨 EMERGENCY STOP: ${symbol} blocked - {', '.join(reasons)}")
+                logger.warning(f"   📊 Total emergency stops: {self.signals_blocked_emergency_stop}")
+                # Don't send signal, exit early
+                return
+
             # Update score
             state.conviction_score = new_score
             

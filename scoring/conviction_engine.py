@@ -361,9 +361,63 @@ class ConvictionEngine:
                         logger.info(f"      {holder_result['reason']}")
             
             # ================================================================
-            # FINAL SCORE CALCULATION
+            # OPT-023: EMERGENCY STOP - Red Flag Detection
             # ================================================================
-            
+            # Block signals with obvious rug indicators (paranoid filtering)
+            # Better to miss a winner than post a rug
+
+            emergency_blocks = []
+
+            # 1. Top 3 holders > 80% (extreme concentration)
+            if holder_result.get('hard_drop', False):
+                emergency_blocks.append(f"Top holders >80% concentration")
+
+            # 2. Liquidity < $5k (too thin, likely rug)
+            liquidity = token_data.get('liquidity', 0)
+            if liquidity > 0 and liquidity < 5000:
+                emergency_blocks.append(f"Liquidity too low: ${liquidity:.0f} < $5k")
+
+            # 3. Token age < 2 minutes (too fresh, wait for real activity)
+            token_created_at = token_data.get('created_at')
+            if token_created_at:
+                from datetime import datetime
+                token_age_seconds = (datetime.utcnow() - token_created_at).total_seconds()
+                if token_age_seconds < 120:  # 2 minutes
+                    emergency_blocks.append(f"Token too new: {token_age_seconds:.0f}s old (< 2min)")
+
+            # 4. No liquidity at all (pre-graduation tokens need some liquidity)
+            if liquidity == 0 and bonding_pct < 100:
+                emergency_blocks.append(f"Zero liquidity on pre-grad token")
+
+            # If any emergency blocks triggered, force score to 0
+            if emergency_blocks:
+                logger.warning("=" * 60)
+                logger.warning(f"   🚨 EMERGENCY STOP TRIGGERED 🚨")
+                for reason in emergency_blocks:
+                    logger.warning(f"   ❌ {reason}")
+                logger.warning(f"   💡 Blocking signal to prevent obvious rug")
+                logger.warning("=" * 60)
+
+                return {
+                    'score': 0,
+                    'passed': False,
+                    'threshold': config.MIN_CONVICTION_SCORE,
+                    'emergency_stop': True,
+                    'emergency_reasons': emergency_blocks,
+                    'token_address': token_address,
+                    'token_data': token_data,
+                    'breakdown': {},
+                    'rug_checks': {
+                        'bundle': bundle_result,
+                        'holder_concentration': holder_result,
+                        'emergency_stop': emergency_blocks
+                    }
+                }
+
+            # ================================================================
+            # FINAL SCORE CALCULATION (if no emergency stop)
+            # ================================================================
+
             final_score = mid_total + holder_result['penalty'] + holder_result['kol_bonus']
             
             # Determine threshold
