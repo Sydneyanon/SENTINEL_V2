@@ -607,6 +607,181 @@
       "passes": false,
       "notes": "USER REQUEST: Active management - tell traders when to exit positions",
       "baseline_metrics": {}
+    },
+    {
+      "id": "OPT-034",
+      "title": "TIMING: Analyze optimal hours/days for signals",
+      "description": "As a strategist, I want to know WHEN tokens are most likely to run so we push hard at the right times",
+      "acceptanceCriteria": [
+        "Query database: all signals with outcomes, group by hour (0-23 UTC) and day (Mon-Sun)",
+        "Calculate win_rate, avg_ROI, rug_rate per time slot",
+        "Identify HOT ZONES: times with >65% WR (push hard - post everything)",
+        "Identify COLD ZONES: times with <45% WR (ease off - only post 80+ conviction)",
+        "Create time_optimizer.py that adjusts MIN_CONVICTION dynamically",
+        "Monitor for 48 hours",
+        "Keep if: win_rate improves >8% by being selective in bad times"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "USER REQUEST: Push hard when optimal, ease off otherwise. Time of day/week matters for degen activity.",
+      "baseline_metrics": {}
+    },
+    {
+      "id": "OPT-035",
+      "title": "SPEED: Catch tokens within 60 seconds of KOL buy",
+      "description": "As a sniper, I want to post signals FAST before price pumps",
+      "acceptanceCriteria": [
+        "Measure current latency: KOL buy → signal posted (avg time)",
+        "Optimize websocket processing: parallel instead of sequential",
+        "Cache metadata aggressively (avoid redundant Helius calls)",
+        "Target: <60 seconds from KOL buy to Telegram post",
+        "Monitor for 6 hours",
+        "Keep if: avg_ROI improves >15% (earlier entry = better prices)"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "CRITICAL: Speed matters. Faster signals = better entry prices = higher ROI.",
+      "baseline_metrics": {}
+    },
+    {
+      "id": "OPT-036",
+      "title": "DATA QUALITY: Never post signals with missing critical data",
+      "description": "As a quality filter, I want to block signals when we don't have reliable data",
+      "acceptanceCriteria": [
+        "Add data quality checks: price, liquidity, holder_count must exist",
+        "Block signal if: price = 0 or None, liquidity < $1k, holder_count = 0 (pre-grad exempt)",
+        "Block if API errors on critical data (Helius timeout, DexScreener 404)",
+        "Log blocked signals with reason",
+        "Monitor for 4 hours",
+        "Keep if: rug_rate drops >10% (bad data = rugs)"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "INFRASTRUCTURE FIX: We've had tons of issues with missing price/holder data. Don't post garbage.",
+      "baseline_metrics": {}
+    },
+    {
+      "id": "OPT-037",
+      "title": "LEARNING: Build rug pattern database from past failures",
+      "description": "As a learner, I want to remember every rug so we never fall for the same pattern twice",
+      "acceptanceCriteria": [
+        "Query all signals with outcome='rug' from last 30 days",
+        "Extract features: holder pattern, liquidity curve, volume pattern, wallet behavior",
+        "Build rug fingerprint database (JSON file)",
+        "Add rug_pattern_matcher.py that checks new signals against known rug patterns",
+        "Score similarity 0-100, block if >80% match to known rug",
+        "Monitor for 24 hours",
+        "Keep if: prevents >5 rugs OR rug_rate drops >20%"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "CRITICAL: Learn from mistakes. Don't post similar rugs twice. Build institutional memory.",
+      "baseline_metrics": {}
+    },
+    {
+      "id": "OPT-038",
+      "title": "MARKET CONDITIONS: Detect pump.fun meta shifts",
+      "description": "As a market analyst, I want to know when overall market is hot/cold and adjust strategy",
+      "acceptanceCriteria": [
+        "Track pump.fun metrics every 15min: new token count, volume, graduation rate",
+        "Define HOT MARKET: >200 new tokens/hour, >$5M volume/hour (post aggressively)",
+        "Define COLD MARKET: <50 new tokens/hour, <$1M volume/hour (only elite signals)",
+        "Adjust conviction threshold dynamically: -10 pts in hot markets, +15 pts in cold",
+        "Monitor for 24 hours",
+        "Keep if: win_rate improves >10% by being selective when market is cold"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": "ADVANCED: Ride the wave when market is hot, hide when it's cold. Meta awareness.",
+      "baseline_metrics": {}
+    },
+    {
+      "id": "OPT-039",
+      "title": "HOLDER QUALITY: Analyze wallet quality not just count",
+      "description": "As a holder analyzer, I want to know if holders are real traders or bots/bundlers",
+      "acceptanceCriteria": [
+        "For each token, check top 20 holders: are they real wallets or suspicious?",
+        "Suspicious indicators: new wallet (<7 days), only holds this token, part of bundle",
+        "Calculate quality_score: % of holders that are legitimate traders",
+        "Penalty: -20 conviction pts if <50% quality holders",
+        "Bonus: +15 pts if >80% quality holders (real accumulation)",
+        "Monitor for 8 hours",
+        "Keep if: rug_rate drops >15% (bot holders = red flag)"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": "ADVANCED: 1000 bot holders != 100 real trader holders. Quality over quantity.",
+      "baseline_metrics": {}
+    },
+    {
+      "id": "OPT-040",
+      "title": "CONFIRMATION: Require 2+ KOLs for risky tokens",
+      "description": "As a risk manager, I want multiple KOL confirmation on sketchy tokens",
+      "acceptanceCriteria": [
+        "Define RISKY: new token (<5min old), low liquidity (<$10k), or suspicious holders",
+        "For risky tokens: require 2+ elite KOLs OR 1 god-tier KOL before posting",
+        "For safe tokens: 1 KOL is enough",
+        "Add 'waiting for confirmation' state (max 3min wait)",
+        "Monitor for 6 hours",
+        "Keep if: false positive rate drops >25% (stop posting solo-KOL rugs)"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": "CRITICAL: Single KOL buying sus token = risky. Wait for confirmation from others.",
+      "baseline_metrics": {}
+    },
+    {
+      "id": "OPT-041",
+      "title": "COST: Eliminate redundant Helius API calls",
+      "description": "As an operator, I want to stop wasting Helius credits on duplicate/unnecessary calls",
+      "acceptanceCriteria": [
+        "Audit code: find all Helius API calls (holder checks, metadata, transactions)",
+        "Identify redundant calls: same token checked multiple times in 5min window",
+        "Implement aggressive caching: 2h TTL for holder data, 1h for metadata",
+        "Add request deduplication: batch multiple checks into single call",
+        "Measure credits used per signal (before vs after)",
+        "Monitor for 6 hours",
+        "Keep if: credits per signal drops >40% with no quality loss"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": "INFRASTRUCTURE: We've wasted tons of credits. Every call costs money. Optimize ruthlessly.",
+      "baseline_metrics": {}
+    },
+    {
+      "id": "OPT-042",
+      "title": "INFRASTRUCTURE: Auto-fix Railway crashes and errors",
+      "description": "As a self-healing system, I want to detect and fix runtime errors automatically",
+      "acceptanceCriteria": [
+        "Monitor Railway logs every 5min for ERROR/Exception/Fatal",
+        "Classify errors: logging spam (add rate limit), API timeout (add retry), memory leak (restart service)",
+        "Auto-apply fixes: reduce log level, increase timeout, add circuit breaker",
+        "Track error frequency before/after fixes",
+        "Monitor for 12 hours",
+        "Keep if: error rate drops >60% OR no container restarts in 24h"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "CRITICAL: We've fought logging spam and crashes. Ralph should fix infrastructure issues proactively.",
+      "baseline_metrics": {}
+    },
+    {
+      "id": "OPT-043",
+      "title": "DYNAMIC CONFIDENCE: Adjust strategy based on recent performance",
+      "description": "As an adaptive system, I want to be conservative after losses and aggressive after wins",
+      "acceptanceCriteria": [
+        "Track last 10 signals: calculate rolling win_rate",
+        "If last 10 signals: >70% WR → AGGRESSIVE MODE (lower threshold by 10 pts)",
+        "If last 10 signals: <40% WR → DEFENSIVE MODE (raise threshold by 20 pts)",
+        "Reset to normal after 20 signals OR 6 hours",
+        "Add mode indicator to Telegram posts: 🔥 AGGRESSIVE or 🛡️ DEFENSIVE",
+        "Monitor for 48 hours",
+        "Keep if: reduces losing streaks >50% (stop posting after 3 consecutive rugs)"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": "PSYCHOLOGICAL: Don't keep posting after losses. Be aggressive when hot, defensive when cold.",
+      "baseline_metrics": {}
     }
   ]
 }
