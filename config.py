@@ -392,7 +392,7 @@ LOG_FILE = "prometheus.log"
 # FEATURE FLAGS
 # =============================================================================
 
-ENABLE_NARRATIVES = True   # Narrative detection - ENABLED to fix low convictions
+ENABLE_NARRATIVES = False   # Narrative detection (disabled - narratives are static)
 ENABLE_PERFORMANCE_TRACKING = True
 ENABLE_MILESTONE_ALERTS = True
 ENABLE_LUNARCRUSH = False   # LunarCrush disabled (use Twitter only)

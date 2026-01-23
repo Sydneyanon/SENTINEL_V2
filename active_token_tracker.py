@@ -508,6 +508,10 @@ class ActiveTokenTracker:
             state.last_analyzed = now
             self.reanalyses_total += 1
 
+            # Add unique_buyers count to token_data (for display in Telegram)
+            unique_buyers_count = len(self.unique_buyers.get(token_address, set()))
+            state.token_data['unique_buyers'] = unique_buyers_count
+
             # Get fresh conviction score
             conviction_data = await self.conviction_engine.analyze_token(
                 token_address,
