@@ -4,9 +4,21 @@ Ralph API Runner - Uses Anthropic API directly instead of Claude CLI
 """
 import os
 import sys
+import subprocess
 import traceback
 
 print("=== Ralph API Runner Starting ===", flush=True)
+print(f"Python version: {sys.version}", flush=True)
+print(f"Python path: {sys.executable}", flush=True)
+
+# Show installed packages
+import subprocess
+try:
+    result = subprocess.run(['pip3', 'list'], capture_output=True, text=True)
+    print("Installed packages:", flush=True)
+    print(result.stdout, flush=True)
+except Exception as e:
+    print(f"Could not list packages: {e}", flush=True)
 
 try:
     print("Importing anthropic...", flush=True)
@@ -15,6 +27,7 @@ try:
 except ImportError as e:
     print(f"ERROR: Failed to import anthropic: {e}", flush=True)
     print("Install with: pip install anthropic", flush=True)
+    print(f"sys.path: {sys.path}", flush=True)
     sys.exit(1)
 
 def run_ralph_iteration():
