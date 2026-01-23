@@ -912,6 +912,25 @@
       "passes": false,
       "notes": "USER INSIGHT: Meta changes weekly. Continuous learning from graduated tokens keeps us current.",
       "baseline_metrics": {}
+    },
+    {
+      "id": "OPT-051",
+      "title": "CRITICAL: Fix silent Telegram posting failures",
+      "description": "As a user, I want to know when signals fail to post to Telegram instead of silent failures",
+      "acceptanceCriteria": [
+        "Debug: Signal with 55 conviction passed threshold but didn't post to TG",
+        "Check publishers/telegram.py for silent exception handling",
+        "Add explicit error logging: 'FAILED TO POST SIGNAL: {mint} - {error}'",
+        "Add retry logic: 3 attempts with 2s delay between",
+        "Add fallback: if TG fails, log to database with 'posting_failed' flag",
+        "Add health check: alert if 3+ consecutive posting failures",
+        "Monitor for 2 hours",
+        "Keep if: 0 silent failures AND all passing signals post successfully"
+      ],
+      "priority": 0,
+      "passes": false,
+      "notes": "EMERGENCY: User report - signal passed (55 > 45 threshold) but didn't post to TG. Silent failures kill trust.",
+      "baseline_metrics": {}
     }
   ]
 }
