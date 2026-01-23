@@ -8,13 +8,15 @@ from fastapi import FastAPI, Request
 from loguru import logger
 from datetime import datetime, timedelta
 import sys
+import os
 
-# Configure logging
+# Configure logging (environment-based to avoid Railway 500 logs/sec limit)
+LOG_LEVEL = os.getenv('LOG_LEVEL', 'WARNING').upper()  # Default: WARNING (minimal logs)
 logger.remove()
 logger.add(
     sys.stdout,
     format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <level>{message}</level>",
-    level="INFO"
+    level=LOG_LEVEL
 )
 
 # Import existing modules
