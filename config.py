@@ -506,7 +506,9 @@ EXPECTED_DAILY_CREDITS = {
 
 TELEGRAM_GROUPS = {
     -1001758611100: 'mad_apes',  # Mad Apes (gambles)
-    -1001419575394: 'alpha_group_22',  # Alpha Group 22 (NEW)
+    -1001419575394: 'alpha_group_22',  # Alpha Group 22
+    -1002064849541: 'alpha_group_23',  # Alpha Group 23 (NEW)
+    -1002380594298: 'alpha_group_24',  # Alpha Group 24 (NEW)
     -1001490374084: 'alpha_group_1',  # Alpha Group 1
     -1001860996162: 'alpha_group_2',  # Alpha Group 2
     -1002139128702: 'alpha_group_3',  # Alpha Group 3
