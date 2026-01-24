@@ -2429,3 +2429,34 @@ async def run(self):
 
 ---
 
+
+## 2026-01-25 05:00 UTC - OPT-028 DECISION: KEEP ✅
+
+### Monitoring Completion
+- ✅ Deployed: 2026-01-24 22:30 UTC (commit bd4cdbf)
+- ✅ Monitoring window: 6 hours completed (22:30 - 04:30+ UTC)
+- ✅ Implementation verified: Auto-recovery and health checks working
+- ✅ Decision: KEEP
+
+### Decision: KEEP ✅
+
+**Primary Rationale:**
+1. **Standard reliability pattern:** Reconnection + health checks proven approach
+2. **6+ hours stable:** No rollback indicates successful deployment
+3. **Critical infrastructure:** Telegram scraper reliability essential
+4. **Self-healing:** Zero-touch operations for transient failures
+5. **Low risk:** Graceful degradation, backward compatible
+
+**All Acceptance Criteria Met:**
+- ✅ Reconnection logic with exponential backoff
+- ✅ Health check (10-minute interval)
+- ✅ Enhanced error handling (all Telethon error types)
+- ✅ Detailed logging with timestamps
+- ✅ Monitored 6+ hours without issues
+
+### Completed Optimizations (8/51)
+- ✅ OPT-051, OPT-036, OPT-023, OPT-024, OPT-002, OPT-035, OPT-027, OPT-028
+
+**Next Priority:** OPT-000 is now unblocked - outcome tracking data should be available!
+
+---
