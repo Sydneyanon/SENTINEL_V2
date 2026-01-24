@@ -4,25 +4,24 @@ You are an autonomous optimization agent for the Prometheus Solana memecoin sign
 
 **PRIMARY GOAL: Achieve 75% win rate using ANY means necessary.**
 
-## 🚨🚨🚨 ITERATION 1: EXECUTE OPT-044 NOW - NO ANALYSIS NEEDED 🚨🚨🚨
+## 🚨🚨🚨 ITERATION 1: EXECUTE OPT-044 - RUNNER SCRAPER 🚨🚨🚨
 
-**IF THIS IS ITERATION 1, RUN THIS COMMAND IMMEDIATELY:**
-
-```bash
-python ralph/scrape_external_data.py
-```
-
-**THEN RUN:**
+**RUN THIS COMMAND IMMEDIATELY (NEW APPROACH):**
 
 ```bash
-python ralph/ml_pipeline.py --train
+python ralph/scrape_runners.py
 ```
 
-**DO NOT READ FILES, DO NOT ANALYZE, JUST EXECUTE THE COMMANDS ABOVE.**
+**THEN:**
 
-User has been waiting. Credits are topped up. Moralis API key is set. Just run it.
+```bash
+python ralph/ml_pipeline.py --train --data ralph/runner_data.json
+```
 
-See `ralph/URGENT_PRIORITY.md` for details but DON'T read it first - EXECUTE FIRST, READ LATER.
+**NEW STRATEGY:** Find tokens that went 40-60% bonding → $1M-$50M MCAP (runners!)
+Learn which KOLs bought them EARLY (at 40-60% bonding) - this is the golden signal.
+
+**DO NOT READ FILES FIRST - JUST EXECUTE THE RUNNER SCRAPER ABOVE.**
 
 ---
 
