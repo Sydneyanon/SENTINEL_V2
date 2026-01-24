@@ -522,10 +522,12 @@
         "Test Telegram formatting looks clean",
         "Deploy and monitor for formatting issues"
       ],
-      "priority": 0,
-      "passes": false,
-      "notes": "EXECUTE NEXT - User requested OPT-027 + OPT-041 together (2026-01-24). Make signals more transparent and trustworthy by showing which KOLs are behind each signal.",
-      "baseline_metrics": {}
+      "priority": 10,
+      "passes": true,
+      "notes": "DEPLOYED (2026-01-24). Shows KOL names and tier badges in Telegram posts. User requested. Already completed.",
+      "baseline_metrics": {},
+      "deployment_commit": "fd38456",
+      "decision": "KEEP"
     },
     {
       "id": "OPT-028",
@@ -822,22 +824,27 @@
     },
     {
       "id": "OPT-044",
-      "title": "RESEARCH: Reverse-engineer graduated tokens for success patterns",
-      "description": "As a researcher, I want to learn from ALL graduated tokens, not just our signals",
+      "title": "RESEARCH: Scrape external data and analyze success patterns",
+      "description": "As a researcher, I want to learn from successful Solana tokens, not wait for our own signals (we're posting ZERO at threshold=75)",
       "acceptanceCriteria": [
-        "Scrape pump.fun API: all tokens that graduated bonding curve in last 30 days",
-        "For each graduated token, fetch full history: price, volume, holder growth, KOL buys during bonding",
-        "Classify WINNERS (10x+ post-grad) vs LOSERS (rug or <2x)",
-        "Extract features: KOL count during bonding, holder velocity, volume pattern, liquidity additions, narrative",
-        "Build success pattern database: 'Tokens with 3+ elite KOL buys during bonding + holder velocity >50/hr = 78% graduation success rate'",
-        "Add graduated_token_analyzer.py that scores new signals based on grad patterns",
-        "Monitor for 48 hours",
-        "Keep if: win_rate improves >12% by applying grad token learnings"
+        "Run ralph/scrape_external_data.py to fetch trending tokens from DexScreener (FREE API)",
+        "Filter for winners: 200%+ gain in 24h (3x minimum)",
+        "Check which of our tracked KOLs bought them (Helius API, ~2 credits per token)",
+        "Discover new potential KOLs: wallets that bought 2+ winners",
+        "Analyze patterns: KOL count vs outcome, narrative vs outcome, etc.",
+        "Output findings to ralph/external_data.json",
+        "Create analysis report showing: KOL performance, discovered wallets, winning patterns",
+        "Update conviction_engine.py based on findings (increase weight for proven patterns)",
+        "Add high-performing discovered wallets to curated_wallets.py",
+        "Monitor for 48 hours after applying changes",
+        "Keep if: conviction scores improve OR new KOLs generate winning signals"
       ],
-      "priority": 1,
+      "priority": 0,
       "passes": false,
-      "notes": "USER INSIGHT: Learn from the entire pump.fun ecosystem, not just our small sample size. Massive data advantage.",
-      "baseline_metrics": {}
+      "notes": "EXECUTE NEXT - User requested (2026-01-24). CRITICAL: Can't learn from our signals when posting zero! Use external data from DexScreener + Helius. Script ready at ralph/scrape_external_data.py. Cost: ~200 Helius credits one-time. See ralph/SCRAPER_README.md for details.",
+      "baseline_metrics": {},
+      "tool_available": "ralph/scrape_external_data.py",
+      "documentation": "ralph/SCRAPER_README.md"
     },
     {
       "id": "OPT-045",
