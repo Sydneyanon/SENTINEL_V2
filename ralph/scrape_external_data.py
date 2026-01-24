@@ -581,30 +581,39 @@ class ExternalDataScraper:
         Returns:
             Tuple of (token_results, discovered_kols)
         """
-        logger.info(f"🚀 Analyzing graduated pump.fun tokens from Moralis API...")
+        logger.info(f"🚀 Analyzing tokens - trying Moralis first, DexScreener fallback...")
 
-        # Fetch graduated tokens from Moralis (FREE with dedicated pump.fun endpoint)
+        # Try Moralis first (dedicated pump.fun endpoint)
         tokens = await self.fetch_graduated_tokens_moralis(limit=max_tokens)
 
         logger.info(f"📊 Moralis API returned {len(tokens)} graduated tokens")
 
-        # Filter for successful graduated tokens based on market cap
-        # Moralis gives us tokens that already graduated ($60k+ bonding curve completion)
-        # Filter by current market cap to find the real winners
-        min_mcap = 100000  # $100k+ = moderate success (1.6x from graduation)
-        if min_gain_percent >= 200:  # If looking for big winners
-            min_mcap = 500000  # $500k+ = major success (8x from graduation)
+        # Fallback to DexScreener if Moralis fails
+        if len(tokens) == 0:
+            logger.warning(f"   ⚠️ Moralis returned 0 tokens, falling back to DexScreener...")
+            tokens = await self.fetch_trending_tokens_dexscreener(min_volume_24h=10000)
+            logger.info(f"📊 DexScreener API returned {len(tokens)} trending tokens")
 
+        # Filter tokens based on source (Moralis uses MCAP, DexScreener uses gain %)
         winners = []
+
         for token in tokens:
-            mcap = token.get('market_cap', 0)
+            # Check if this is a Moralis token (has market_cap) or DexScreener (has price_change_24h)
+            if 'market_cap' in token and token.get('market_cap', 0) > 0:
+                # Moralis token - filter by market cap
+                mcap = token.get('market_cap', 0)
+                min_mcap = 100000  # $100k+ = moderate success
+                if mcap >= min_mcap:
+                    winners.append(token)
+            elif 'price_change_24h' in token:
+                # DexScreener token - filter by gain %
+                price_change = token.get('price_change_24h', 0)
+                liquidity = token.get('liquidity_usd', 0)
+                min_liquidity = 50000  # $50k minimum
+                if price_change >= min_gain_percent and liquidity >= min_liquidity:
+                    winners.append(token)
 
-            # All graduated tokens are already 1x winners (completed bonding)
-            # Filter by current mcap to find 2x, 5x, 10x+ performers
-            if mcap >= min_mcap:
-                winners.append(token)
-
-        logger.info(f"✅ Found {len(winners)} graduated tokens with MCAP >${min_mcap/1000:.0f}k (out of {len(tokens)} total)")
+        logger.info(f"✅ Found {len(winners)} qualifying tokens (out of {len(tokens)} total)")
 
         # Track which wallets appear in multiple winners (potential new KOLs)
         wallet_appearances = {}  # wallet -> [token_address, ...]
@@ -622,7 +631,13 @@ class ExternalDataScraper:
         # Create aiohttp session for API calls
         async with aiohttp.ClientSession() as session:
             for i, token in enumerate(winners[:tokens_to_analyze]):
-                logger.info(f"📊 Checking {i+1}/{tokens_to_analyze}: {token['symbol']} ({token['price_change_24h']:.0f}% gain)")
+                # Format log based on token source
+                if 'market_cap' in token:
+                    mcap_str = f"${token.get('market_cap', 0)/1000:.0f}k MCAP"
+                else:
+                    mcap_str = f"{token.get('price_change_24h', 0):.0f}% gain"
+
+                logger.info(f"📊 Checking {i+1}/{tokens_to_analyze}: {token['symbol']} ({mcap_str})")
 
                 # 1. Check KOL involvement (~2 credits)
                 kol_data = await self.check_kol_involvement(
@@ -837,13 +852,13 @@ class ExternalDataScraper:
 async def main():
     """Main scraping workflow"""
     # Configurable parameters
-    MIN_GAIN = 100  # 100% = 2x minimum (was 200 for 3x, lowered to find more data)
+    MIN_GAIN = 30  # 30% = 1.3x minimum (lowered from 100% to find data in current market)
     MAX_TOKENS = 1000  # Analyze up to 1000 tokens for comprehensive data
 
-    logger.info("🚀 Starting external data scraper (MORALIS GRADUATED TOKENS)...")
+    logger.info("🚀 Starting external data scraper (HYBRID: Moralis + DexScreener)...")
     logger.info("📋 Configuration:")
-    logger.info(f"   Source: Moralis pump.fun graduated tokens API (FREE tier)")
-    logger.info(f"   Filter: Minimum MCAP $100k+ (moderate/high success)")
+    logger.info(f"   Primary: Moralis pump.fun graduated tokens API (if available)")
+    logger.info(f"   Fallback: DexScreener trending tokens (30%+ gain)")
     logger.info(f"   Max tokens to analyze: {MAX_TOKENS}")
     logger.info(f"   Estimated cost: ~{MAX_TOKENS * 5} Helius credits (0.05% of budget)")
     logger.info("")
