@@ -55,9 +55,13 @@ DISABLE_POLLING_BELOW_THRESHOLD = True  # Only poll tokens >= 50 conviction
 # Signal thresholds based on graduation status
 # REVERTED OPT-024: 75 was TOO HIGH - bot posted 1 signal in 12 hours (2100+ KOL buys tracked!)
 # Analysis: Only 2 signals in 24h with conviction scores hitting exactly 75 and 45
-# NEW: 55 threshold balances quality with volume - need signals to measure performance
+# OPT-001 (2026-01-24 23:45 UTC): Raising 55 → 60 based on database analysis:
+#   - Current WR: 32.8% (19/58) - FAR below 75% target
+#   - Signals <50 conviction: 30.8% WR (16/52)
+#   - Signals 50-59: 50.0% WR (3/6) - BETTER quality at higher thresholds
+#   - Testing 60 to improve win rate while maintaining signal volume
 # Kept strict data quality filters (OPT-023, OPT-036) to prevent rugs
-MIN_CONVICTION_SCORE = 55  # Pre-graduation threshold - Balanced: quality + sufficient volume
+MIN_CONVICTION_SCORE = 60  # Pre-graduation threshold - OPT-001: Quality improvement
 POST_GRAD_THRESHOLD = 60   # Post-graduation threshold - Slightly higher for graduated tokens
 
 # Base score threshold for distribution checks
