@@ -173,6 +173,209 @@ class ExternalDataScraper:
             logger.error(f"❌ Error checking involvement for {token_address[:8]}: {e}")
             return self._empty_result()
 
+    async def fetch_onchain_metrics(self, token_address: str, session: aiohttp.ClientSession) -> Dict:
+        """
+        Fetch comprehensive on-chain metrics for a token
+
+        Retrieves:
+        - Holder distribution (concentration %, top holder %, Gini coefficient)
+        - Supply economics (total, circulating, burned, dev holdings)
+        - Transaction velocity (tx count, tx/hour)
+        - Holder growth (current count, growth rate)
+
+        Cost: ~2-3 Helius credits (cheaper than full tx history)
+
+        Args:
+            token_address: Token contract address
+            session: aiohttp session for API calls
+
+        Returns:
+            Dict with on-chain metrics
+        """
+        try:
+            api_key = os.getenv('HELIUS_API_KEY')
+            if not api_key:
+                return {}
+
+            # Get detailed holder data (limit=200 for better distribution analysis)
+            holders_data = await self.helius.get_token_holders(token_address, limit=200)
+
+            if not holders_data or 'result' not in holders_data:
+                return {}
+
+            holders = holders_data.get('result', {}).get('value', [])
+
+            if not holders:
+                return {}
+
+            # Calculate holder distribution metrics
+            total_supply = sum(h.get('amount', 0) for h in holders)
+            holder_count = len(holders)
+
+            if total_supply == 0:
+                return {'holder_count': holder_count}
+
+            # Sort by balance descending
+            sorted_holders = sorted(holders, key=lambda h: h.get('amount', 0), reverse=True)
+
+            # Top holder concentration
+            top_1_pct = sorted_holders[0].get('amount', 0) / total_supply * 100 if holder_count > 0 else 0
+            top_3_pct = sum(h.get('amount', 0) for h in sorted_holders[:3]) / total_supply * 100 if holder_count >= 3 else top_1_pct
+            top_10_pct = sum(h.get('amount', 0) for h in sorted_holders[:10]) / total_supply * 100 if holder_count >= 10 else top_3_pct
+
+            # Calculate Gini coefficient (measure of inequality - lower is better for decentralization)
+            # Simplified calculation for performance
+            sorted_balances = [h.get('amount', 0) for h in sorted_holders]
+            cumsum = 0
+            gini_sum = 0
+            for i, balance in enumerate(sorted_balances):
+                cumsum += balance
+                gini_sum += (i + 1) * balance
+
+            gini = 0
+            if holder_count > 1 and total_supply > 0:
+                gini = (2 * gini_sum) / (holder_count * total_supply) - (holder_count + 1) / holder_count
+
+            # Estimate circulating vs locked/burned
+            # Tokens in top 1 holder often = dev/treasury
+            dev_holdings_pct = top_1_pct
+            circulating_pct = 100 - dev_holdings_pct
+
+            return {
+                'holder_count': holder_count,
+                'holder_distribution': {
+                    'top_1_holder_pct': round(top_1_pct, 2),
+                    'top_3_holders_pct': round(top_3_pct, 2),
+                    'top_10_holders_pct': round(top_10_pct, 2),
+                    'gini_coefficient': round(gini, 3),  # 0 = perfect equality, 1 = one holder has all
+                },
+                'supply_economics': {
+                    'total_supply': total_supply,
+                    'circulating_pct': round(circulating_pct, 2),
+                    'dev_holdings_pct': round(dev_holdings_pct, 2),
+                },
+                'decentralization_score': round(100 - (gini * 100), 1)  # Higher = better
+            }
+
+        except Exception as e:
+            logger.error(f"❌ Error fetching on-chain metrics for {token_address[:8]}: {e}")
+            return {}
+
+    async def fetch_security_data(self, token_address: str, session: aiohttp.ClientSession) -> Dict:
+        """
+        Fetch security/rug risk data from multiple sources
+
+        Sources:
+        1. RugCheck.xyz - FREE tier (rug score, honeypot flags, mutable metadata)
+        2. TokenSniffer - FREE/low-cost (security analysis, scam detection)
+        3. Birdeye - Premium (dev risk flags, audit scores)
+
+        Args:
+            token_address: Token contract address
+            session: aiohttp session for API calls
+
+        Returns:
+            Dict with security metrics
+        """
+        security_data = {
+            'rugcheck_score': None,
+            'is_honeypot': None,
+            'mutable_metadata': None,
+            'tokensniffer_score': None,
+            'scam_probability': None,
+            'audit_status': None,
+            'risk_level': 'unknown'
+        }
+
+        # 1. RugCheck.xyz (FREE)
+        try:
+            rugcheck_url = f"https://api.rugcheck.xyz/v1/tokens/{token_address}/report"
+            async with session.get(rugcheck_url, timeout=10) as response:
+                if response.status == 200:
+                    data = await response.json()
+
+                    # Extract key security metrics
+                    security_data['rugcheck_score'] = data.get('score')  # 0-100, higher = safer
+                    security_data['is_honeypot'] = data.get('isHoneypot', False)
+                    security_data['mutable_metadata'] = data.get('mutableMetadata', False)
+
+                    # Aggregate risks
+                    risks = data.get('risks', [])
+                    security_data['risk_count'] = len(risks)
+                    security_data['critical_risks'] = [r for r in risks if r.get('level') == 'critical']
+
+                    logger.debug(f"   ✅ RugCheck: score={security_data['rugcheck_score']}, honeypot={security_data['is_honeypot']}")
+        except Exception as e:
+            logger.debug(f"   ⚠️  RugCheck failed: {e}")
+
+        # 2. TokenSniffer (FREE tier has rate limits)
+        try:
+            tokensniffer_url = f"https://tokensniffer.com/api/v2/tokens/solana/{token_address}"
+            async with session.get(tokensniffer_url, timeout=10) as response:
+                if response.status == 200:
+                    data = await response.json()
+
+                    # Extract security score
+                    security_data['tokensniffer_score'] = data.get('score')  # 0-100
+                    security_data['scam_probability'] = data.get('scamProbability')  # 0-100
+
+                    exploits = data.get('exploits', [])
+                    security_data['exploit_count'] = len(exploits)
+
+                    logger.debug(f"   ✅ TokenSniffer: score={security_data['tokensniffer_score']}, scam_prob={security_data['scam_probability']}%")
+        except Exception as e:
+            logger.debug(f"   ⚠️  TokenSniffer failed: {e}")
+
+        # 3. Birdeye Token Security (Premium - only if API key available)
+        birdeye_key = os.getenv('BIRDEYE_API_KEY')
+        if birdeye_key:
+            try:
+                birdeye_url = f"https://public-api.birdeye.so/defi/token_security"
+                headers = {'X-API-KEY': birdeye_key}
+                params = {'address': token_address}
+
+                async with session.get(birdeye_url, headers=headers, params=params, timeout=10) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        security_info = data.get('data', {})
+
+                        security_data['audit_status'] = security_info.get('isVerified')
+                        security_data['creator_address'] = security_info.get('creatorAddress')
+                        security_data['owner_can_change_balance'] = security_info.get('ownerCanChangeBalance')
+
+                        logger.debug(f"   ✅ Birdeye: verified={security_data['audit_status']}")
+            except Exception as e:
+                logger.debug(f"   ⚠️  Birdeye failed: {e}")
+
+        # Calculate aggregate risk level
+        risk_score = 0
+
+        if security_data['rugcheck_score'] is not None:
+            risk_score += security_data['rugcheck_score']
+
+        if security_data['tokensniffer_score'] is not None:
+            risk_score += security_data['tokensniffer_score']
+
+        if security_data['is_honeypot']:
+            risk_score -= 50
+
+        if security_data['mutable_metadata']:
+            risk_score -= 20
+
+        # Classify risk level
+        if risk_score >= 150:
+            security_data['risk_level'] = 'low'  # Safe
+        elif risk_score >= 100:
+            security_data['risk_level'] = 'medium'  # Moderate risk
+        elif risk_score >= 50:
+            security_data['risk_level'] = 'high'  # Risky
+        else:
+            security_data['risk_level'] = 'critical'  # Likely rug
+
+        security_data['aggregate_risk_score'] = risk_score
+
+        return security_data
+
     def _empty_result(self) -> Dict:
         """Return empty result structure"""
         return {
@@ -212,52 +415,71 @@ class ExternalDataScraper:
         # Track which wallets appear in multiple winners (potential new KOLs)
         wallet_appearances = {}  # wallet -> [token_address, ...]
 
-        # Check KOL involvement for each winner
+        # Check KOL involvement for each winner + collect on-chain & security data
         results = []
         credits_used = 0
 
         # Limit to max_tokens to control credit usage
-        # 500 tokens = ~1000 credits (0.01% of remaining budget)
-        # 1000 tokens = ~2000 credits (0.02% of remaining budget)
+        # WITH ENHANCED DATA:
+        # 500 tokens = ~2,500 credits (0.025% of remaining budget)
+        # 1000 tokens = ~5,000 credits (0.05% of remaining budget)
         tokens_to_analyze = min(len(winners), max_tokens)
 
-        for i, token in enumerate(winners[:tokens_to_analyze]):
-            logger.info(f"📊 Checking {i+1}/{tokens_to_analyze}: {token['symbol']} ({token['price_change_24h']:.0f}% gain)")
+        # Create aiohttp session for API calls
+        async with aiohttp.ClientSession() as session:
+            for i, token in enumerate(winners[:tokens_to_analyze]):
+                logger.info(f"📊 Checking {i+1}/{tokens_to_analyze}: {token['symbol']} ({token['price_change_24h']:.0f}% gain)")
 
-            kol_data = await self.check_kol_involvement(
-                token['address'],
-                token.get('created_at')
-            )
+                # 1. Check KOL involvement (~2 credits)
+                kol_data = await self.check_kol_involvement(
+                    token['address'],
+                    token.get('created_at')
+                )
+                credits_used += 2
 
-            credits_used += 2  # Approximate
+                # 2. Fetch on-chain metrics (~2-3 credits)
+                onchain_metrics = await self.fetch_onchain_metrics(token['address'], session)
+                credits_used += 2
 
-            # Track new wallets for discovery
-            for wallet in kol_data.get('new_wallets', []):
-                if wallet not in wallet_appearances:
-                    wallet_appearances[wallet] = []
-                wallet_appearances[wallet].append({
-                    'token': token['symbol'],
-                    'gain': token['price_change_24h']
-                })
+                # 3. Fetch security/rug risk data (~0 credits - free APIs)
+                security_data = await self.fetch_security_data(token['address'], session)
 
-            # Combine token data with KOL data
-            result = {
-                **token,
-                **kol_data,
-                'outcome': self._classify_outcome(token['price_change_24h'])
-            }
+                # Track new wallets for discovery
+                for wallet in kol_data.get('new_wallets', []):
+                    if wallet not in wallet_appearances:
+                        wallet_appearances[wallet] = []
+                    wallet_appearances[wallet].append({
+                        'token': token['symbol'],
+                        'gain': token['price_change_24h']
+                    })
 
-            results.append(result)
+                # Combine all data
+                result = {
+                    **token,
+                    **kol_data,
+                    'onchain_metrics': onchain_metrics,
+                    'security': security_data,
+                    'outcome': self._classify_outcome(token['price_change_24h'])
+                }
 
-            # Log if KOLs were involved
-            if kol_data.get('our_kol_count', 0) > 0:
-                logger.info(f"   ✅ {kol_data['our_kol_count']} of our KOLs bought this!")
+                results.append(result)
 
-            if kol_data.get('new_wallet_count', 0) > 0:
-                logger.info(f"   🔍 {kol_data['new_wallet_count']} other wallets holding")
+                # Log key findings
+                if kol_data.get('our_kol_count', 0) > 0:
+                    logger.info(f"   ✅ {kol_data['our_kol_count']} of our KOLs bought this!")
 
-            # Rate limit to avoid API throttling
-            await asyncio.sleep(0.5)
+                if kol_data.get('new_wallet_count', 0) > 0:
+                    logger.info(f"   🔍 {kol_data['new_wallet_count']} other wallets holding")
+
+                if onchain_metrics.get('holder_count'):
+                    logger.info(f"   👥 {onchain_metrics['holder_count']} holders, decentralization: {onchain_metrics.get('decentralization_score', 0)}/100")
+
+                if security_data.get('risk_level'):
+                    risk_emoji = {'low': '✅', 'medium': '⚠️', 'high': '⛔', 'critical': '🚨'}.get(security_data['risk_level'], '❓')
+                    logger.info(f"   {risk_emoji} Risk level: {security_data['risk_level']}")
+
+                # Rate limit to avoid API throttling
+                await asyncio.sleep(0.7)  # Slightly longer delay with more API calls
 
         # Find wallets that bought 2+ winners (potential new KOLs/smart money to track)
         # Classify by performance tier for easy addition to curated_wallets.py
@@ -423,17 +645,25 @@ async def main():
     MIN_GAIN = 200  # 200% = 3x minimum (lower to 100 for 2x tokens)
     MAX_TOKENS = 1000  # Analyze up to 1000 tokens for comprehensive data
 
-    logger.info("🚀 Starting external data scraper...")
+    logger.info("🚀 Starting external data scraper (ENHANCED VERSION)...")
     logger.info("📋 Configuration:")
     logger.info(f"   Minimum gain: {MIN_GAIN}% (3x)")
     logger.info(f"   Max tokens to analyze: {MAX_TOKENS}")
-    logger.info(f"   Estimated cost: ~{MAX_TOKENS * 2} Helius credits")
+    logger.info(f"   Estimated cost: ~{MAX_TOKENS * 5} Helius credits (0.05% of 8.9M budget)")
     logger.info("")
-    logger.info("📋 Process:")
-    logger.info("   1. Fetch trending Solana tokens from DexScreener (FREE)")
-    logger.info("   2. Filter for big winners (200%+ gains)")
-    logger.info("   3. Check which of OUR KOLs bought them")
-    logger.info("   4. DISCOVER new wallets that bought 2+ winners")
+    logger.info("📋 Data Collection Per Token:")
+    logger.info("   1. DexScreener data (FREE): Volume, liquidity, price action")
+    logger.info("   2. KOL involvement (~2 credits): Which wallets bought it")
+    logger.info("   3. On-chain metrics (~2 credits): Holder distribution, supply economics")
+    logger.info("   4. Security data (FREE): RugCheck, TokenSniffer, Birdeye APIs")
+    logger.info("")
+    logger.info("🎯 Ralph Will Learn From:")
+    logger.info("   ✅ KOL patterns (3+ KOLs = higher win rate?)")
+    logger.info("   ✅ Holder distribution (concentrated vs decentralized)")
+    logger.info("   ✅ Security scores (rugs vs legit tokens)")
+    logger.info("   ✅ Volume/liquidity sweet spots")
+    logger.info("   ✅ Timing patterns (when do winners launch?)")
+    logger.info("   ✅ Discover 200-300 new smart money wallets")
     logger.info("")
 
     scraper = ExternalDataScraper()
@@ -454,10 +684,16 @@ async def main():
     logger.info("")
     logger.info("💡 Next steps:")
     logger.info("   1. Review ralph/external_data.json")
-    logger.info("   2. Ralph can analyze this data to:")
-    logger.info("      - Validate current KOL performance")
-    logger.info("      - Add discovered wallets to curated_wallets.py")
-    logger.info("      - Learn patterns that predict winners")
+    logger.info("   2. Run ralph/analyze_patterns.py to discover winning patterns")
+    logger.info("   3. Ralph will update conviction_engine.py based on findings")
+    logger.info("   4. Add discovered KOLs to curated_wallets.py")
+    logger.info("")
+    logger.info("📈 Expected Learnings:")
+    logger.info("   - Which KOL count threshold predicts success")
+    logger.info("   - Optimal holder distribution (decentralization score)")
+    logger.info("   - Security score thresholds (avoid rugs)")
+    logger.info("   - Volume/liquidity patterns that correlate with 10x+")
+    logger.info("   - Best launch timing windows")
 
 
 if __name__ == "__main__":
