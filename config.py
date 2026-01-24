@@ -212,7 +212,7 @@ MIN_LIQUIDITY = 5000        # Minimum liquidity in USD
 # =============================================================================
 
 RUG_DETECTION = {
-    'enabled': True,
+    'enabled': False,  # Temporarily disabled - RugCheck API returning 400 errors (rate limit/credits)
     
     # Bundle Detection (coordinated buys in same block)
     'bundles': {
