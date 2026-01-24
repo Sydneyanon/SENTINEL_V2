@@ -630,3 +630,197 @@ All three optimizations marked as `passes: true` in prd.json:
 Proceed with **OPT-000** next - it's the highest priority and requires querying historical signal data to identify and blacklist losing patterns. This is the foundation for cutting losses aggressively.
 
 ---
+
+## 2026-01-24 01:00 UTC - OPT-024: CONVICTION FLOOR - Raise Minimum to 75
+
+### Problem Identified
+**QUALITY OVER QUANTITY NEEDED:** Current threshold (45) allows marginal signals through
+- Current: MIN_CONVICTION_SCORE = 45, POST_GRAD_THRESHOLD = 45
+- Result: Too many medium-quality signals, diluting win rate
+- Need: Dramatic quality improvement through aggressive filtering
+- Goal: 75%+ win rate target (AGGRESSIVE MODE)
+
+### Strategy: Triple Layer Defense
+
+**Already deployed (24h ago):**
+1. OPT-036: Data quality checks (no bad data)
+2. OPT-023: Emergency stop filters (no obvious rugs)
+
+**Now adding:**
+3. **OPT-024: High conviction threshold (only top signals)** ✅
+
+**Result:** Multi-layer filtering for maximum quality
+
+### Solution Implemented (OPT-024)
+
+#### 1. Conviction Threshold Increase ✅
+```python
+# Before (DIAGNOSTIC MODE):
+MIN_CONVICTION_SCORE = 45  # Pre-graduation threshold
+POST_GRAD_THRESHOLD = 45   # Post-graduation threshold
+
+# After (AGGRESSIVE MODE):
+MIN_CONVICTION_SCORE = 75  # +67% increase
+POST_GRAD_THRESHOLD = 75   # +67% increase
+```
+
+**Rationale:**
+- 45 threshold: Allows signals with minimal positive factors
+- 75 threshold: Requires strong combination of multiple factors
+- Example signals that pass 75:
+  - Multiple elite KOLs + hot narrative + good holders
+  - Single god-tier KOL + hot narrative + volume surge
+  - Elite KOL + fresh narrative + strong holder pattern + volume
+
+### Changes Made
+
+**config.py (lines 56-57):**
+- MIN_CONVICTION_SCORE: 45 → 75
+- POST_GRAD_THRESHOLD: 45 → 75
+- Added comments explaining AGGRESSIVE MODE strategy
+- Trade-off: Quality over quantity (fewer signals, much higher quality)
+
+### Expected Impact
+
+**Signal Count:**
+- Current: ~X signals per hour at threshold 45
+- Expected: ~50% drop (acceptable for quality improvement)
+- Minimum acceptable: 2 signals/hour (if <2/hour, too restrictive)
+
+**Signal Quality:**
+- Current: Mixed quality, unknown win rate
+- Expected: Only top-tier combinations pass
+- Target win rate: >60% minimum, ideally >70%+
+- Target avg ROI: >3x (25%+ improvement)
+
+**User Experience:**
+- Fewer notifications (less noise)
+- Every signal is high conviction (trustworthy)
+- Higher expected success rate per signal
+- Quality over quantity approach
+
+### Deployment Status
+
+- ✅ Code committed: commit 2cbc9a7
+- ✅ Pushed to branch: ralph/optimize-v1
+- ✅ PR created: https://github.com/Sydneyanon/SENTINEL_V2/pull/75
+- ⏳ **NEXT STEP: User must merge PR #75 to trigger Railway deployment**
+  - Merge PR → Railway auto-deploys (~2 min)
+  - Monitor logs for 3 hours minimum
+  - Analyze & decide
+
+### Acceptance Criteria Status
+
+✅ Changed MIN_CONVICTION_SCORE to 75
+⏳ **Monitor for 3 hours minimum** (after deploy)
+⏳ Measure: signal_count, win_rate, avg_ROI
+⏳ Decision: Keep or revert based on metrics
+
+### Decision Criteria (After 3h Monitoring)
+
+**KEEP if ANY of these:**
+- Win rate > 60% AND avg_ROI > 3x
+- Win rate > 70% (regardless of ROI)
+- Signal count 2-10/hour with strong quality
+
+**REVERT if ALL of these:**
+- Signal count < 2 per hour (too restrictive)
+- Win rate did not improve meaningfully
+- Acceptance criteria failed
+
+**BIAS TOWARD KEEPING:**
+- Quality over quantity is the AGGRESSIVE MODE goal
+- Better to post 5 great signals than 10 mixed signals
+- 75% win rate target requires aggressive filtering
+
+### Risk Assessment
+
+**Low Risk:**
+- Simple config change (2 lines)
+- Easy to revert if too restrictive
+- No code logic changes
+- Can test in production safely
+
+**Reversibility:**
+- If too strict: revert commit, push, redeploy (5 minutes)
+- If just right: keep and move to next optimization
+- Can fine-tune later if needed (try 70 or 80)
+
+**Expected Behavior:**
+- Signals with conviction 45-74: Now blocked (logged in Railway)
+- Signals with conviction 75+: Posted as before
+- Emergency stops (OPT-023) still active (blocks first)
+- Data quality checks (OPT-036) still active (blocks bad data)
+
+### Monitoring Instructions
+
+**What to check in Railway logs:**
+
+1. **Threshold check logs:**
+   ```
+   🔍 THRESHOLD CHECK for {symbol}:
+      new_score=XX, threshold=75, signal_sent=false
+      Passes: true/false
+   ```
+   - Verify threshold shows 75 (not 45)
+   - See how many signals are blocked vs passing
+
+2. **Signal posting:**
+   ```
+   ✅ PASSES threshold check!
+   ✅ Has real data - SENDING SIGNAL
+   📤 Posted Prometheus signal
+   ```
+   - Count: How many signals posted per hour?
+   - Quality: Are they all high conviction (75+)?
+
+3. **Blocked signals:**
+   - Check logs for signals that scored 45-74 (now blocked)
+   - Verify they would have been marginal/lower quality
+   - Count how many blocked vs posted
+
+### Next Steps
+
+1. **User/Operator:** Merge PR #75 on GitHub
+2. Railway will auto-deploy (~2 min)
+3. Monitor Railway logs for 3 hours minimum
+4. Track metrics:
+   - Signal count per hour
+   - Conviction scores of posted signals
+   - Quality of signals (subjective assessment)
+5. After 3 hours:
+   - If 2-10 signals/hour with strong quality → KEEP
+   - If <2 signals/hour → Consider reverting (too strict)
+   - If >10 signals/hour → Check implementation
+6. Update PRD: set OPT-024 `passes: true` if successful
+
+### Learnings
+
+**Aggressive Filtering Philosophy:**
+- Start strict, relax if needed (easier than starting loose)
+- 75 is aggressive but aligns with 75% win rate goal
+- Quality signals = user trust = long-term success
+
+**Multi-Layer Defense:**
+- Each layer catches different issues:
+  - Data quality: Bad data
+  - Emergency stops: Obvious rugs
+  - High threshold: Marginal signals
+- Compound effect is powerful
+
+**Trade-offs:**
+- Fewer signals = less frequent posts
+- But: Higher quality = better user experience
+- And: Higher win rate = more trust and engagement
+
+### Philosophy: Better to Miss Than to Post Badly
+
+With threshold 75, we're saying:
+- Only post signals we're highly confident in
+- Miss some winners rather than post losers
+- Build trust through quality, not quantity
+- Aim for 75% win rate, not high volume
+
+This aligns perfectly with AGGRESSIVE MODE goals.
+
+---

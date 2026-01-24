@@ -456,8 +456,13 @@
       ],
       "priority": 2,
       "passes": false,
-      "notes": "AGGRESSIVE: Quality over quantity. Aim for 75%+ win rate with high conviction only.",
-      "baseline_metrics": {}
+      "notes": "IMPLEMENTED - Waiting for deployment. Commit: 2cbc9a7. PR: https://github.com/Sydneyanon/SENTINEL_V2/pull/75. Raised threshold from 45 to 75 (+67%). AGGRESSIVE MODE: Quality over quantity approach. Expected ~50% drop in signal count but much higher quality.",
+      "baseline_metrics": {},
+      "implementation_status": "deployed_pending_monitoring",
+      "deployment_commit": "2cbc9a7",
+      "monitoring_start": null,
+      "monitoring_duration_hours": 3,
+      "pr_url": "https://github.com/Sydneyanon/SENTINEL_V2/pull/75"
     },
     {
       "id": "OPT-025",
