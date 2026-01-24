@@ -65,6 +65,8 @@ class ExternalDataScraper:
                     data = await response.json()
                     pairs = data.get('pairs', [])
 
+                    logger.info(f"📊 DexScreener returned {len(pairs)} total pairs")
+
                     # Filter for Solana, pump.fun, and significant volume
                     solana_tokens = []
                     for pair in pairs:
@@ -100,6 +102,12 @@ class ExternalDataScraper:
                         })
 
                     logger.info(f"✅ Found {len(solana_tokens)} Solana tokens with >${min_volume_24h} volume")
+
+                    # Debug: Show price changes to understand why no 100%+ gains found
+                    if len(solana_tokens) > 0:
+                        gains = [t.get('price_change_24h', 0) for t in solana_tokens]
+                        logger.info(f"📈 Top 5 gains: {sorted(gains, reverse=True)[:5]}")
+
                     return solana_tokens
 
             except Exception as e:
@@ -402,6 +410,8 @@ class ExternalDataScraper:
         # Get trending tokens
         tokens = await self.fetch_trending_tokens_dexscreener(min_volume_24h=50000)
 
+        logger.info(f"📊 DexScreener returned {len(tokens)} tokens total")
+
         # Filter for big winners
         winners = []
         for token in tokens:
@@ -410,7 +420,7 @@ class ExternalDataScraper:
             if gain_24h >= min_gain_percent:
                 winners.append(token)
 
-        logger.info(f"✅ Found {len(winners)} tokens that gained >{min_gain_percent}%")
+        logger.info(f"✅ Found {len(winners)} tokens that gained >{min_gain_percent}% (out of {len(tokens)} total)")
 
         # Track which wallets appear in multiple winners (potential new KOLs)
         wallet_appearances = {}  # wallet -> [token_address, ...]
@@ -564,8 +574,9 @@ class ExternalDataScraper:
             print("="*70)
             print("\n⚠️  No tokens found. This might be due to:")
             print("   - No internet access")
-            print("   - No tokens met the criteria (200%+ gain)")
+            print("   - No tokens met the gain criteria")
             print("   - DexScreener API issues")
+            print("   - Check logs above for debug info")
             print("\n" + "="*70)
             return
 
