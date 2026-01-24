@@ -41,6 +41,78 @@ class ExternalDataScraper:
 
         logger.info(f"📋 Loaded {len(self.our_kol_wallets)} KOL wallets to track")
 
+    async def fetch_graduated_tokens_pumpfun(self, limit: int = 100) -> List[Dict]:
+        """
+        Fetch recently graduated tokens from pump.fun
+        These are tokens that successfully bonded and moved to Raydium
+
+        Args:
+            limit: Number of graduated tokens to fetch
+
+        Returns:
+            List of graduated token data
+        """
+        logger.info("🔍 Fetching graduated tokens from pump.fun...")
+
+        # pump.fun graduated tokens endpoint
+        url = f"https://client-api-2-74b1891ee9f9.herokuapp.com/coins?offset=0&limit={limit}&sort=last_trade_timestamp&order=DESC&includeNsfw=false"
+
+        async with aiohttp.ClientSession() as session:
+            try:
+                async with session.get(url, timeout=30) as response:
+                    if response.status != 200:
+                        logger.error(f"❌ pump.fun API error: {response.status}")
+                        text = await response.text()
+                        logger.error(f"Response: {text[:200]}")
+                        return []
+
+                    tokens = await response.json()
+
+                    logger.info(f"📊 pump.fun returned {len(tokens)} recent tokens")
+
+                    # Convert to our format and filter for graduated tokens
+                    graduated_tokens = []
+                    for token in tokens:
+                        # Only include graduated tokens (raydium_pool exists)
+                        if not token.get('raydium_pool'):
+                            continue
+
+                        # Calculate rough price change (compare current to creation)
+                        market_cap = float(token.get('market_cap', 0))
+                        # Graduated tokens start at ~$60k mcap, so calculate gain
+                        if market_cap > 60000:
+                            price_change_24h = ((market_cap - 60000) / 60000) * 100
+                        else:
+                            price_change_24h = 0
+
+                        graduated_tokens.append({
+                            'address': token.get('mint'),
+                            'symbol': token.get('symbol', 'UNKNOWN'),
+                            'name': token.get('name', 'Unknown'),
+                            'price_usd': float(token.get('usd_market_cap', 0)) / 1_000_000_000 if token.get('total_supply') else 0,
+                            'volume_24h': 0,  # Not available from this endpoint
+                            'liquidity_usd': market_cap,
+                            'price_change_24h': price_change_24h,
+                            'price_change_6h': 0,
+                            'price_change_1h': 0,
+                            'created_at': token.get('created_timestamp'),
+                            'dex_url': f"https://pump.fun/{token.get('mint')}"
+                        })
+
+                    logger.info(f"✅ Found {len(graduated_tokens)} graduated tokens")
+
+                    if len(graduated_tokens) > 0:
+                        mcaps = [t.get('liquidity_usd', 0) for t in graduated_tokens]
+                        logger.info(f"📈 Top 5 market caps: {sorted(mcaps, reverse=True)[:5]}")
+
+                    return graduated_tokens
+
+            except Exception as e:
+                logger.error(f"❌ Error fetching from pump.fun: {e}")
+                import traceback
+                logger.error(traceback.format_exc())
+                return []
+
     async def fetch_trending_tokens_dexscreener(self, min_volume_24h: int = 50000) -> List[Dict]:
         """
         Fetch trending Solana tokens from DexScreener (FREE API)
@@ -53,7 +125,8 @@ class ExternalDataScraper:
         """
         logger.info("🔍 Fetching trending tokens from DexScreener...")
 
-        url = "https://api.dexscreener.com/latest/dex/search/?q=SOL"
+        # Use the tokens endpoint for Solana - more reliable than search
+        url = "https://api.dexscreener.com/latest/dex/tokens/So11111111111111111111111111111111111111112"
 
         async with aiohttp.ClientSession() as session:
             try:
@@ -64,6 +137,8 @@ class ExternalDataScraper:
 
                     data = await response.json()
                     pairs = data.get('pairs', [])
+
+                    logger.info(f"📊 DexScreener returned {len(pairs)} total pairs")
 
                     # Filter for Solana, pump.fun, and significant volume
                     solana_tokens = []
@@ -100,6 +175,12 @@ class ExternalDataScraper:
                         })
 
                     logger.info(f"✅ Found {len(solana_tokens)} Solana tokens with >${min_volume_24h} volume")
+
+                    # Debug: Show price changes to understand why no 100%+ gains found
+                    if len(solana_tokens) > 0:
+                        gains = [t.get('price_change_24h', 0) for t in solana_tokens]
+                        logger.info(f"📈 Top 5 gains: {sorted(gains, reverse=True)[:5]}")
+
                     return solana_tokens
 
             except Exception as e:
@@ -397,20 +478,26 @@ class ExternalDataScraper:
         Returns:
             Tuple of (token_results, discovered_kols)
         """
-        logger.info(f"🚀 Analyzing tokens that gained >{min_gain_percent}% in 24h...")
+        logger.info(f"🚀 Analyzing graduated pump.fun tokens...")
 
-        # Get trending tokens
-        tokens = await self.fetch_trending_tokens_dexscreener(min_volume_24h=50000)
+        # Fetch recently graduated tokens from pump.fun
+        tokens = await self.fetch_graduated_tokens_pumpfun(limit=500)
 
-        # Filter for big winners
+        logger.info(f"📊 pump.fun API returned {len(tokens)} graduated tokens")
+
+        # For graduated tokens, filter by market cap instead of gain %
+        # Graduated = already successful (bonded $60k+)
+        # Filter for tokens with mcap > $100k (moderate success) or > $500k (big winners)
+        min_mcap = 100000 if min_gain_percent <= 100 else 500000
+
         winners = []
         for token in tokens:
-            gain_24h = token.get('price_change_24h', 0)
+            mcap = token.get('liquidity_usd', 0)
 
-            if gain_24h >= min_gain_percent:
+            if mcap >= min_mcap:
                 winners.append(token)
 
-        logger.info(f"✅ Found {len(winners)} tokens that gained >{min_gain_percent}%")
+        logger.info(f"✅ Found {len(winners)} graduated tokens with mcap >${min_mcap/1000}k (out of {len(tokens)} total)")
 
         # Track which wallets appear in multiple winners (potential new KOLs)
         wallet_appearances = {}  # wallet -> [token_address, ...]
@@ -564,8 +651,9 @@ class ExternalDataScraper:
             print("="*70)
             print("\n⚠️  No tokens found. This might be due to:")
             print("   - No internet access")
-            print("   - No tokens met the criteria (200%+ gain)")
+            print("   - No tokens met the gain criteria")
             print("   - DexScreener API issues")
+            print("   - Check logs above for debug info")
             print("\n" + "="*70)
             return
 
@@ -642,17 +730,18 @@ class ExternalDataScraper:
 async def main():
     """Main scraping workflow"""
     # Configurable parameters
-    MIN_GAIN = 200  # 200% = 3x minimum (lower to 100 for 2x tokens)
+    MIN_GAIN = 100  # 100% = 2x minimum (was 200 for 3x, lowered to find more data)
     MAX_TOKENS = 1000  # Analyze up to 1000 tokens for comprehensive data
 
-    logger.info("🚀 Starting external data scraper (ENHANCED VERSION)...")
+    logger.info("🚀 Starting external data scraper (pump.fun GRADUATED TOKENS)...")
     logger.info("📋 Configuration:")
-    logger.info(f"   Minimum gain: {MIN_GAIN}% (3x)")
+    logger.info(f"   Source: pump.fun graduated tokens (bonded successfully)")
+    logger.info(f"   Minimum market cap: $100k+ (moderate success)")
     logger.info(f"   Max tokens to analyze: {MAX_TOKENS}")
     logger.info(f"   Estimated cost: ~{MAX_TOKENS * 5} Helius credits (0.05% of 8.9M budget)")
     logger.info("")
     logger.info("📋 Data Collection Per Token:")
-    logger.info("   1. DexScreener data (FREE): Volume, liquidity, price action")
+    logger.info("   1. pump.fun data (FREE): Graduated tokens with $100k+ mcap")
     logger.info("   2. KOL involvement (~2 credits): Which wallets bought it")
     logger.info("   3. On-chain metrics (~2 credits): Holder distribution, supply economics")
     logger.info("   4. Security data (FREE): RugCheck, TokenSniffer, Birdeye APIs")
