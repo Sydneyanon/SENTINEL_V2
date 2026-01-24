@@ -841,9 +841,9 @@
       ],
       "priority": 0,
       "passes": false,
-      "notes": "EXECUTE NEXT - User requested (2026-01-24). CRITICAL: Can't learn from our signals when posting zero! Use external data from DexScreener + Helius. Script ready at ralph/scrape_external_data.py. Cost: ~200 Helius credits one-time. See ralph/SCRAPER_README.md for details.",
+      "notes": "EXECUTE NEXT - User requested (2026-01-24). CRITICAL: Can't learn from our signals when posting zero! Use external data from DexScreener + Helius. Tools ready: (1) ralph/scrape_external_data.py collects 1000 tokens, (2) ralph/analyze_patterns.py discovers NEW winning conditions (volume, liquidity, timing, momentum patterns). Cost: ~2000 Helius credits one-time. See ralph/SCRAPER_README.md for details.",
       "baseline_metrics": {},
-      "tool_available": "ralph/scrape_external_data.py",
+      "tools_available": ["ralph/scrape_external_data.py", "ralph/analyze_patterns.py"],
       "documentation": "ralph/SCRAPER_README.md"
     },
     {

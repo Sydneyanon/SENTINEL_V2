@@ -10,6 +10,7 @@ from rug_detector import RugDetector
 from lunarcrush_fetcher import get_lunarcrush_fetcher
 from twitter_fetcher import get_twitter_fetcher
 from credit_tracker import get_credit_tracker  # OPT-055: Track credit usage
+from rugcheck_api import get_rugcheck_api  # RugCheck.xyz API integration
 
 
 class ConvictionEngine:
@@ -52,6 +53,9 @@ class ConvictionEngine:
 
         # OPT-055: Initialize credit tracker
         self.credit_tracker = get_credit_tracker()
+
+        # Initialize RugCheck.xyz API
+        self.rugcheck = get_rugcheck_api()
         
     async def analyze_token(
         self, 
@@ -328,6 +332,60 @@ class ConvictionEngine:
             # Better to miss a winner than post a rug AND save 10 credits
 
             emergency_blocks = []
+            rugcheck_penalty = 0
+            rugcheck_result = None
+
+            # 0. RugCheck.xyz API (FREE) - Check for rug risk
+            if config.RUG_DETECTION.get('enabled', True):
+                logger.info(f"   🔍 Checking RugCheck.xyz API...")
+                rugcheck_result = await self.rugcheck.check_token(token_address, timeout=8)
+
+                if rugcheck_result['success']:
+                    risk_level = rugcheck_result['risk_level']
+                    score = rugcheck_result['score']
+
+                    # Apply penalties/blocks based on risk level
+                    if risk_level == 'critical':
+                        # BLOCK: Honeypot or 2+ critical risks
+                        emergency_blocks.append(f"RugCheck: CRITICAL risk (score: {score})")
+                        if rugcheck_result.get('is_honeypot'):
+                            emergency_blocks.append(f"RugCheck: Honeypot detected")
+                        logger.error(f"   🚨 RugCheck: CRITICAL RISK (score: {score}) - BLOCKING")
+
+                    elif risk_level == 'high':
+                        # Heavy penalty: -30 points (mutable metadata, freezeable, 1 critical risk)
+                        rugcheck_penalty = -30
+                        logger.warning(f"   ⛔ RugCheck: HIGH risk (score: {score}) - {rugcheck_penalty} pts")
+                        if rugcheck_result.get('mutable_metadata'):
+                            logger.warning(f"      ⚠️  Mutable metadata detected")
+                        if rugcheck_result.get('freezeable'):
+                            logger.warning(f"      ⚠️  Freezeable token detected")
+
+                    elif risk_level == 'medium':
+                        # Moderate penalty: -15 points
+                        rugcheck_penalty = -15
+                        logger.warning(f"   ⚠️  RugCheck: MEDIUM risk (score: {score}) - {rugcheck_penalty} pts")
+
+                    elif risk_level == 'low':
+                        # Small penalty: -5 points
+                        rugcheck_penalty = -5
+                        logger.info(f"   ⚠️  RugCheck: LOW risk (score: {score}) - {rugcheck_penalty} pts")
+
+                    else:  # 'good'
+                        # No penalty - clean token
+                        logger.info(f"   ✅ RugCheck: GOOD (score: {score})")
+
+                    # Log critical risks if any
+                    if rugcheck_result.get('critical_risks'):
+                        for risk in rugcheck_result['critical_risks'][:3]:  # Show top 3
+                            logger.warning(f"      🔴 {risk.get('name', 'Unknown risk')}: {risk.get('description', 'N/A')}")
+
+                else:
+                    # RugCheck failed - don't block, just log
+                    logger.debug(f"   ⚠️  RugCheck API unavailable: {rugcheck_result.get('error', 'Unknown error')}")
+
+            # Apply RugCheck penalty to mid_total
+            mid_total += rugcheck_penalty
 
             # 1. Liquidity < $5k (too thin, likely rug)
             liquidity = token_data.get('liquidity', 0)
@@ -432,6 +490,7 @@ class ConvictionEngine:
                     'token_data': token_data,
                     'breakdown': {},
                     'rug_checks': {
+                        'rugcheck_api': rugcheck_result,
                         'bundle': bundle_result,
                         'holder_concentration': holder_result,
                         'emergency_stop': emergency_blocks
@@ -475,11 +534,13 @@ class ConvictionEngine:
                     'social_sentiment': social_score,
                     'twitter_buzz': twitter_score,
                     'telegram_calls': social_confirmation_score,
+                    'rugcheck_penalty': rugcheck_penalty,
                     'holder_penalty': holder_result['penalty'],
                     'kol_bonus': holder_result['kol_bonus'],
                     'total': final_score
                 },
                 'rug_checks': {
+                    'rugcheck_api': rugcheck_result,
                     'bundle': bundle_result,
                     'holder_concentration': holder_result
                 },
