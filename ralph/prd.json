@@ -381,8 +381,21 @@
       ],
       "priority": 1,
       "passes": false,
-      "notes": "AGGRESSIVE: Cut dead weight. Bad KOLs hurt win rate more than good KOLs help.",
-      "baseline_metrics": {}
+      "notes": "DEPLOYED (2026-01-24 17:32 UTC). Blacklisted 5/16 KOLs (31.3%) with win_rate <35%. Wallets: sAdNbe1c (33.3% WR, 66.7% rug), BTf4A2 (25% WR), 4vw54B (33.3%), Bi4rd5 (33.3%), PMJA8U (33.3%). MONITORING for 24 hours. Decision pending.",
+      "baseline_metrics": {
+        "current_win_rate": 35.6,
+        "signals_with_outcomes": 45,
+        "wins": 16,
+        "losses": 21,
+        "rugs": 8,
+        "blacklisted_wallets": 5,
+        "active_kols": 31
+      },
+      "implementation_status": "deployed",
+      "deployment_commit": "2f9ad02",
+      "expected_improvement": "8-15% win rate improvement",
+      "monitoring_start": "2026-01-24T17:32:00Z",
+      "monitoring_end_target": "2026-01-25T17:32:00Z"
     },
     {
       "id": "OPT-020",
