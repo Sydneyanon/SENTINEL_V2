@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from loguru import logger
 import asyncio
 from pumpportal_api import PumpPortalAPI
+from time_optimizer import get_time_optimizer  # OPT-034: Dynamic threshold adjustment
 
 
 @dataclass
@@ -39,6 +40,10 @@ class ActiveTokenTracker:
         self.helius_fetcher = helius_fetcher
         self.pumpportal_api = PumpPortalAPI()  # For fetching token metadata
 
+        # OPT-034: Initialize TimeOptimizer for dynamic threshold adjustment
+        from config import MIN_CONVICTION_SCORE
+        self.time_optimizer = get_time_optimizer(base_threshold=MIN_CONVICTION_SCORE)
+
         # Active tokens being tracked
         self.tracked_tokens: Dict[str, TokenState] = {}
 
@@ -51,6 +56,7 @@ class ActiveTokenTracker:
         self.reanalyses_total = 0
         self.signals_blocked_data_quality = 0  # OPT-036: Track blocked signals
         self.signals_blocked_emergency_stop = 0  # OPT-023: Track emergency stops
+        self.signals_blocked_timing = 0  # OPT-034: Track signals blocked by timing
 
         logger.info("🎯 ActiveTokenTracker initialized")
     
@@ -602,13 +608,18 @@ class ActiveTokenTracker:
                 data_quality_checks['holders'] = holder_count > 0
 
             has_real_data = all(data_quality_checks.values())
-            
+
+            # OPT-034: Get time-adjusted conviction threshold
+            adjusted_threshold, time_reason = self.time_optimizer.get_adjusted_threshold()
+
             # DIAGNOSTIC: Log every threshold check
             logger.info(f"🔍 THRESHOLD CHECK for {symbol}:")
-            logger.info(f"   new_score={new_score}, threshold={MIN_CONVICTION_SCORE}, signal_sent={state.signal_sent}")
-            logger.info(f"   Passes: {new_score >= MIN_CONVICTION_SCORE and not state.signal_sent}")
+            logger.info(f"   new_score={new_score}, base_threshold={MIN_CONVICTION_SCORE}, adjusted_threshold={adjusted_threshold}")
+            logger.info(f"   Time adjustment: {time_reason}")
+            logger.info(f"   signal_sent={state.signal_sent}")
+            logger.info(f"   Passes: {new_score >= adjusted_threshold and not state.signal_sent}")
 
-            if new_score >= MIN_CONVICTION_SCORE and not state.signal_sent:
+            if new_score >= adjusted_threshold and not state.signal_sent:
                 logger.info(f"   ✅ PASSES threshold check!")
                 if has_real_data:
                     logger.info(f"   ✅ Has real data - SENDING SIGNAL")
@@ -634,6 +645,11 @@ class ActiveTokenTracker:
                     logger.warning(f"   📊 Total blocked (data quality): {self.signals_blocked_data_quality}")
             else:
                 logger.info(f"   ⏭️  FAILS threshold check - not sending signal")
+                # OPT-034: Track if blocked by timing adjustment
+                if new_score >= MIN_CONVICTION_SCORE and new_score < adjusted_threshold:
+                    self.signals_blocked_timing += 1
+                    logger.info(f"   ⏰ Blocked by timing adjustment: {time_reason}")
+                    logger.info(f"   📊 Total blocked (timing): {self.signals_blocked_timing}")
             
         except Exception as e:
             logger.error(f"❌ Error re-analyzing token: {e}")

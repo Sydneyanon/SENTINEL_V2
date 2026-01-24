@@ -1,0 +1,194 @@
+{
+  "total_signals": 45,
+  "by_hour": [
+    {
+      "hour": 0,
+      "total": 2,
+      "win_rate": 100.0,
+      "rug_rate": 0.0,
+      "avg_roi": 13.5,
+      "zone": "\ud83d\udd25 HOT"
+    },
+    {
+      "hour": 2,
+      "total": 2,
+      "win_rate": 0.0,
+      "rug_rate": 0.0,
+      "avg_roi": 0.33931488543748856,
+      "zone": "\u2744\ufe0f COLD"
+    },
+    {
+      "hour": 3,
+      "total": 3,
+      "win_rate": 0.0,
+      "rug_rate": 33.33333333333333,
+      "avg_roi": 1.0501568516095479,
+      "zone": "\u2744\ufe0f COLD"
+    },
+    {
+      "hour": 4,
+      "total": 2,
+      "win_rate": 0.0,
+      "rug_rate": 50.0,
+      "avg_roi": 0.9887160062789917,
+      "zone": "\u2744\ufe0f COLD"
+    },
+    {
+      "hour": 5,
+      "total": 3,
+      "win_rate": 33.33333333333333,
+      "rug_rate": 0.0,
+      "avg_roi": 1.2065593749284744,
+      "zone": "\u2744\ufe0f COLD"
+    },
+    {
+      "hour": 6,
+      "total": 5,
+      "win_rate": 40.0,
+      "rug_rate": 0.0,
+      "avg_roi": 2.660000777244568,
+      "zone": "\u2744\ufe0f COLD"
+    },
+    {
+      "hour": 7,
+      "total": 3,
+      "win_rate": 33.33333333333333,
+      "rug_rate": 0.0,
+      "avg_roi": 1.6639080444971721,
+      "zone": "\u2744\ufe0f COLD"
+    },
+    {
+      "hour": 9,
+      "total": 2,
+      "win_rate": 50.0,
+      "rug_rate": 0.0,
+      "avg_roi": 1.0584840141236782,
+      "zone": "\ud83c\udf21\ufe0f WARM"
+    },
+    {
+      "hour": 10,
+      "total": 3,
+      "win_rate": 33.33333333333333,
+      "rug_rate": 33.33333333333333,
+      "avg_roi": 2.4382356901963553,
+      "zone": "\u2744\ufe0f COLD"
+    },
+    {
+      "hour": 12,
+      "total": 3,
+      "win_rate": 0.0,
+      "rug_rate": 33.33333333333333,
+      "avg_roi": 0.5881378302971522,
+      "zone": "\u2744\ufe0f COLD"
+    },
+    {
+      "hour": 16,
+      "total": 2,
+      "win_rate": 0.0,
+      "rug_rate": 50.0,
+      "avg_roi": 0.7637197775766253,
+      "zone": "\u2744\ufe0f COLD"
+    },
+    {
+      "hour": 17,
+      "total": 4,
+      "win_rate": 25.0,
+      "rug_rate": 0.0,
+      "avg_roi": 0.8551819957792759,
+      "zone": "\u2744\ufe0f COLD"
+    },
+    {
+      "hour": 18,
+      "total": 1,
+      "win_rate": 0.0,
+      "rug_rate": 100.0,
+      "avg_roi": 1.5,
+      "zone": "\u2744\ufe0f COLD"
+    },
+    {
+      "hour": 19,
+      "total": 3,
+      "win_rate": 66.66666666666666,
+      "rug_rate": 0.0,
+      "avg_roi": 5.051289061705272,
+      "zone": "\ud83d\udd25 HOT"
+    },
+    {
+      "hour": 20,
+      "total": 3,
+      "win_rate": 66.66666666666666,
+      "rug_rate": 33.33333333333333,
+      "avg_roi": 1.354674145579338,
+      "zone": "\ud83d\udd25 HOT"
+    },
+    {
+      "hour": 21,
+      "total": 1,
+      "win_rate": 0.0,
+      "rug_rate": 100.0,
+      "avg_roi": 0.04028749838471413,
+      "zone": "\u2744\ufe0f COLD"
+    },
+    {
+      "hour": 22,
+      "total": 2,
+      "win_rate": 100.0,
+      "rug_rate": 0.0,
+      "avg_roi": 5.0,
+      "zone": "\ud83d\udd25 HOT"
+    },
+    {
+      "hour": 23,
+      "total": 1,
+      "win_rate": 100.0,
+      "rug_rate": 0.0,
+      "avg_roi": 5.0,
+      "zone": "\ud83d\udd25 HOT"
+    }
+  ],
+  "by_day": [
+    {
+      "day": 3,
+      "day_name": "Thursday",
+      "total": 15,
+      "win_rate": 53.333333333333336,
+      "rug_rate": 20.0,
+      "avg_roi": 2.6452603402237096,
+      "zone": "\ud83c\udf21\ufe0f WARM"
+    },
+    {
+      "day": 4,
+      "day_name": "Friday",
+      "total": 30,
+      "win_rate": 26.666666666666668,
+      "rug_rate": 16.666666666666664,
+      "avg_roi": 2.231382220921417,
+      "zone": "\u2744\ufe0f COLD"
+    }
+  ],
+  "hot_hours": [
+    0,
+    19,
+    20,
+    22,
+    23
+  ],
+  "cold_hours": [
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    10,
+    12,
+    16,
+    17,
+    18,
+    21
+  ],
+  "hot_days": [],
+  "cold_days": [
+    4
+  ]
+}
