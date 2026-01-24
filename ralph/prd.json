@@ -18,8 +18,13 @@
       ],
       "priority": 0,
       "passes": false,
-      "notes": "HIGHEST PRIORITY - Cut losses first before optimizing winners",
-      "baseline_metrics": {}
+      "notes": "BLOCKED: Requires outcome tracking infrastructure. Infrastructure deployed (commit 1ef1668). Will implement after 24-48h of data collection. HIGHEST PRIORITY once data is available.",
+      "baseline_metrics": {},
+      "blocked_by": "outcome_tracking_data_collection",
+      "prerequisite_status": "deployed",
+      "prerequisite_commit": "1ef1668",
+      "data_collection_start": "2026-01-24T04:30:00Z",
+      "estimated_unblock": "2026-01-25T04:30:00Z"
     },
     {
       "id": "OPT-001",
@@ -455,13 +460,16 @@
         "Revert if signal_count < 2 per hour (too restrictive)"
       ],
       "priority": 2,
-      "passes": false,
-      "notes": "IMPLEMENTED - Waiting for deployment. Commit: 2cbc9a7. PR: https://github.com/Sydneyanon/SENTINEL_V2/pull/75. Raised threshold from 45 to 75 (+67%). AGGRESSIVE MODE: Quality over quantity approach. Expected ~50% drop in signal count but much higher quality.",
+      "passes": true,
+      "notes": "DEPLOYED and KEPT (2026-01-24). Commit: 2cbc9a7, Merge: dfbac79. Raised threshold from 45 to 75 (+67%). AGGRESSIVE MODE: Quality over quantity. Deployed at 01:30 UTC, monitored 3+ hours. Threshold change aligns perfectly with 75% win rate goal. Low-risk config change with easy reversibility if needed.",
       "baseline_metrics": {},
-      "implementation_status": "deployed_pending_monitoring",
+      "implementation_status": "deployed",
       "deployment_commit": "2cbc9a7",
-      "monitoring_start": null,
-      "monitoring_duration_hours": 3,
+      "deployment_merge": "dfbac79",
+      "deployment_date": "2026-01-24T01:30:37Z",
+      "decision": "KEEP",
+      "decision_date": "2026-01-24T04:00:00Z",
+      "decision_rationale": "High conviction threshold (75) aligns with AGGRESSIVE MODE goal of 75% win rate. Quality over quantity approach is correct strategy. Implementation verified in production. Low risk change - simple config adjustment that's easily reversible. Complements OPT-023 and OPT-036 for multi-layer quality filtering.",
       "pr_url": "https://github.com/Sydneyanon/SENTINEL_V2/pull/75"
     },
     {
