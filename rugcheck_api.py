@@ -103,59 +103,85 @@ class RugCheckAPI:
         """
         Parse RugCheck API response into our format
 
-        RugCheck API returns various risk indicators - we aggregate them
-        into a simple score and risk level
+        RugCheck scoring (HIGHER = WORSE):
+        - score: 0-1000+ (lower is better, 0 = perfect)
+        - score_normalised: 0-10 (lower is better, 0 = perfect)
+        - rugged: boolean (true = confirmed rug)
         """
         try:
-            # Extract key fields (adjust based on actual API response)
-            score = data.get('score', 50)  # Default to medium if unknown
+            # RugCheck uses score_normalised (0-10 scale, lower = better)
+            score_normalised = data.get('score_normalised', None)
+            score_raw = data.get('score', None)
+            rugged = data.get('rugged', False)
             risks = data.get('risks', [])
 
             # Check for critical indicators
-            is_honeypot = data.get('isHoneypot', False)
-            mutable_metadata = data.get('mutableMetadata', False) or data.get('isMutable', False)
-            freezeable = data.get('freezeable', False) or data.get('canFreeze', False)
+            is_honeypot = rugged  # Use rugged flag as honeypot indicator
 
-            # Check top holder concentration
-            top_holder_pct = data.get('topHolderPercent', 0)
-            if top_holder_pct == 0:
-                # Try alternate field names
-                top_holder_pct = data.get('top_holder_pct', 0)
+            # Check metadata mutability from risks
+            mutable_metadata = False
+            freezeable = False
+            for risk in risks:
+                if 'mutable' in risk.get('name', '').lower():
+                    mutable_metadata = True
+                if 'freeze' in risk.get('name', '').lower():
+                    freezeable = True
 
-            # Count critical risks
-            critical_risks = [r for r in risks if r.get('level') == 'critical' or r.get('severity') == 'critical']
-            high_risks = [r for r in risks if r.get('level') == 'high' or r.get('severity') == 'high']
+            # Get top holder percentage from topHolders
+            top_holder_pct = 0
+            top_holders = data.get('topHolders', [])
+            if top_holders:
+                top_holder_pct = top_holders[0].get('pct', 0)
 
-            # Determine risk level based on indicators
-            if is_honeypot or len(critical_risks) >= 2:
-                risk_level = 'critical'  # Likely rug - block
-            elif mutable_metadata or freezeable or len(critical_risks) == 1:
-                risk_level = 'high'  # High risk - major penalty
-            elif len(high_risks) >= 2 or top_holder_pct > 50:
-                risk_level = 'medium'  # Moderate risk - penalty
-            elif len(high_risks) == 1 or top_holder_pct > 30:
-                risk_level = 'low'  # Some risk - small penalty
-            else:
-                risk_level = 'good'  # Clean - no penalty
+            # Count critical/danger risks
+            critical_risks = [r for r in risks if r.get('level') in ['critical', 'danger', 'error']]
+            high_risks = [r for r in risks if r.get('level') in ['warn', 'warning']]
 
-            # Override with RugCheck's score if available
-            if score is not None:
-                if score >= 80:
+            # Determine risk level using score_normalised (0-10 scale)
+            # IMPORTANT: Lower score = better (opposite of typical scoring!)
+            if rugged or is_honeypot:
+                risk_level = 'critical'  # Confirmed rug - BLOCK
+            elif score_normalised is not None:
+                # Use normalized score (0-10, lower = better)
+                if score_normalised <= 2:
+                    risk_level = 'good'      # 0-2 = very safe
+                elif score_normalised <= 4:
+                    risk_level = 'low'       # 3-4 = low risk
+                elif score_normalised <= 6:
+                    risk_level = 'medium'    # 5-6 = moderate risk
+                elif score_normalised <= 8:
+                    risk_level = 'high'      # 7-8 = high risk
+                else:
+                    risk_level = 'critical'  # 9-10 = very high risk
+            elif score_raw is not None:
+                # Fallback to raw score (0-1000+, lower = better)
+                if score_raw <= 50:
                     risk_level = 'good'
-                elif score >= 60:
+                elif score_raw <= 100:
                     risk_level = 'low'
-                elif score >= 40:
+                elif score_raw <= 200:
                     risk_level = 'medium'
-                elif score >= 20:
+                elif score_raw <= 400:
                     risk_level = 'high'
                 else:
                     risk_level = 'critical'
+            elif len(critical_risks) >= 2:
+                risk_level = 'critical'  # Multiple critical risks
+            elif len(critical_risks) == 1:
+                risk_level = 'high'  # One critical risk
+            elif len(high_risks) >= 3:
+                risk_level = 'medium'  # Multiple warnings
+            else:
+                risk_level = 'good'  # No significant risks
 
             return {
                 'success': True,
-                'score': score,
+                'score': score_normalised if score_normalised is not None else score_raw,
+                'score_normalised': score_normalised,
+                'score_raw': score_raw,
                 'risk_level': risk_level,
                 'is_honeypot': is_honeypot,
+                'rugged': rugged,
                 'mutable_metadata': mutable_metadata,
                 'freezeable': freezeable,
                 'top_holder_pct': top_holder_pct,
