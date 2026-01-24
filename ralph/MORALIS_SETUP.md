@@ -31,12 +31,14 @@ After signup:
 ### 3. Add to Railway (15 seconds)
 
 In Railway dashboard:
-1. Go to your Prometheus bot service
+1. Go to your **Ralph optimizer service** (not main bot)
 2. Click "Variables" tab
 3. Add new variable:
    - **Name**: `MORALIS_API_KEY`
    - **Value**: `<paste your API key>`
-4. Click "Deploy" (Railway will restart with new env var)
+4. Click "Deploy" (Railway will restart Ralph with new env var)
+
+**Important**: Add to Ralph's service, not the main Prometheus bot!
 
 **Done! Ralph can now collect 1000 graduated tokens.**
 

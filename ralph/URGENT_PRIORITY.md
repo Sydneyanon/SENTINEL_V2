@@ -15,8 +15,11 @@ The scraper has been updated to use **Moralis Solana API** which is:
 ### Setup Required (1 minute):
 
 1. Sign up at https://moralis.com (free, no credit card)
-2. Get your API key from dashboard
-3. Add to Railway environment variables: `MORALIS_API_KEY=your_key_here`
+2. Get your API key from dashboard (https://admin.moralis.io → API Keys)
+3. Add to **Ralph optimizer service** in Railway:
+   - Go to Ralph service → Variables tab
+   - Add: `MORALIS_API_KEY=your_key_here`
+   - Deploy (Ralph restarts automatically)
 
 **pump.fun API was unreliable - Moralis is the professional solution**
 
