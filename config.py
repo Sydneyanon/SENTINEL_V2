@@ -53,8 +53,11 @@ DISABLE_POLLING_BELOW_THRESHOLD = True  # Only poll tokens >= 50 conviction
 # =============================================================================
 
 # Signal thresholds based on graduation status
-MIN_CONVICTION_SCORE = 45  # Pre-graduation threshold (40%+ bonding curve) - DIAGNOSTIC MODE: Finding why signals show low conviction
-POST_GRAD_THRESHOLD = 45   # Post-graduation threshold (100% - on Raydium) - DIAGNOSTIC MODE: Finding why signals show low conviction
+# OPT-024: Raised from 45 to 75 for AGGRESSIVE MODE quality filtering
+# Goal: Only post highest conviction signals (75%+ win rate target)
+# Trade-off: ~50% fewer signals but much higher quality (quality over quantity)
+MIN_CONVICTION_SCORE = 75  # Pre-graduation threshold - AGGRESSIVE: Quality over quantity
+POST_GRAD_THRESHOLD = 75   # Post-graduation threshold - AGGRESSIVE: Quality over quantity
 
 # Base score threshold for distribution checks
 # Only check distribution if base score >= this value
