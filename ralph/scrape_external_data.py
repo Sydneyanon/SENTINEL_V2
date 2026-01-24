@@ -642,12 +642,12 @@ class ExternalDataScraper:
 async def main():
     """Main scraping workflow"""
     # Configurable parameters
-    MIN_GAIN = 200  # 200% = 3x minimum (lower to 100 for 2x tokens)
+    MIN_GAIN = 100  # 100% = 2x minimum (was 200 for 3x, lowered to find more data)
     MAX_TOKENS = 1000  # Analyze up to 1000 tokens for comprehensive data
 
     logger.info("🚀 Starting external data scraper (ENHANCED VERSION)...")
     logger.info("📋 Configuration:")
-    logger.info(f"   Minimum gain: {MIN_GAIN}% (3x)")
+    logger.info(f"   Minimum gain: {MIN_GAIN}% (2x)")
     logger.info(f"   Max tokens to analyze: {MAX_TOKENS}")
     logger.info(f"   Estimated cost: ~{MAX_TOKENS * 5} Helius credits (0.05% of 8.9M budget)")
     logger.info("")
