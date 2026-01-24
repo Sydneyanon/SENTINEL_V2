@@ -1,0 +1,99 @@
+# Ralph Progress Log
+Started: Sat Jan 24 22:04:31 UTC 2026
+---
+
+## 2026-01-24 22:06 UTC - OPT-044: External data scraping attempt
+
+### Objective
+Collect 1000 token dataset from Moralis/DexScreener to train ML model for conviction scoring improvements.
+
+### Actions Taken
+1. ✅ Installed dependencies (aiohttp, loguru, numpy, pandas, scikit-learn, xgboost)
+2. ✅ Ran ralph/scrape_external_data.py
+3. ✅ Added DexScreener fallback when Moralis returned 0 tokens
+
+### Results
+- **Moralis API**: Returned 0 graduated tokens (API endpoint may have changed or data unavailable)
+- **DexScreener API**: Returned 24 Solana tokens, but NONE with 100%+ gains in 24h
+  - Top 5 price changes: -0.01%, -0.01%, -0.2%, -0.22%, -0.24% (all negative)
+- **Final dataset**: 0 tokens collected
+
+### Decision: BLOCKED - Cannot proceed
+**Reason**: No external data available to train ML model
+
+### Root Cause Analysis
+1. **Moralis API issue**: Free tier endpoint may have rate limits, changed structure, or no graduated tokens available in timeframe
+2. **Market conditions**: No pump.fun tokens with 100%+ gains in last 24h (cold market)
+3. **No historical data**: Bot has no local database of past signals to train on
+
+### Recommendations
+1. **Wait for market activity**: Retry scraping during peak degen hours (typically 14:00-20:00 UTC)
+2. **Lower gain threshold**: Collect tokens with 50%+ gains instead of 100%+ to get training data
+3. **Use bot's live data**: Deploy outcome tracking infrastructure (OPT-000) first, collect 48h of our own signal data
+4. **Alternative data source**: Use Birdeye API or other Solana analytics platforms
+
+### Unblocking Options (Priority Order)
+**Option A (Immediate)**: Lower gain threshold to 50%, run scraper again
+**Option B (24h wait)**: Retry during peak market hours tomorrow
+**Option C (48h pivot)**: Focus on OPT-000 (outcome tracking) to build proprietary dataset
+
+### Update (22:09 UTC): Partially Unblocked
+- ✅ Fixed DexScreener filtering (price_change decimal vs percentage bug)
+- ✅ Removed MCAP filter for DexScreener tokens
+- ✅ Collected 1 token with 133% gain (SOL pair from DexScreener)
+- ⚠️  **Still insufficient data**: Need minimum 50 tokens to train ML, only have 1
+
+### Market Conditions
+Current Solana memecoin market (DexScreener analysis):
+- Only 1 token out of 24 with 50%+ gains in 24h
+- Top gains: 133%, -1%, -6%, -14%, -19% (mostly negative)
+- **Cold market**: No pump.fun graduation activity, low volatility
+
+### Updated Decision: WAIT & RETRY
+**Immediate action**: None (cannot train on 1 token)
+**Retry schedule**: Every 6-12 hours during peak degen hours (14:00-20:00 UTC)
+**Fallback strategy**: If still no data in 48h, pivot to OPT-000 (build proprietary dataset)
+
+### Next Steps
+Moving to next highest priority optimization that doesn't require external data:
+- OPT-019: Auto-blacklist consistently wrong KOLs (requires outcome data - BLOCKED)
+- OPT-034: Time-based threshold adjustments (requires outcome data - BLOCKED)
+- OPT-002: Helius API credit optimization (DEPLOYED, monitoring)
+- **OPT-001**: Conviction threshold optimization (CAN DO NOW)
+
+---
+
+## 2026-01-24 22:12 UTC - OPT-044: Final Attempt with 15% Threshold
+
+### Actions Taken
+1. ✅ Lowered MIN_GAIN from 50% to 15% (extremely low threshold)
+2. ✅ Ran scraper again
+
+### Results
+- **DexScreener**: Found 1 token with 65% gain (SOL pair)
+- **Critical Issue**: `HELIUS_API_KEY not set` - Cannot check KOL involvement
+- **Market Conditions**: Dead market - top 5 gains [65%, 6%, -1%, -19%, -24%]
+
+### Decision: BLOCKED - Cannot Complete OPT-044
+**Reason**:
+1. Market conditions - insufficient tokens with gains (need 50+ tokens, have 1)
+2. Missing HELIUS_API_KEY - cannot analyze KOL patterns without it
+3. Moralis API returning 0 graduated tokens (API issue or no graduations)
+
+### Critical Finding: HELIUS_API_KEY Missing
+The Helius API key is not available in the environment, blocking:
+- KOL involvement checks
+- Holder distribution analysis
+- On-chain transaction analysis
+
+**This must be set before ANY Helius-dependent optimizations can work.**
+
+### Final Status: OPT-044 DEFERRED
+**Will retry when**:
+1. Market conditions improve (more graduated tokens with gains)
+2. HELIUS_API_KEY is configured in Railway environment
+3. Alternative: Build proprietary dataset from bot's own signals (OPT-000)
+
+**Estimated retry**: 24-48 hours or when market activity increases
+
+---

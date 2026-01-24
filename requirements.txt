@@ -1,0 +1,52 @@
+# Prometheus Bot - Complete Dependencies
+
+# Ralph Autonomous Optimizer
+anthropic>=0.40.0
+
+# Web Framework (for FastAPI main.py)
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+
+# Telegram Integration
+python-telegram-bot>=20.7
+
+# WebSocket & HTTP
+aiohttp>=3.9.1
+websockets>=12.0
+
+# Logging
+loguru>=0.7.2
+
+# Database
+asyncpg>=0.29.0
+psycopg2-binary>=2.9.9
+
+# Solana
+solders>=0.18.0
+
+# Environment Variables
+python-dotenv>=1.0.0
+
+# Date/Time Utilities
+python-dateutil>=2.8.2
+
+# JSON Handling (faster than standard json)
+orjson>=3.9.10
+
+# Async Support
+asyncio>=3.4.3
+
+# GMGN Wallet Metadata (via Apify)
+apify-client>=1.7.0
+
+# Social Intelligence APIs
+# - LunarCrush: Social sentiment aggregator
+# - Twitter API v2: Direct Twitter mentions & engagement
+# - Telegram: Built-in monitor (alternative to external scraper)
+# Twitter/LunarCrush use aiohttp (already included above)
+telethon>=1.28.0  # Telegram client (only if using built-in monitor)
+
+# Machine Learning Dependencies (Ralph Autonomous Learning)
+xgboost>=2.0.3
+scikit-learn>=1.4.0
+numpy>=1.26.0

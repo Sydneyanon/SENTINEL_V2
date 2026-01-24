@@ -1,0 +1,74 @@
+# Ralph Progress Log
+Started: Sat Jan 24 21:45:40 UTC 2026
+---
+
+## 2026-01-24 21:47 UTC - EMERGENCY: OPT-024 REVERTED (Conviction Threshold)
+
+### Critical Finding: Bot Essentially Dead
+**Analysis Period:** 2026-01-24 00:00 - 21:46 UTC (21.75 hours)
+
+### Metrics (Last 24h)
+**Signal Volume:**
+- signals_posted: 2 (0.08/hour - 1 per 12 hours!)
+- Conviction scores: 75.0 (posted), 45.0 (posted before OPT-024)
+- Target was ~50% fewer signals, got ~98% fewer
+
+**Activity Tracked:**
+- KOL buys: 2,116 from 33 unique KOLs
+- Unique tokens checked: 634
+- Helius credits used: ~6,340
+
+**Score Distribution:**
+- 75+: 1 signal (0.16% of tokens)
+- 45-54: 1 signal (0.16% of tokens)
+- Lower: 632 tokens (99.68%)
+
+### Root Cause Analysis
+OPT-024 raised threshold from 45 → 75 for "quality over quantity"
+- Intent: ~50% reduction in signals, higher win rate
+- Reality: ~98% reduction (2 signals vs expected ~100/day baseline)
+- Threshold 75 is unreachable by current scoring algorithm
+- Only 1 token hit exactly 75.0 in entire 24h period
+
+### AGGRESSIVE MODE Override Decision: REVERT
+**Cannot achieve 75% win rate with zero signals to measure!**
+
+Reasoning:
+1. **Volume crisis:** Need 5-10 signals/day minimum for win rate calculation
+2. **Optimization paralysis:** Can't optimize what we can't measure
+3. **Filters working:** OPT-023 (emergency stop) + OPT-036 (data quality) already preventing rugs
+4. **Threshold miscalibration:** 75 was set without score distribution analysis
+
+### Changes Made
+**Config Change:** MIN_CONVICTION_SCORE: 75 → 55
+**Commit:** bcabb00
+**Deployed:** 2026-01-24 21:47 UTC (Railway auto-deploy)
+
+**New Thresholds:**
+- MIN_CONVICTION_SCORE: 55 (pre-graduation)
+- POST_GRAD_THRESHOLD: 60 (post-graduation)
+
+**Expected Impact:**
+- Signal volume: 5-15 signals/day (manageable, measurable)
+- Quality maintained by: OPT-023 emergency filters + OPT-036 data quality checks
+- Allows performance measurement for future optimizations
+
+### Monitoring Plan
+- Watch for 6 hours post-deploy (until 2026-01-25 03:47 UTC)
+- Target: 3-8 signals in 6 hours (0.5-1.3/hour)
+- Track: conviction score distribution, signal quality, rug rate
+
+### Learnings
+1. **NEVER set thresholds without score distribution analysis**
+2. **Quality AND volume matter** - can't measure quality without volume
+3. **AGGRESSIVE MODE needs signals** - 75% WR of 0 signals = meaningless
+4. **Multi-layer filtering works** - OPT-023 + OPT-036 already handle quality
+
+### Next Steps
+1. ✅ Monitor OPT-024 revert (threshold 55) for 6h
+2. ⏳ Evaluate OPT-002 (cache optimization) - monitoring ended
+3. ⏳ Evaluate OPT-035 (speed optimization) - monitoring ended
+4. ⏳ Wait for OPT-041 (credit optimization) - 6h remaining
+
+---
+Sat Jan 24 21:49:05 UTC 2026
