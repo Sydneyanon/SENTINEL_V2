@@ -118,33 +118,55 @@ class TelegramMonitor:
             # Debug: Log every 100th message to show monitor is active
             if not hasattr(self, '_message_count'):
                 self._message_count = 0
+                self._calls_detected = 0
             self._message_count += 1
             if self._message_count % 100 == 0:
-                logger.info(f"📬 Telegram monitor active: {self._message_count} messages processed")
+                logger.info(f"📬 Telegram monitor active: {self._message_count} messages processed, {self._calls_detected} calls detected")
 
             # Get group info for logging
             chat_id = event.chat_id
             group_name = self.monitored_groups.get(chat_id, f"group_{chat_id}")
 
-            # Extract Solana CAs from message
-            potential_cas = self.ca_pattern.findall(text)
+            # Extract Solana CAs from message (multiple methods)
+            potential_cas = set()
+
+            # Method 1: Direct CA regex match
+            direct_matches = self.ca_pattern.findall(text)
+            potential_cas.update(direct_matches)
+
+            # Method 2: Extract from pump.fun URLs
+            # Matches: pump.fun/GDfn8... or pump.fun/coin/GDfn8...
+            pump_pattern = r'pump\.fun(?:/coin)?/([1-9A-HJ-NP-Za-km-z]{32,44})'
+            pump_matches = re.findall(pump_pattern, text, re.IGNORECASE)
+            potential_cas.update(pump_matches)
+
+            # Method 3: Extract from dexscreener URLs
+            # Matches: dexscreener.com/solana/GDfn8...
+            dex_pattern = r'dexscreener\.com/solana/([1-9A-HJ-NP-Za-km-z]{32,44})'
+            dex_matches = re.findall(dex_pattern, text, re.IGNORECASE)
+            potential_cas.update(dex_matches)
+
             if not potential_cas:
                 return
 
             logger.info(f"📨 Message from {group_name} has {len(potential_cas)} CA(s)")
+            logger.debug(f"   Message preview: {text[:100]}...")
 
             # Process each CA found
             for ca in potential_cas:
                 # Skip known non-token addresses
                 if ca in self.ignore_addresses:
+                    logger.debug(f"   ⏭️  Skipped (known address): {ca[:8]}...")
                     continue
 
                 # Basic validation (Solana CAs are typically 32-44 chars)
                 if len(ca) < 32 or len(ca) > 44:
+                    logger.debug(f"   ⏭️  Skipped (invalid length {len(ca)}): {ca}")
                     continue
 
                 # Add to cache
                 await self._add_call_to_cache(ca, group_name)
+                self._calls_detected += 1
 
         except Exception as e:
             logger.error(f"❌ Error handling Telegram message: {e}")
