@@ -56,8 +56,13 @@
       ],
       "priority": 2,
       "passes": false,
-      "notes": "",
-      "baseline_metrics": {}
+      "notes": "DEPLOYED (2026-01-24 07:45 UTC). Increased holder cache TTL from 60min to 120min. Expected 50% credit reduction on holder checks. MONITORING for 2 hours. Decision pending.",
+      "baseline_metrics": {},
+      "implementation_status": "deployed",
+      "deployment_commit": "9ec7ee1",
+      "expected_credit_reduction": "50%",
+      "monitoring_start": "2026-01-24T07:45:00Z",
+      "monitoring_end_target": "2026-01-24T09:45:00Z"
     },
     {
       "id": "OPT-003",
@@ -659,10 +664,15 @@
       ],
       "priority": 2,
       "passes": false,
-      "notes": "DEPLOYED (2026-01-24). Implemented: 1) Parallel metadata fetching (PumpPortal + Helius simultaneously), 2) 5-second bonding curve cache, 3) Reduced latency from 5.5-7.5s to estimated 3-4s. PENDING DEPLOYMENT to Railway for monitoring.",
+      "notes": "DEPLOYED (2026-01-24 01:46 UTC). PR #76 merged. Implemented: 1) Parallel metadata fetching (PumpPortal + Helius), 2) 5-second bonding curve cache, 3) Estimated 25-35% latency reduction (5.5-7.5s → 3-4s). MONITORING for 6 hours. Decision pending.",
       "baseline_metrics": {},
-      "implementation_status": "code_complete",
-      "estimated_latency_improvement": "1500-2000ms (25-35% faster)"
+      "implementation_status": "deployed",
+      "deployment_commit": "4e10ce8",
+      "deployment_merge": "PR #76",
+      "deployment_date": "2026-01-24T01:46:42Z",
+      "estimated_latency_improvement": "1500-2000ms (25-35% faster)",
+      "monitoring_start": "2026-01-24T01:46:42Z",
+      "monitoring_end_target": "2026-01-24T07:46:42Z"
     },
     {
       "id": "OPT-036",

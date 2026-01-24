@@ -35,9 +35,10 @@ class HeliusDataFetcher:
         self.api_key = config.HELIUS_API_KEY
         self.rpc_url = f"https://mainnet.helius-rpc.com/?api-key={self.api_key}"
 
-        # Cache for holder checks (60-minute TTL to save credits)
+        # Cache for holder checks (OPT-002: 120-minute TTL to save credits)
+        # Increased from 60min → 120min to reduce credit waste by ~50%
         self.holder_cache = {}  # {token_address: {'data': {...}, 'timestamp': datetime}}
-        self.cache_ttl_minutes = 60
+        self.cache_ttl_minutes = 120
 
         # OPT-035: Cache for bonding curve data (5-second TTL for speed)
         # Bonding curve changes slowly, so we can cache aggressively for short periods
@@ -376,9 +377,9 @@ class HeliusDataFetcher:
 
     async def get_token_holders(self, token_address: str, limit: int = 10) -> Optional[Dict]:
         """
-        Get top token holders with 60-minute caching (saves credits!)
+        Get top token holders with 120-minute caching (saves credits!)
 
-        COST: 10 Helius credits per call (cached for 60 minutes)
+        COST: 10 Helius credits per call (cached for 120 minutes - OPT-002)
 
         Args:
             token_address: Token mint address
