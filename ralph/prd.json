@@ -784,8 +784,23 @@
       ],
       "priority": 0,
       "passes": false,
-      "notes": "EXECUTE NEXT - User requested OPT-027 + OPT-041 together (2026-01-24). Critical: 1.1M/10M credits used (11%). OPT-055 already saves 80-85%, OPT-041 targets additional 40%+ reduction. Optimize ruthlessly - every call costs money.",
-      "baseline_metrics": {}
+      "notes": "DEPLOYED (2026-01-24 21:40 UTC). Commit: 0f8030d. Added: 1) Transaction history caching (2h TTL), 2) Batch token metadata fetching (100 tokens in 1 call), 3) Cache awareness docs. Expected 40%+ credit reduction. MONITORING until 2026-01-25 03:40 UTC.",
+      "baseline_metrics": {
+        "current_credits_used": "1.1M/10M (11%)",
+        "opt_055_savings": "80-85%",
+        "target_additional_savings": "40%+",
+        "target_monthly_usage": "100-300K credits"
+      },
+      "implementation_status": "deployed",
+      "deployment_commit": "0f8030d",
+      "deployment_date": "2026-01-24T21:40:00Z",
+      "monitoring_start": "2026-01-24T21:40:00Z",
+      "monitoring_end_target": "2026-01-25T03:40:00Z",
+      "optimizations_applied": [
+        "Transaction history caching (2h TTL) in wallet_autodiscovery.py",
+        "Batch token metadata fetching in helius_fetcher.py",
+        "Documentation of existing cache usage"
+      ]
     },
     {
       "id": "OPT-042",

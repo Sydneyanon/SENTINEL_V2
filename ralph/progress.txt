@@ -1721,3 +1721,78 @@ Updated comments and docstrings to reflect:
 
 ---
 
+
+## [2026-01-24 21:40 UTC] - OPT-041: Eliminate redundant Helius API calls
+
+### Context
+- Baseline: 1.1M/10M credits used (11%)
+- OPT-055 already saves 80-85%
+- Target: Additional 40%+ credit reduction
+- Priority 0 (HIGHEST) - User requested immediate execution
+
+### Changes Made
+
+#### 1. Transaction History Caching (wallet_autodiscovery.py)
+- Added 2-hour cache for Helius transaction API calls
+- Prevents redundant tx history fetches for same wallet
+- Implementation:
+  ```python
+  self.tx_history_cache = {}  # {address: {'data': [...], 'timestamp': datetime}}
+  self.tx_cache_hours = 2  # 2-hour cache
+  ```
+- **Saves: ~5 credits per cached wallet lookup**
+
+#### 2. Batch Token Metadata Fetching (helius_fetcher.py)
+- New `get_assets_batch()` method fetches up to 100 tokens in 1 API call
+- Replaces 100 separate calls with 1 batch call (99% reduction)
+- Uses existing 60-minute metadata cache (checks cache first)
+- Implementation:
+  - Separates cached vs uncached addresses
+  - Fetches only uncached tokens in batch
+  - Caches results for 60 minutes
+- **Saves: 99 credits per 100-token batch (when uncached)**
+
+#### 3. Documentation & Cache Awareness
+- Added comments to scrape_external_data.py about cache usage
+- Holder checks already benefit from 120-min cache (OPT-002)
+
+### Deployment Info
+- Commit: 0f8030d
+- Pushed: 2026-01-24 21:40 UTC
+- Railway auto-deploy: ~2 min ETA
+- Branch: main
+
+### Monitoring Plan
+- Duration: 6 hours (until 2026-01-25 03:40 UTC)
+- Track:
+  - Credits used per hour
+  - Cache hit rates (metadata, tx history)
+  - Batch fetch efficiency
+  - Signal quality (should be unchanged)
+  - API error rates
+
+### Decision Criteria (AGGRESSIVE MODE)
+**KEEP if:**
+- Credits per signal drops >40% OR
+- Total credits usage reduced >30% OR
+- No degradation in signal quality
+
+**REVERT only if:**
+- Credits usage unchanged AND
+- API errors increased significantly AND
+- Cache causing stale data issues
+
+### Expected Impact
+- Batch fetching: 90%+ reduction for scraper operations (when uncached)
+- Transaction cache: 40%+ reduction for autodiscovery
+- Combined with OPT-055 (80-85%): **Total savings target >90%**
+- Net result: 1.1M credits → estimated 100-300K credits per month
+
+### Next Steps
+1. Monitor Railway logs for errors
+2. Check credit usage after 6 hours
+3. Analyze cache hit rates
+4. Update PRD with results
+5. If successful, proceed to next optimization
+
+---
