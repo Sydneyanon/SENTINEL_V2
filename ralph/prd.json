@@ -49,7 +49,7 @@
       "description": "As an operator, I want to minimize Helius credit usage without sacrificing signal quality",
       "acceptanceCriteria": [
         "Identify top 3 credit-consuming operations from logs",
-        "Increase caching TTL for holder checks (60min → 120min)",
+        "Increase caching TTL for holder checks (60min \u2192 120min)",
         "Monitor credit usage for 2 hours",
         "Ensure signal quality doesn't drop >5%",
         "Commit if credits reduced by >20%"
@@ -278,7 +278,7 @@
       "acceptanceCriteria": [
         "Audit current metadata sources: Helius DAS API, bonding curve, DexScreener",
         "Measure success rate and latency for each source",
-        "Add fallback chain: Helius → DexScreener → Jupiter API → Solscan",
+        "Add fallback chain: Helius \u2192 DexScreener \u2192 Jupiter API \u2192 Solscan",
         "Implement 24h cache for token metadata (Redis or in-memory)",
         "Add parallel fetching: fetch metadata + price + holders simultaneously",
         "Monitor for 2 hours",
@@ -532,7 +532,7 @@
       "description": "As a trader, I want to see which KOLs bought so I know who's behind the signal",
       "acceptanceCriteria": [
         "Add KOL name/label to Telegram embed (e.g., 'Ansem', 'Machi Big Brother')",
-        "Show tier badge (🔥 Elite, 👑 God, etc.)",
+        "Show tier badge (\ud83d\udd25 Elite, \ud83d\udc51 God, etc.)",
         "If multiple KOLs: show top 3 by tier",
         "Pull names from curated_wallets.py metadata",
         "Test Telegram formatting looks clean",
@@ -540,7 +540,7 @@
       ],
       "priority": 4,
       "passes": true,
-      "notes": "DEPLOYED and KEPT (commit fd38456, PR #78). Enhanced Telegram posts with KOL names, tier badges (👑 GOD, 🔥 ELITE, ⭐ TOP KOL, 🐋 WHALE), win rates, and PnL data. Shows top 3 wallets by tier. All acceptance criteria met. USER REQUEST: Make signals more transparent and trustworthy",
+      "notes": "DEPLOYED and KEPT (commit fd38456, PR #78). Enhanced Telegram posts with KOL names, tier badges (\ud83d\udc51 GOD, \ud83d\udd25 ELITE, \u2b50 TOP KOL, \ud83d\udc0b WHALE), win rates, and PnL data. Shows top 3 wallets by tier. All acceptance criteria met. USER REQUEST: Make signals more transparent and trustworthy",
       "baseline_metrics": {},
       "implementation_status": "deployed",
       "deployment_commit": "fd38456",
@@ -643,7 +643,7 @@
         "Monitor all posted signals continuously (price, volume, holders)",
         "Post exit alert when: hit 3x ('Take 50% profits'), 5x ('Take 70%'), or red flags ('EXIT NOW')",
         "Red flags: volume crashed >80%, holders down >40%, liquidity pulled >50%",
-        "Format: '🚨 EXIT SIGNAL: [TOKEN] hit 5x - Suggest taking 70% profits. Volume: -15%, Holders: +5%'",
+        "Format: '\ud83d\udea8 EXIT SIGNAL: [TOKEN] hit 5x - Suggest taking 70% profits. Volume: -15%, Holders: +5%'",
         "Track if users follow exit signals (measure via on-chain)",
         "Monitor for 48 hours",
         "Keep if: exit alerts would have improved avg ROI >15% (vs holding)"
@@ -668,15 +668,48 @@
       ],
       "priority": 1,
       "passes": false,
-      "notes": "USER REQUEST: Push hard when optimal, ease off otherwise. Time of day/week matters for degen activity.",
-      "baseline_metrics": {}
+      "notes": "DEPLOYED (2026-01-24 17:48 UTC). Analyzed 45 signals, found 5 HOT hours (>=65% WR) and 12 COLD hours (<45% WR). Dynamic threshold adjustment: +10 pts during cold zones. Expected 8%+ win rate improvement by avoiding poor times. MONITORING for 48 hours.",
+      "baseline_metrics": {
+        "total_signals_analyzed": 45,
+        "hot_hours_identified": 5,
+        "cold_hours_identified": 12,
+        "hot_hours": [
+          0,
+          19,
+          20,
+          22,
+          23
+        ],
+        "cold_hours": [
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          10,
+          12,
+          16,
+          17,
+          18,
+          21
+        ],
+        "cold_days": [
+          "Friday"
+        ],
+        "strategy": "HOT: threshold=75, COLD: threshold=85 (+10)"
+      },
+      "implementation_status": "deployed",
+      "deployment_commit": "8a046ba",
+      "monitoring_start": "2026-01-24T17:43:34.042937Z",
+      "monitoring_end_target": "2026-01-26T17:43:34.042962Z"
     },
     {
       "id": "OPT-035",
       "title": "SPEED: Catch tokens within 60 seconds of KOL buy",
       "description": "As a sniper, I want to post signals FAST before price pumps",
       "acceptanceCriteria": [
-        "Measure current latency: KOL buy → signal posted (avg time)",
+        "Measure current latency: KOL buy \u2192 signal posted (avg time)",
         "Optimize websocket processing: parallel instead of sequential",
         "Cache metadata aggressively (avoid redundant Helius calls)",
         "Target: <60 seconds from KOL buy to Telegram post",
@@ -685,7 +718,7 @@
       ],
       "priority": 2,
       "passes": true,
-      "notes": "DEPLOYED and KEPT (2026-01-24). Commit: 4e10ce8, PR #76. Implemented parallel metadata fetching (55% faster) and 5-second bonding curve cache. Latency reduced 25-35% (5.5-7.5s → 3-4s). Pure performance optimization with no logic changes. Earlier entry = better prices = competitive advantage.",
+      "notes": "DEPLOYED and KEPT (2026-01-24). Commit: 4e10ce8, PR #76. Implemented parallel metadata fetching (55% faster) and 5-second bonding curve cache. Latency reduced 25-35% (5.5-7.5s \u2192 3-4s). Pure performance optimization with no logic changes. Earlier entry = better prices = competitive advantage.",
       "baseline_metrics": {},
       "implementation_status": "deployed",
       "deployment_commit": "4e10ce8",
@@ -837,10 +870,10 @@
       "description": "As an adaptive system, I want to be conservative after losses and aggressive after wins",
       "acceptanceCriteria": [
         "Track last 10 signals: calculate rolling win_rate",
-        "If last 10 signals: >70% WR → AGGRESSIVE MODE (lower threshold by 10 pts)",
-        "If last 10 signals: <40% WR → DEFENSIVE MODE (raise threshold by 20 pts)",
+        "If last 10 signals: >70% WR \u2192 AGGRESSIVE MODE (lower threshold by 10 pts)",
+        "If last 10 signals: <40% WR \u2192 DEFENSIVE MODE (raise threshold by 20 pts)",
         "Reset to normal after 20 signals OR 6 hours",
-        "Add mode indicator to Telegram posts: 🔥 AGGRESSIVE or 🛡️ DEFENSIVE",
+        "Add mode indicator to Telegram posts: \ud83d\udd25 AGGRESSIVE or \ud83d\udee1\ufe0f DEFENSIVE",
         "Monitor for 48 hours",
         "Keep if: reduces losing streaks >50% (stop posting after 3 consecutive rugs)"
       ],
@@ -970,7 +1003,7 @@
         "Retrain ML models on updated dataset",
         "Track meta shifts: 'narratives that worked last month vs this month'",
         "Auto-adjust scoring weights based on recent data",
-        "Log changes to progress.txt: 'Meta shift detected: AI narrative win_rate dropped from 68% → 42%, reducing weight'",
+        "Log changes to progress.txt: 'Meta shift detected: AI narrative win_rate dropped from 68% \u2192 42%, reducing weight'",
         "Monitor continuously",
         "Keep permanently (continuous learning)"
       ],
