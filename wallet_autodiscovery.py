@@ -12,10 +12,15 @@ import config
 
 class WalletAutoDiscovery:
     """Automatically discover and score wallets"""
-    
+
     def __init__(self):
         self.session: Optional[aiohttp.ClientSession] = None
         self.gmgn_base = "https://gmgn.ai/defi/quotation/v1/smartmoney/sol"
+
+        # OPT-041: Cache for transaction history (2-hour TTL to save credits)
+        # Wallet transaction history rarely changes significantly in short periods
+        self.tx_history_cache = {}  # {address: {'data': [...], 'timestamp': datetime}}
+        self.tx_cache_hours = 2  # 2-hour cache for transaction history
         
     async def __aenter__(self):
         self.session = aiohttp.ClientSession()
@@ -105,23 +110,57 @@ class WalletAutoDiscovery:
             return None
     
     async def _calculate_from_onchain(self, address: str) -> Optional[Dict]:
-        """Calculate stats from on-chain transaction history via Helius"""
+        """Calculate stats from on-chain transaction history via Helius
+
+        OPT-041: Added 2-hour cache for transaction history to save Helius credits
+        """
         try:
+            # OPT-041: Check transaction history cache first (2-hour TTL)
+            if address in self.tx_history_cache:
+                cached = self.tx_history_cache[address]
+                cache_age = (datetime.utcnow() - cached['timestamp']).total_seconds()
+                if cache_age < self.tx_cache_hours * 3600:
+                    logger.debug(f"   💾 Using cached tx history ({cache_age/3600:.1f}h old)")
+                    transactions = cached['data']
+                    # Skip to analysis with cached data
+                    stats = self._analyze_transactions(address, transactions)
+                    return {
+                        'address': address,
+                        'name': f"Wallet_{address[:6]}",
+                        'win_rate': stats['win_rate'],
+                        'total_profit': stats['total_profit'],
+                        'trade_count': stats['trade_count'],
+                        'avg_hold_time': stats['avg_hold_time'],
+                        'specialty': stats['specialty'],
+                        'source': 'on-chain',
+                        'last_updated': datetime.utcnow().isoformat(),
+                        'verified': False,
+                        'active': True
+                    }
+
             # Use Helius to get transaction history
             if not config.HELIUS_API_KEY:
                 return None
-            
+
+            logger.info(f"   🌐 Fetching tx history from Helius (uncached)")
             url = f"https://api.helius.xyz/v0/addresses/{address}/transactions"
             params = {
                 'api-key': config.HELIUS_API_KEY,
                 'limit': 100  # Last 100 transactions
             }
-            
+
             async with self.session.get(url, params=params, timeout=10) as resp:
                 if resp.status != 200:
                     return None
-                
+
                 transactions = await resp.json()
+
+                # OPT-041: Cache the transaction history (2-hour TTL)
+                self.tx_history_cache[address] = {
+                    'data': transactions,
+                    'timestamp': datetime.utcnow()
+                }
+                logger.debug(f"   💾 Cached tx history for 2 hours")
                 
                 # Calculate stats from transactions
                 stats = self._analyze_transactions(address, transactions)

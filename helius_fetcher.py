@@ -3,7 +3,7 @@ Helius Data Fetcher - Get token data from Helius RPC/API
 Uses bonding curve decoder for pump.fun tokens
 Falls back to DexScreener for graduated tokens
 """
-from typing import Dict, Optional, Callable, Any
+from typing import Dict, Optional, Callable, Any, List
 import aiohttp
 import asyncio
 from loguru import logger
@@ -420,7 +420,88 @@ class HeliusDataFetcher:
             import traceback
             logger.error(traceback.format_exc())
             return None
-    
+
+    async def get_assets_batch(self, token_addresses: List[str]) -> Dict[str, Optional[Dict]]:
+        """
+        Get asset data for multiple tokens in a single API call (OPT-041)
+
+        BATCH OPTIMIZATION: Fetch up to 100 tokens in one API call instead of 100 separate calls
+        This reduces API calls by 99% when fetching multiple tokens
+
+        Args:
+            token_addresses: List of token mint addresses (max 100)
+
+        Returns:
+            Dict mapping token_address -> asset_data
+        """
+        try:
+            if not token_addresses:
+                return {}
+
+            # Limit to 100 tokens per batch (Helius API limit)
+            if len(token_addresses) > 100:
+                logger.warning(f"   ⚠️ Batch size {len(token_addresses)} exceeds limit, truncating to 100")
+                token_addresses = token_addresses[:100]
+
+            # Check cache first - separate cached from uncached
+            results = {}
+            uncached_addresses = []
+
+            for token_address in token_addresses:
+                if token_address in self.metadata_cache:
+                    cached = self.metadata_cache[token_address]
+                    cache_age = (datetime.utcnow() - cached['timestamp']).total_seconds()
+                    if cache_age < self.metadata_cache_minutes * 60:
+                        logger.debug(f"   💾 Cache hit for {token_address[:8]}")
+                        results[token_address] = cached['data']
+                        continue
+                uncached_addresses.append(token_address)
+
+            # If everything was cached, return early
+            if not uncached_addresses:
+                logger.info(f"   🎯 All {len(token_addresses)} tokens served from cache (0 API calls)")
+                return results
+
+            # Fetch uncached tokens in batch
+            logger.info(f"   📦 Batch fetching {len(uncached_addresses)} tokens (1 API call saves {len(uncached_addresses)-1} calls)")
+
+            url = f"https://api.helius.xyz/v0/token-metadata?api-key={self.api_key}"
+
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    url,
+                    json={"mintAccounts": uncached_addresses},
+                    timeout=aiohttp.ClientTimeout(total=30)  # Longer timeout for batch
+                ) as resp:
+                    if resp.status != 200:
+                        logger.warning(f"   ⚠️ Batch metadata fetch failed: {resp.status}")
+                        # Return cached results only
+                        return results
+
+                    data = await resp.json()
+
+                    if not data:
+                        logger.warning(f"   ⚠️ Batch fetch returned empty data")
+                        return results
+
+                    # Process batch results
+                    for item in data:
+                        token_address = item.get('account')
+                        if token_address:
+                            # Cache the result
+                            self.metadata_cache[token_address] = {
+                                'data': item,
+                                'timestamp': datetime.utcnow()
+                            }
+                            results[token_address] = item
+
+                    logger.info(f"   ✅ Batch fetched {len(data)} tokens, cached for 60 minutes")
+                    return results
+
+        except Exception as e:
+            logger.error(f"   ❌ Batch metadata fetch error: {e}")
+            return results
+
     async def get_holder_count(self, token_address: str) -> int:
         """
         Get holder count for a token

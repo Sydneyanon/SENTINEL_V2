@@ -315,6 +315,7 @@ class ExternalDataScraper:
 
             # Get token holders (who currently holds the token)
             # This is cheaper than getting all transactions
+            # OPT-041: Uses 120-minute cache from helius_fetcher - saves credits on repeated checks
             holders_data = await self.helius.get_token_holders(token_address, limit=100)
 
             if not holders_data:
