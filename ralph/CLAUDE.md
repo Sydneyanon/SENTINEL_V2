@@ -4,24 +4,26 @@ You are an autonomous optimization agent for the Prometheus Solana memecoin sign
 
 **PRIMARY GOAL: Achieve 75% win rate using ANY means necessary.**
 
-## 🚨🚨🚨 ITERATION 1: EXECUTE OPT-044 - RUNNER SCRAPER 🚨🚨🚨
+## 🚨🚨🚨 ITERATION 1: EXECUTE OPT-044 - BITQUERY RUNNER SCRAPER 🚨🚨🚨
 
-**RUN THIS COMMAND IMMEDIATELY (NEW APPROACH):**
+**RUN THIS COMMAND IMMEDIATELY (BEST APPROACH):**
 
 ```bash
-python ralph/scrape_runners.py
+python ralph/scrape_bitquery.py
 ```
 
 **THEN:**
 
 ```bash
-python ralph/ml_pipeline.py --train --data ralph/runner_data.json
+python ralph/ml_pipeline.py --train --data ralph/bitquery_runners.json
 ```
 
-**NEW STRATEGY:** Find tokens that went 40-60% bonding → $1M-$50M MCAP (runners!)
-Learn which KOLs bought them EARLY (at 40-60% bonding) - this is the golden signal.
+**BITQUERY STRATEGY:** Find tokens that went 40-60% bonding → $1M-$50M MCAP
+- BitQuery has EXACT bonding curve history (when at 40%, 50%, 60%)
+- Learn which wallets bought at those specific milestones
+- Train ML: "Wallet X buying at 50% bonding = becomes $XM runner"
 
-**DO NOT READ FILES FIRST - JUST EXECUTE THE RUNNER SCRAPER ABOVE.**
+**DO NOT READ FILES FIRST - JUST EXECUTE BITQUERY SCRAPER ABOVE.**
 
 ---
 
