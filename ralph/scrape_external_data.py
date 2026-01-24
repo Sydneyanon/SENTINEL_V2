@@ -113,6 +113,109 @@ class ExternalDataScraper:
                 logger.error(traceback.format_exc())
                 return []
 
+    async def fetch_graduated_tokens_moralis(self, limit: int = 1000) -> List[Dict]:
+        """
+        Fetch graduated pump.fun tokens from Moralis API (FREE with generous limits)
+
+        Moralis provides:
+        - Exact graduation timestamp
+        - Token metadata (name, symbol, logo)
+        - Price, liquidity, MCAP at graduation
+        - Supports pagination for 10K+ historical tokens
+
+        Args:
+            limit: Total number of graduated tokens to fetch (paginated in batches of 100)
+
+        Returns:
+            List of graduated token data
+        """
+        logger.info("🔍 Fetching graduated pump.fun tokens from Moralis API...")
+
+        # Get API key from environment
+        moralis_api_key = os.getenv('MORALIS_API_KEY')
+        if not moralis_api_key:
+            logger.error("❌ MORALIS_API_KEY not found in environment")
+            logger.error("   Sign up for free at moralis.com (no credit card needed)")
+            logger.error("   Then add MORALIS_API_KEY to .env file")
+            return []
+
+        graduated_tokens = []
+        cursor = None
+        page = 0
+
+        async with aiohttp.ClientSession() as session:
+            while len(graduated_tokens) < limit:
+                page += 1
+                page_limit = min(100, limit - len(graduated_tokens))  # Max 100 per request
+
+                # Build URL with pagination
+                url = f"https://solana-gateway.moralis.io/token/mainnet/exchange/pumpfun/graduated?limit={page_limit}"
+                if cursor:
+                    url += f"&cursor={cursor}"
+
+                headers = {'X-API-Key': moralis_api_key}
+
+                try:
+                    logger.info(f"   📄 Fetching page {page} ({page_limit} tokens)...")
+
+                    async with session.get(url, headers=headers, timeout=30) as response:
+                        if response.status != 200:
+                            logger.error(f"❌ Moralis API error: {response.status}")
+                            text = await response.text()
+                            logger.error(f"Response: {text[:500]}")
+                            break
+
+                        data = await response.json()
+                        tokens = data.get('tokens', [])
+                        cursor = data.get('cursor')
+
+                        if not tokens:
+                            logger.info(f"   ✅ Reached end of data (page {page})")
+                            break
+
+                        # Convert to our format
+                        for token in tokens:
+                            # Parse graduation timestamp
+                            graduated_at = token.get('graduatedAt', '')
+                            try:
+                                created_timestamp = int(datetime.fromisoformat(graduated_at.replace('Z', '+00:00')).timestamp()) if graduated_at else None
+                            except:
+                                created_timestamp = None
+
+                            graduated_tokens.append({
+                                'address': token.get('tokenAddress'),
+                                'symbol': token.get('symbol', 'UNKNOWN'),
+                                'name': token.get('name', 'Unknown'),
+                                'logo': token.get('logo'),
+                                'decimals': token.get('decimals', 9),
+                                'price_usd': float(token.get('priceUsd', '0').replace(' USD', '').replace('$', '')),
+                                'price_native': token.get('priceNative', '0'),
+                                'liquidity_usd': float(token.get('liquidity', '0').replace(' SOL', '')) * 150,  # Rough SOL->USD
+                                'market_cap': float(token.get('fullyDilutedValuation', '0').replace(' USD', '').replace('$', '')),
+                                'created_at': created_timestamp,
+                                'graduated_at': graduated_at,
+                                'dex_url': f"https://pump.fun/{token.get('tokenAddress')}"
+                            })
+
+                        logger.info(f"   ✅ Got {len(tokens)} tokens (total: {len(graduated_tokens)})")
+
+                        # If no cursor, we've reached the end
+                        if not cursor:
+                            logger.info(f"   🏁 No more pages available")
+                            break
+
+                        # Rate limit: 2 calls/sec on free tier
+                        await asyncio.sleep(0.6)
+
+                except Exception as e:
+                    logger.error(f"❌ Error fetching from Moralis: {e}")
+                    import traceback
+                    logger.error(traceback.format_exc())
+                    break
+
+        logger.info(f"📊 Moralis API returned {len(graduated_tokens)} graduated tokens")
+        return graduated_tokens
+
     async def fetch_trending_tokens_dexscreener(self, min_volume_24h: int = 50000) -> List[Dict]:
         """
         Fetch trending Solana tokens from DexScreener (FREE API)
@@ -478,26 +581,30 @@ class ExternalDataScraper:
         Returns:
             Tuple of (token_results, discovered_kols)
         """
-        logger.info(f"🚀 Analyzing graduated pump.fun tokens...")
+        logger.info(f"🚀 Analyzing graduated pump.fun tokens from Moralis API...")
 
-        # Fetch recently graduated tokens from pump.fun
-        tokens = await self.fetch_graduated_tokens_pumpfun(limit=500)
+        # Fetch graduated tokens from Moralis (FREE with dedicated pump.fun endpoint)
+        tokens = await self.fetch_graduated_tokens_moralis(limit=max_tokens)
 
-        logger.info(f"📊 pump.fun API returned {len(tokens)} graduated tokens")
+        logger.info(f"📊 Moralis API returned {len(tokens)} graduated tokens")
 
-        # For graduated tokens, filter by market cap instead of gain %
-        # Graduated = already successful (bonded $60k+)
-        # Filter for tokens with mcap > $100k (moderate success) or > $500k (big winners)
-        min_mcap = 100000 if min_gain_percent <= 100 else 500000
+        # Filter for successful graduated tokens based on market cap
+        # Moralis gives us tokens that already graduated ($60k+ bonding curve completion)
+        # Filter by current market cap to find the real winners
+        min_mcap = 100000  # $100k+ = moderate success (1.6x from graduation)
+        if min_gain_percent >= 200:  # If looking for big winners
+            min_mcap = 500000  # $500k+ = major success (8x from graduation)
 
         winners = []
         for token in tokens:
-            mcap = token.get('liquidity_usd', 0)
+            mcap = token.get('market_cap', 0)
 
+            # All graduated tokens are already 1x winners (completed bonding)
+            # Filter by current mcap to find 2x, 5x, 10x+ performers
             if mcap >= min_mcap:
                 winners.append(token)
 
-        logger.info(f"✅ Found {len(winners)} graduated tokens with mcap >${min_mcap/1000}k (out of {len(tokens)} total)")
+        logger.info(f"✅ Found {len(winners)} graduated tokens with MCAP >${min_mcap/1000:.0f}k (out of {len(tokens)} total)")
 
         # Track which wallets appear in multiple winners (potential new KOLs)
         wallet_appearances = {}  # wallet -> [token_address, ...]
@@ -733,15 +840,15 @@ async def main():
     MIN_GAIN = 100  # 100% = 2x minimum (was 200 for 3x, lowered to find more data)
     MAX_TOKENS = 1000  # Analyze up to 1000 tokens for comprehensive data
 
-    logger.info("🚀 Starting external data scraper (pump.fun GRADUATED TOKENS)...")
+    logger.info("🚀 Starting external data scraper (MORALIS GRADUATED TOKENS)...")
     logger.info("📋 Configuration:")
-    logger.info(f"   Source: pump.fun graduated tokens (bonded successfully)")
-    logger.info(f"   Minimum market cap: $100k+ (moderate success)")
+    logger.info(f"   Source: Moralis pump.fun graduated tokens API (FREE tier)")
+    logger.info(f"   Filter: Minimum MCAP $100k+ (moderate/high success)")
     logger.info(f"   Max tokens to analyze: {MAX_TOKENS}")
-    logger.info(f"   Estimated cost: ~{MAX_TOKENS * 5} Helius credits (0.05% of 8.9M budget)")
+    logger.info(f"   Estimated cost: ~{MAX_TOKENS * 5} Helius credits (0.05% of budget)")
     logger.info("")
     logger.info("📋 Data Collection Per Token:")
-    logger.info("   1. pump.fun data (FREE): Graduated tokens with $100k+ mcap")
+    logger.info("   1. Moralis data (FREE): Graduated tokens with exact timestamps, MCAP, liquidity")
     logger.info("   2. KOL involvement (~2 credits): Which wallets bought it")
     logger.info("   3. On-chain metrics (~2 credits): Holder distribution, supply economics")
     logger.info("   4. Security data (FREE): RugCheck, TokenSniffer, Birdeye APIs")
