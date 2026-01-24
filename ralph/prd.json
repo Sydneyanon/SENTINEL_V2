@@ -522,9 +522,9 @@
         "Test Telegram formatting looks clean",
         "Deploy and monitor for formatting issues"
       ],
-      "priority": 4,
+      "priority": 0,
       "passes": false,
-      "notes": "USER REQUEST: Make signals more transparent and trustworthy",
+      "notes": "EXECUTE NEXT - User requested OPT-027 + OPT-041 together (2026-01-24). Make signals more transparent and trustworthy by showing which KOLs are behind each signal.",
       "baseline_metrics": {}
     },
     {
@@ -780,9 +780,9 @@
         "Monitor for 6 hours",
         "Keep if: credits per signal drops >40% with no quality loss"
       ],
-      "priority": 4,
+      "priority": 0,
       "passes": false,
-      "notes": "INFRASTRUCTURE: We've wasted tons of credits. Every call costs money. Optimize ruthlessly.",
+      "notes": "EXECUTE NEXT - User requested OPT-027 + OPT-041 together (2026-01-24). Critical: 1.1M/10M credits used (11%). OPT-055 already saves 80-85%, OPT-041 targets additional 40%+ reduction. Optimize ruthlessly - every call costs money.",
       "baseline_metrics": {}
     },
     {
