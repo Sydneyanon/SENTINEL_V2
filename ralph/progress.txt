@@ -1425,3 +1425,85 @@ self.bonding_curve_cache[token_address] = {
 
 ---
 
+## 2026-01-24 07:30 UTC - OPT-035 DEPLOYED: Monitoring Phase
+
+### Deployment Confirmation
+- ✅ PR #76 merged at 01:46:42 UTC
+- ✅ Railway auto-deployed (commit 4e10ce8)
+- ✅ Includes both OPT-000 prerequisite infrastructure AND OPT-035 speed optimizations
+- ⏳ **MONITORING: 6 hours required (target completion: 07:46 UTC)**
+
+### Deployed Changes
+
+**1. Parallel Metadata Fetching:**
+- Before: Sequential (PumpPortal → Helius → DexScreener = 3300ms)
+- After: Parallel (asyncio.gather = 1500ms max)
+- **Savings: 1800ms (55% faster)**
+
+**2. Bonding Curve Cache:**
+- TTL: 5 seconds
+- Expected cache hit rate: ~80%
+- **Savings: 1200ms per poll (cached)**
+
+**3. Total Latency Improvement:**
+- Before: 5.5-7.5s typical
+- After: 3-4s estimated (25-35% faster)
+- Target: <60s from KOL buy (WELL UNDER TARGET)
+
+### Monitoring Metrics (To Track)
+
+**Primary Metric:**
+- ✅ **avg_ROI improvement >15%** (earlier entry = better prices)
+
+**Secondary Metrics:**
+- Cache hit rate (target: 75-85%)
+- End-to-end latency (target: <4s)
+- No errors or failures from parallel execution
+- Credit usage stable or reduced (cache efficiency)
+
+### Decision Criteria (After 6h)
+
+**KEEP if ANY of these:**
+- avg_ROI improved >15% (earlier entry)
+- Latency reduced >25% (3-4s vs 5.5-7.5s baseline)
+- Cache working effectively (75%+ hit rate)
+- No implementation issues
+
+**REVERT if:**
+- Errors from parallel execution
+- Cache causing stale data issues
+- No measurable improvement
+
+**Expected Outcome:** KEEP (high confidence - pure performance optimization with no logic changes)
+
+### Parallel Deployments
+
+This PR also deployed:
+- **OPT-000 Infrastructure:** Outcome tracking for future data-driven optimizations
+- Waiting 24-48h for data collection before implementing OPT-000
+
+### Next Optimizations Available
+
+**Can implement NOW (no data dependencies):**
+1. **OPT-002**: Reduce Helius credit waste (cache tuning)
+2. **OPT-001**: Test conviction thresholds 65, 70, 75, 80
+3. **OPT-018**: Parallel A/B test multiple thresholds
+4. **OPT-004**: Tune bundle detection penalties
+
+**Blocked (need outcome data, available ~2026-01-25):**
+- OPT-000: Kill losing patterns
+- OPT-019: Blacklist bad KOLs
+- OPT-034: Time-based filtering
+- OPT-037+: Pattern learning and ML
+
+### Recommendation
+
+**Action Plan:**
+1. **Wait for OPT-035 monitoring window** (6h from deployment = ~08:00 UTC)
+2. **Meanwhile, implement OPT-002** (credit waste reduction - synergizes with OPT-035 caching)
+3. **Decide on OPT-035** after 6h
+4. **Continue with OPT-001 or OPT-018** (threshold optimization)
+5. **OPT-000 and data-driven optimizations** become available tomorrow
+
+---
+
