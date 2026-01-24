@@ -45,3 +45,8 @@ apify-client>=1.7.0
 # - Telegram: Built-in monitor (alternative to external scraper)
 # Twitter/LunarCrush use aiohttp (already included above)
 telethon>=1.28.0  # Telegram client (only if using built-in monitor)
+
+# Machine Learning Dependencies (Ralph Autonomous Learning)
+xgboost>=2.0.3
+scikit-learn>=1.4.0
+numpy>=1.26.0

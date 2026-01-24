@@ -11,6 +11,7 @@ from lunarcrush_fetcher import get_lunarcrush_fetcher
 from twitter_fetcher import get_twitter_fetcher
 from credit_tracker import get_credit_tracker  # OPT-055: Track credit usage
 from rugcheck_api import get_rugcheck_api  # RugCheck.xyz API integration
+from ralph.integrate_ml import get_ml_predictor  # ML predictions for conviction scoring
 
 
 class ConvictionEngine:
@@ -56,6 +57,9 @@ class ConvictionEngine:
 
         # Initialize RugCheck.xyz API
         self.rugcheck = get_rugcheck_api()
+
+        # Initialize ML predictor
+        self.ml_predictor = get_ml_predictor()
         
     async def analyze_token(
         self, 
@@ -85,8 +89,12 @@ class ConvictionEngine:
             # ================================================================
             # PHASE 1: FREE BASE SCORE (0-60 points)
             # ================================================================
-            
+
             base_scores = {}
+
+            # Initialize ML prediction result (will be populated later)
+            ml_result = {'ml_enabled': False, 'ml_bonus': 0, 'prediction_class': 0,
+                        'class_name': 'unknown', 'confidence': 0.0}
             
             # 1. Smart Wallet Activity (0-40 points)
             smart_wallet_data = await self.smart_wallet_tracker.get_smart_wallet_activity(
@@ -507,7 +515,17 @@ class ConvictionEngine:
             # ================================================================
 
             final_score = mid_total + holder_result['penalty'] + holder_result['kol_bonus']
-            
+
+            # ML Prediction - Add conviction bonus based on predicted outcome
+            kol_count = smart_wallet_data.get('wallet_count', 0)
+            ml_result = self.ml_predictor.predict_for_signal(token_data, kol_count=kol_count)
+
+            if ml_result['ml_enabled']:
+                logger.info(f"   🤖 ML Prediction: {ml_result['class_name']} "
+                           f"({ml_result['confidence']*100:.0f}% confident)")
+                logger.info(f"      Conviction bonus: {ml_result['ml_bonus']:+d} points")
+                final_score += ml_result['ml_bonus']
+
             # Determine threshold
             threshold = config.MIN_CONVICTION_SCORE if is_pre_grad else config.POST_GRAD_THRESHOLD
             
@@ -542,6 +560,7 @@ class ConvictionEngine:
                     'rugcheck_penalty': rugcheck_penalty,
                     'holder_penalty': holder_result['penalty'],
                     'kol_bonus': holder_result['kol_bonus'],
+                    'ml_bonus': ml_result.get('ml_bonus', 0),
                     'total': final_score
                 },
                 'rug_checks': {
@@ -552,7 +571,8 @@ class ConvictionEngine:
                 'social_data': social_data,
                 'twitter_data': twitter_data,
                 'telegram_call_data': telegram_call_data,
-                'smart_wallet_data': smart_wallet_data  # FIXED: Include wallet data for display
+                'smart_wallet_data': smart_wallet_data,  # FIXED: Include wallet data for display
+                'ml_prediction': ml_result  # ML prediction with class, confidence, and bonus
             }
             
         except Exception as e:
