@@ -678,8 +678,33 @@ class ActiveTokenTracker:
             conviction_data['signal_type'] = 'KOL_TRIGGERED'
             conviction_data['bonding_curve_pct'] = state.token_data.get('bonding_curve_pct', 0)
             conviction_data['kol_buy_count'] = state.kol_buy_count
-            
-            # Save to database
+
+            # OPT-016: Extract KOL wallet data for performance tracking
+            kol_wallets = [w['address'] for w in state.kol_buys] if state.kol_buys else []
+            kol_tiers = [w.get('tier', 'unknown') for w in state.kol_buys] if state.kol_buys else []
+
+            # Get narratives from conviction breakdown
+            breakdown = conviction_data.get('breakdown', {})
+            narrative_tags = []
+            if breakdown.get('narrative', 0) > 0:
+                # Extract primary narrative if available
+                primary = conviction_data.get('primary_narrative')
+                if primary:
+                    narrative_tags.append(primary)
+
+            # Determine holder pattern from conviction data
+            holder_concentration = breakdown.get('holder_concentration', {})
+            holder_penalty = holder_concentration.get('penalty', 0)
+            if holder_penalty < -20:
+                holder_pattern = 'highly_concentrated'
+            elif holder_penalty < -10:
+                holder_pattern = 'concentrated'
+            elif holder_concentration.get('kol_bonus', 0) > 0:
+                holder_pattern = 'kol_heavy'
+            else:
+                holder_pattern = 'distributed'
+
+            # Save to database with full metadata
             if self.db:
                 await self.db.insert_signal({
                     'token_address': token_address,
@@ -692,6 +717,10 @@ class ActiveTokenTracker:
                     'liquidity': state.token_data.get('liquidity', 0),
                     'volume_24h': state.token_data.get('volume_24h', 0),
                     'market_cap': state.token_data.get('market_cap', 0),
+                    'kol_wallets': kol_wallets,
+                    'kol_tiers': kol_tiers,
+                    'narrative_tags': narrative_tags,
+                    'holder_pattern': holder_pattern,
                 })
             
             # Post to Telegram
@@ -704,49 +733,7 @@ class ActiveTokenTracker:
 
                 if self.db:
                     await self.db.mark_signal_posted(token_address, message_id)
-
-                    # OPT-000 PREREQUISITE: Save signal metadata for pattern analysis
-                    try:
-                        # Extract metadata from conviction_data
-                        kol_wallets = [w['address'] for w in state.kol_buys] if state.kol_buys else []
-                        kol_tiers = [w.get('tier', 'unknown') for w in state.kol_buys] if state.kol_buys else []
-
-                        # Get narratives from conviction breakdown
-                        breakdown = conviction_data.get('breakdown', {})
-                        narrative_tags = []
-                        if breakdown.get('narrative', 0) > 0:
-                            # Extract primary narrative if available
-                            primary = conviction_data.get('primary_narrative')
-                            if primary:
-                                narrative_tags.append(primary)
-
-                        # Determine holder pattern from conviction data
-                        holder_concentration = breakdown.get('holder_concentration', {})
-                        holder_penalty = holder_concentration.get('penalty', 0)
-                        if holder_penalty < -20:
-                            holder_pattern = 'highly_concentrated'
-                        elif holder_penalty < -10:
-                            holder_pattern = 'concentrated'
-                        elif holder_concentration.get('kol_bonus', 0) > 0:
-                            holder_pattern = 'kol_heavy'
-                        else:
-                            holder_pattern = 'distributed'
-
-                        # Update signal metadata
-                        await self.db.update_signal_metadata(
-                            token_address=token_address,
-                            narrative_tags=narrative_tags,
-                            kol_wallets=kol_wallets,
-                            kol_tiers=kol_tiers,
-                            holder_pattern=holder_pattern
-                        )
-
-                        logger.debug(
-                            f"📊 Saved metadata: narratives={narrative_tags}, "
-                            f"kols={len(kol_wallets)}, pattern={holder_pattern}"
-                        )
-                    except Exception as e:
-                        logger.warning(f"⚠️ Failed to save signal metadata: {e}")
+                    # OPT-016: Metadata now saved at insert time (see above)
 
                 logger.info(f"✅ Signal sent for ${symbol}")
             else:
