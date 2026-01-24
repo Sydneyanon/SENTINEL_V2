@@ -182,13 +182,14 @@ class ExternalDataScraper:
             'new_wallet_count': 0,
         }
 
-    async def analyze_successful_tokens(self, min_gain_percent: float = 200) -> tuple[List[Dict], Dict]:
+    async def analyze_successful_tokens(self, min_gain_percent: float = 200, max_tokens: int = 500) -> tuple[List[Dict], Dict]:
         """
         Find tokens that mooned and check if our KOLs bought them
         ALSO discovers new potential KOLs!
 
         Args:
             min_gain_percent: Minimum gain % to consider (200 = 3x)
+            max_tokens: Maximum tokens to analyze (default 500, can go up to 1000+)
 
         Returns:
             Tuple of (token_results, discovered_kols)
@@ -215,8 +216,13 @@ class ExternalDataScraper:
         results = []
         credits_used = 0
 
-        for i, token in enumerate(winners[:100]):  # Limit to top 100 to save credits
-            logger.info(f"📊 Checking {i+1}/{len(winners[:100])}: {token['symbol']} ({token['price_change_24h']:.0f}% gain)")
+        # Limit to max_tokens to control credit usage
+        # 500 tokens = ~1000 credits (0.01% of remaining budget)
+        # 1000 tokens = ~2000 credits (0.02% of remaining budget)
+        tokens_to_analyze = min(len(winners), max_tokens)
+
+        for i, token in enumerate(winners[:tokens_to_analyze]):
+            logger.info(f"📊 Checking {i+1}/{tokens_to_analyze}: {token['symbol']} ({token['price_change_24h']:.0f}% gain)")
 
             kol_data = await self.check_kol_involvement(
                 token['address'],
@@ -381,19 +387,30 @@ class ExternalDataScraper:
 
 async def main():
     """Main scraping workflow"""
+    # Configurable parameters
+    MIN_GAIN = 200  # 200% = 3x minimum
+    MAX_TOKENS = 500  # Analyze up to 500 tokens (can increase to 1000+)
+
     logger.info("🚀 Starting external data scraper...")
-    logger.info("📋 This will:")
+    logger.info("📋 Configuration:")
+    logger.info(f"   Minimum gain: {MIN_GAIN}% (3x)")
+    logger.info(f"   Max tokens to analyze: {MAX_TOKENS}")
+    logger.info(f"   Estimated cost: ~{MAX_TOKENS * 2} Helius credits")
+    logger.info("")
+    logger.info("📋 Process:")
     logger.info("   1. Fetch trending Solana tokens from DexScreener (FREE)")
     logger.info("   2. Filter for big winners (200%+ gains)")
     logger.info("   3. Check which of OUR KOLs bought them")
     logger.info("   4. DISCOVER new wallets that bought 2+ winners")
-    logger.info("   5. Cost: ~1000-2000 Helius credits (one-time)")
     logger.info("")
 
     scraper = ExternalDataScraper()
 
     # Scrape and analyze
-    results, discovered_kols = await scraper.analyze_successful_tokens(min_gain_percent=200)
+    results, discovered_kols = await scraper.analyze_successful_tokens(
+        min_gain_percent=MIN_GAIN,
+        max_tokens=MAX_TOKENS
+    )
 
     # Save results
     await scraper.save_results(results, discovered_kols)

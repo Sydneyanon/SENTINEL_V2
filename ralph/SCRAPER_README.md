@@ -44,8 +44,8 @@ Creates `ralph/external_data.json` with:
 ```json
 {
   "scraped_at": "2026-01-24T...",
-  "token_count": 45,
-  "discovered_kols_count": 12,
+  "token_count": 487,
+  "discovered_kols_count": 156,
   "tokens": [
     {
       "address": "...",
@@ -93,10 +93,19 @@ Based on real data:
 ## Credit Usage
 
 - **DexScreener**: FREE (no API key needed)
-- **Helius** (checking KOL involvement): ~1-2 credits per token
-- **Total for 100 tokens**: ~200 credits (one-time cost)
+- **Helius** (checking KOL involvement): ~2 credits per token
+- **Total for 500 tokens** (default): ~1,000 credits (0.01% of remaining budget)
+- **Total for 1000 tokens** (max): ~2,000 credits (0.02% of remaining budget)
 
-**ROI**: Massive! Learn from 100+ real outcomes for <1% of your credit budget.
+**ROI**: Massive! Learn from 500-1000 real outcomes for <0.02% of your credit budget.
+
+### Configurable Parameters
+
+In `ralph/scrape_external_data.py`, adjust:
+```python
+MIN_GAIN = 200  # 200% = 3x minimum (can lower to 100 for 2x)
+MAX_TOKENS = 500  # Default 500, can increase to 1000+
+```
 
 ## Next Steps After Running
 
@@ -110,8 +119,13 @@ Based on real data:
 
 Instead of waiting days for OUR signals (getting none at 75 threshold), we:
 - Analyze the ENTIRE ecosystem immediately
-- Learn from 100+ successful tokens
-- Discover what ACTUALLY works
+- Learn from **500-1000 successful tokens** (huge dataset!)
+- Discover what ACTUALLY works across the market
 - Apply learnings to fix our conviction scoring
 
-**Result**: Tomorrow Ralph can optimize based on REAL DATA, not guesses.
+**Sample Size Matters:**
+- 100 tokens: OK, but limited statistical power
+- **500 tokens: STRONG** - can find real patterns with confidence
+- **1000 tokens: EXCELLENT** - discover even rare but profitable patterns
+
+**Result**: Tomorrow Ralph can optimize based on REAL DATA from hundreds of tokens, not guesses.
