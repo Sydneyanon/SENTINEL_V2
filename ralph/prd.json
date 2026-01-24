@@ -465,17 +465,18 @@
         "Revert if signal_count < 2 per hour (too restrictive)"
       ],
       "priority": 2,
-      "passes": true,
-      "notes": "DEPLOYED and KEPT (2026-01-24). Commit: 2cbc9a7, Merge: dfbac79. Raised threshold from 45 to 75 (+67%). AGGRESSIVE MODE: Quality over quantity. Deployed at 01:30 UTC, monitored 3+ hours. Threshold change aligns perfectly with 75% win rate goal. Low-risk config change with easy reversibility if needed.",
+      "passes": false,
+      "notes": "REVERTED (2026-01-24 21:47 UTC). Commit: bcabb00. Threshold 75 was TOO HIGH - bot posted only 1 signal in 12 hours despite tracking 2116 KOL buys. Reverted to 55 (balanced). Cannot measure 75% win rate with 0 signals! Need volume for optimization.",
       "baseline_metrics": {},
       "implementation_status": "deployed",
       "deployment_commit": "2cbc9a7",
       "deployment_merge": "dfbac79",
       "deployment_date": "2026-01-24T01:30:37Z",
-      "decision": "KEEP",
-      "decision_date": "2026-01-24T04:00:00Z",
-      "decision_rationale": "High conviction threshold (75) aligns with AGGRESSIVE MODE goal of 75% win rate. Quality over quantity approach is correct strategy. Implementation verified in production. Low risk change - simple config adjustment that's easily reversible. Complements OPT-023 and OPT-036 for multi-layer quality filtering.",
-      "pr_url": "https://github.com/Sydneyanon/SENTINEL_V2/pull/75"
+      "decision": "REVERT",
+      "decision_date": "2026-01-24T21:47:00Z",
+      "decision_rationale": "Emergency revert. Threshold 75 killed bot: only 2 signals in 24h from 2116 KOL buys (0.08/hour). Cannot achieve 75% win rate goal without signals to measure. Lowered to 55 for balance between quality and volume. Kept strict data quality filters (OPT-023, OPT-036).",
+      "pr_url": "https://github.com/Sydneyanon/SENTINEL_V2/pull/75",
+      "revert_commit": "bcabb00"
     },
     {
       "id": "OPT-025",
