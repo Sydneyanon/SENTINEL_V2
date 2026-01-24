@@ -36,7 +36,7 @@ except ImportError:
 class MLPipeline:
     """ML training and prediction pipeline"""
 
-    def __init__(self, data_file: str = 'ralph/external_data.json', model_dir: str = 'ralph/models'):
+    def __init__(self, data_file: str = 'external_data.json', model_dir: str = 'models'):
         self.data_file = data_file
         self.model_dir = model_dir
         self.model = None
