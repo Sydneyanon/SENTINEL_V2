@@ -1,6 +1,6 @@
 {
   "project": "Prometheus Signals Bot",
-  "branchName": "ralph/optimize-v1",
+  "branchName": "main",
   "description": "Autonomous optimization of Prometheus memecoin signals bot - AGGRESSIVE MODE: Target 75% win rate",
   "goal": "75% win rate using any optimization necessary",
   "userStories": [
