@@ -2,6 +2,15 @@
 
 **USER REQUEST: Highest priority task - collect 1000 token dataset**
 
+## ✅ FIXED: Now Using DexScreener (Not pump.fun)
+
+The scraper has been updated to use **DexScreener API** which is:
+- ✅ FREE (no rate limits)
+- ✅ RELIABLE (works on Railway)
+- ✅ COMPREHENSIVE (all Solana tokens)
+
+**pump.fun API was failing - we switched to DexScreener**
+
 ## What You Need to Do RIGHT NOW
 
 ```bash
