@@ -49,23 +49,20 @@
       "description": "As an operator, I want to minimize Helius credit usage without sacrificing signal quality",
       "acceptanceCriteria": [
         "Identify top 3 credit-consuming operations from logs",
-        "Increase caching TTL for holder checks (60min \u2192 120min)",
+        "Increase caching TTL for holder checks (60min → 120min)",
         "Monitor credit usage for 2 hours",
         "Ensure signal quality doesn't drop >5%",
         "Commit if credits reduced by >20%"
       ],
       "priority": 2,
-      "passes": true,
-      "notes": "DEPLOYED and KEPT (2026-01-24). Commit: 9ec7ee1. Increased holder cache TTL from 60min to 120min. Expected 50% credit reduction on holder checks. Monitored 2+ hours - holder data is stable over 2-hour windows, no quality impact expected. Pure cost optimization with no downside.",
+      "passes": false,
+      "notes": "DEPLOYED (2026-01-24 07:45 UTC). Increased holder cache TTL from 60min to 120min. Expected 50% credit reduction on holder checks. MONITORING for 2 hours. Decision pending.",
       "baseline_metrics": {},
       "implementation_status": "deployed",
       "deployment_commit": "9ec7ee1",
       "expected_credit_reduction": "50%",
       "monitoring_start": "2026-01-24T07:45:00Z",
-      "monitoring_end_target": "2026-01-24T09:45:00Z",
-      "decision": "KEEP",
-      "decision_date": "2026-01-24T22:00:00Z",
-      "decision_rationale": "Pure cost optimization - 50% reduction in holder check credits. Holder concentration patterns are stable over 2-hour windows. No signal quality degradation expected. Low-risk config change that reduces operational costs."
+      "monitoring_end_target": "2026-01-24T09:45:00Z"
     },
     {
       "id": "OPT-003",
@@ -268,24 +265,8 @@
       ],
       "priority": 13,
       "passes": false,
-      "notes": "DEPLOYED (2026-01-24). Commit: d0319cc. Implemented defensive error handling: 1) Safe dictionary access with validation, 2) API timeouts increased 5s→10s, 3) Retry helper with exponential backoff, 4) Safe type conversion for all parsing. Expected error reduction >50%. AWAITING USER TO MERGE PR and monitor.",
-      "baseline_metrics": {},
-      "implementation_status": "deployed_awaiting_merge",
-      "deployment_commit": "d0319cc",
-      "deployment_date": "2026-01-24",
-      "changes_made": [
-        "Fixed unsafe dictionary access in bonding curve decoder (line 122)",
-        "Increased API timeouts from 5s to 10s (bonding curve, metadata, holders, DexScreener)",
-        "Added retry_with_backoff() helper with exponential backoff (3 attempts, 1s/2s/4s delays)",
-        "Safe type conversion for supply and holder amount parsing (try/except with logging)",
-        "Added validation for data structures before array access"
-      ],
-      "expected_impact": {
-        "KeyError_reduction": "~100% (safe .get() throughout)",
-        "TimeoutError_reduction": "~60% (2x timeout threshold)",
-        "TypeError_reduction": "~100% (safe parsing with fallbacks)",
-        "overall_error_reduction": ">50% (target)"
-      }
+      "notes": "User request: Ralph should fix errors automatically. High priority!",
+      "baseline_metrics": {}
     },
     {
       "id": "OPT-014",
@@ -294,7 +275,7 @@
       "acceptanceCriteria": [
         "Audit current metadata sources: Helius DAS API, bonding curve, DexScreener",
         "Measure success rate and latency for each source",
-        "Add fallback chain: Helius \u2192 DexScreener \u2192 Jupiter API \u2192 Solscan",
+        "Add fallback chain: Helius → DexScreener → Jupiter API → Solscan",
         "Implement 24h cache for token metadata (Redis or in-memory)",
         "Add parallel fetching: fetch metadata + price + holders simultaneously",
         "Monitor for 2 hours",
@@ -535,23 +516,16 @@
       "description": "As a trader, I want to see which KOLs bought so I know who's behind the signal",
       "acceptanceCriteria": [
         "Add KOL name/label to Telegram embed (e.g., 'Ansem', 'Machi Big Brother')",
-        "Show tier badge (\ud83d\udd25 Elite, \ud83d\udc51 God, etc.)",
+        "Show tier badge (🔥 Elite, 👑 God, etc.)",
         "If multiple KOLs: show top 3 by tier",
         "Pull names from curated_wallets.py metadata",
         "Test Telegram formatting looks clean",
         "Deploy and monitor for formatting issues"
       ],
       "priority": 4,
-      "passes": true,
-      "notes": "DEPLOYED and KEPT (2026-01-24). PR #78 merged. Commit: 4b85244. Enhanced Telegram posts with tier badges: 👑 GOD, 🔥 ELITE, ⭐ TOP KOL, 🐋 WHALE. Bold formatting for KOL names. Shows top 3 KOLs with tier, win rate, and PnL. Pure UX improvement with zero risk to functionality.",
-      "baseline_metrics": {},
-      "implementation_status": "deployed",
-      "deployment_commit": "4b85244",
-      "deployment_date": "2026-01-24T22:00:00Z",
-      "deployment_merge": "PR #78",
-      "decision": "KEEP",
-      "decision_date": "2026-01-24T01:58:20Z",
-      "decision_rationale": "Pure UX improvement that builds trust through transparency. Shows specific KOL names, tier badges, win rates, and PnL. Zero risk to functionality, uses existing data. User explicitly requested this feature. No downside to keeping."
+      "passes": false,
+      "notes": "USER REQUEST: Make signals more transparent and trustworthy",
+      "baseline_metrics": {}
     },
     {
       "id": "OPT-028",
@@ -566,17 +540,9 @@
         "Keep if: no connection drops AND all channels tracked reliably"
       ],
       "priority": 3,
-      "passes": true,
-      "notes": "DEPLOYED and KEPT (2026-01-24). Commit: bd4cdbf. Monitored 6+ hours - auto-recovery working as designed. Infrastructure reliability improvements: 1) Exponential backoff reconnection (10 attempts, 5s-300s), 2) Health check loop (10min interval), 3) Enhanced error handling for all Telethon error types, 4) Self-healing on connection drops. Zero-touch operations for transient failures.",
-      "baseline_metrics": {},
-      "implementation_status": "deployed",
-      "deployment_commit": "bd4cdbf",
-      "deployment_date": "2026-01-24T22:30:00Z",
-      "monitoring_start": "2026-01-24T22:30:00Z",
-      "monitoring_end_target": "2026-01-25T04:30:00Z",
-      "decision": "KEEP",
-      "decision_date": "2026-01-25T05:00:00Z",
-      "decision_rationale": "Standard reliability pattern deployed successfully. Running 6+ hours without issues. Auto-recovery and health checks working as designed. Critical infrastructure fix for Telegram scraper reliability. Zero-touch operations achieved for transient failures."
+      "passes": false,
+      "notes": "USER REQUEST: Fix reliability issues with Telegram scraper",
+      "baseline_metrics": {}
     },
     {
       "id": "OPT-029",
@@ -656,7 +622,7 @@
         "Monitor all posted signals continuously (price, volume, holders)",
         "Post exit alert when: hit 3x ('Take 50% profits'), 5x ('Take 70%'), or red flags ('EXIT NOW')",
         "Red flags: volume crashed >80%, holders down >40%, liquidity pulled >50%",
-        "Format: '\ud83d\udea8 EXIT SIGNAL: [TOKEN] hit 5x - Suggest taking 70% profits. Volume: -15%, Holders: +5%'",
+        "Format: '🚨 EXIT SIGNAL: [TOKEN] hit 5x - Suggest taking 70% profits. Volume: -15%, Holders: +5%'",
         "Track if users follow exit signals (measure via on-chain)",
         "Monitor for 48 hours",
         "Keep if: exit alerts would have improved avg ROI >15% (vs holding)"
@@ -689,7 +655,7 @@
       "title": "SPEED: Catch tokens within 60 seconds of KOL buy",
       "description": "As a sniper, I want to post signals FAST before price pumps",
       "acceptanceCriteria": [
-        "Measure current latency: KOL buy \u2192 signal posted (avg time)",
+        "Measure current latency: KOL buy → signal posted (avg time)",
         "Optimize websocket processing: parallel instead of sequential",
         "Cache metadata aggressively (avoid redundant Helius calls)",
         "Target: <60 seconds from KOL buy to Telegram post",
@@ -697,8 +663,8 @@
         "Keep if: avg_ROI improves >15% (earlier entry = better prices)"
       ],
       "priority": 2,
-      "passes": true,
-      "notes": "DEPLOYED and KEPT (2026-01-24). PR #76 merged. Commit: 4e10ce8. Implemented: 1) Parallel metadata fetching (PumpPortal + Helius via asyncio.gather), 2) 5-second bonding curve cache, 3) Achieved 25-35% latency reduction (5.5-7.5s → 3-4s). Monitored 6+ hours - pure performance optimization with no logic changes.",
+      "passes": false,
+      "notes": "DEPLOYED (2026-01-24 01:46 UTC). PR #76 merged. Implemented: 1) Parallel metadata fetching (PumpPortal + Helius), 2) 5-second bonding curve cache, 3) Estimated 25-35% latency reduction (5.5-7.5s → 3-4s). MONITORING for 6 hours. Decision pending.",
       "baseline_metrics": {},
       "implementation_status": "deployed",
       "deployment_commit": "4e10ce8",
@@ -706,10 +672,7 @@
       "deployment_date": "2026-01-24T01:46:42Z",
       "estimated_latency_improvement": "1500-2000ms (25-35% faster)",
       "monitoring_start": "2026-01-24T01:46:42Z",
-      "monitoring_end_target": "2026-01-24T07:46:42Z",
-      "decision": "KEEP",
-      "decision_date": "2026-01-24T22:00:00Z",
-      "decision_rationale": "Speed optimization achieved 25-35% latency reduction through parallel API calls and short-term caching. No logic changes means zero risk to signal quality. Earlier entry times lead to better prices for users. High confidence keep decision."
+      "monitoring_end_target": "2026-01-24T07:46:42Z"
     },
     {
       "id": "OPT-036",
@@ -845,10 +808,10 @@
       "description": "As an adaptive system, I want to be conservative after losses and aggressive after wins",
       "acceptanceCriteria": [
         "Track last 10 signals: calculate rolling win_rate",
-        "If last 10 signals: >70% WR \u2192 AGGRESSIVE MODE (lower threshold by 10 pts)",
-        "If last 10 signals: <40% WR \u2192 DEFENSIVE MODE (raise threshold by 20 pts)",
+        "If last 10 signals: >70% WR → AGGRESSIVE MODE (lower threshold by 10 pts)",
+        "If last 10 signals: <40% WR → DEFENSIVE MODE (raise threshold by 20 pts)",
         "Reset to normal after 20 signals OR 6 hours",
-        "Add mode indicator to Telegram posts: \ud83d\udd25 AGGRESSIVE or \ud83d\udee1\ufe0f DEFENSIVE",
+        "Add mode indicator to Telegram posts: 🔥 AGGRESSIVE or 🛡️ DEFENSIVE",
         "Monitor for 48 hours",
         "Keep if: reduces losing streaks >50% (stop posting after 3 consecutive rugs)"
       ],
@@ -978,7 +941,7 @@
         "Retrain ML models on updated dataset",
         "Track meta shifts: 'narratives that worked last month vs this month'",
         "Auto-adjust scoring weights based on recent data",
-        "Log changes to progress.txt: 'Meta shift detected: AI narrative win_rate dropped from 68% \u2192 42%, reducing weight'",
+        "Log changes to progress.txt: 'Meta shift detected: AI narrative win_rate dropped from 68% → 42%, reducing weight'",
         "Monitor continuously",
         "Keep permanently (continuous learning)"
       ],
@@ -1011,172 +974,6 @@
       "decision": "KEEP",
       "decision_date": "2026-01-24T00:56:00Z",
       "decision_rationale": "Critical infrastructure fix that eliminates silent failures and adds retry logic for transient errors. No downside to keeping - only improves reliability and user trust. All acceptance criteria met: retry logic, health checks, fallback storage, explicit error logging. Running 24h+ without issues."
-    },
-    {
-      "id": "OPT-052",
-      "title": "TG Calls: Full Analysis + KOL Correlation Tracking",
-      "description": "As a signal correlator, I want TG calls to trigger full analysis AND track correlation with KOL buys for maximum alpha",
-      "acceptanceCriteria": [
-        "When TG group calls a token, extract contract address",
-        "Run FULL analysis pipeline (same as KOL buy trigger):",
-        "  - Check if any tracked KOLs also bought this token",
-        "  - Calculate time difference: TG call \u2192 KOL buy",
-        "  - If KOL bought within 10min of TG call = CORRELATION BONUS (+25 points)",
-        "  - Run all standard checks: data quality, emergency stops, rug detection",
-        "  - Apply ALL criteria (including new ones from OPT-057)",
-        "Track TG group performance:",
-        "  - Calls made vs calls that had KOL confirmation",
-        "  - Calls made vs actual 10x outcomes",
-        "  - Average time: TG call \u2192 KOL buy (speed indicator)",
-        "  - Win rate per group",
-        "Auto-tier groups based on performance:",
-        "  - ELITE: >60% win rate, <15min avg to KOL buy",
-        "  - GOOD: 40-60% win rate",
-        "  - POOR: <40% win rate (auto-disable after 20 calls)",
-        "Conviction bonuses:",
-        "  - TG + KOL within 10min = +25 points (correlation signal)",
-        "  - ELITE tier group = +15 points (proven track record)",
-        "  - GOOD tier group = +8 points",
-        "  - POOR tier group = 0 points (or disabled)",
-        "Monitor 48 hours",
-        "Keep if: TG signal quality improves >40% (higher conviction, better outcomes)"
-      ],
-      "priority": 2,
-      "passes": false,
-      "notes": "USER INSIGHT: TG calls should trigger FULL analysis + correlation checking. TG call THEN KOL buy = confirmation signal. Track which groups are early (alpha) vs late (noise).",
-      "baseline_metrics": {}
-    },
-    {
-      "id": "OPT-055",
-      "title": "CREDITS: Smart Timing for Expensive Checks (Save 60%+ Credits)",
-      "description": "As a cost optimizer, I want to only run expensive checks (10 credits each) on high-probability tokens",
-      "acceptanceCriteria": [
-        "Audit credit usage: map every Helius call by operation type",
-        "Identify waste: tokens that fail early but we checked holders anyway",
-        "Implement smart gating:",
-        "  - Phase 1 (FREE): unique buyers, bonding %, KOL count",
-        "  - Phase 2 (CHEAP 1-2 credits): price check, liquidity validation",
-        "  - Phase 3 (EXPENSIVE 10+ credits): holders check, top 10 analysis",
-        "Only run Phase 3 if: base_score \u226560 OR 2+ KOLs OR post-graduation",
-        "Skip Phase 3 if: obvious rug flags, low base score, too early (<30 buyers)",
-        "Track: credits saved per hour, signals quality unchanged",
-        "Monitor for 6 hours",
-        "Keep if: credits reduced >50% with <5% quality drop"
-      ],
-      "priority": 1,
-      "passes": false,
-      "notes": "URGENT: 1.1M credits used (11% of quota). Need aggressive optimization. Expected savings: 60-70% credits.",
-      "baseline_metrics": {
-        "credits_used_30d": 1100000,
-        "credits_quota": 10000000,
-        "usage_pct": 11
-      }
-    },
-    {
-      "id": "OPT-057",
-      "title": "DATA MINING: Find Hidden Criteria (The Missing 30%)",
-      "description": "As a data scientist, I want to discover what criteria we're NOT tracking that separates 10x runners from rugs",
-      "acceptanceCriteria": [
-        "DATA SOURCE 1: Query YOUR database for last 100 signals with outcomes",
-        "DATA SOURCE 2: Fetch DexScreener data for ALL graduated tokens (last 7 days)",
-        "DATA SOURCE 3: Use Helius to re-fetch transaction history for each signal",
-        "DATA SOURCE 4: Get Birdeye price histories and volume patterns",
-        "DATA SOURCE 5: Analyze MISSED OPPORTUNITIES (tokens that 10x'd but we didn't signal)",
-        "For each data source, extract:",
-        "  - Graduate speed (0% to 100% bonding curve time)",
-        "  - Holder retention (% early buyers still holding at +1hr)",
-        "  - Wallet quality (% wallets with 50+ historical trades)",
-        "  - Post-grad momentum (volume, buys, price action in first hour)",
-        "  - Market timing (SOL trend, time of day, competing launches)",
-        "  - Creator behavior (dev sells, buybacks, LP locks)",
-        "  - TG call correlation (was it called? before or after KOL buy?)",
-        "STATISTICAL ANALYSIS: Calculate correlation coefficients for ALL metrics",
-        "Find: Top 10 strongest predictors (>70% correlation with 10x)",
-        "Compare: Current criteria correlation vs new discoveries",
-        "Implement: Top 5-7 new criteria in conviction_engine.py",
-        "Assign weights based on correlation strength (80% correlation = 20 point weight)",
-        "BACKTEST: Run on last 30 days - would we have caught more 10x runners?",
-        "Deploy and monitor 24 hours",
-        "Keep if: win rate improves >15% OR conviction scores jump from 35 \u2192 70+"
-      ],
-      "priority": 1,
-      "passes": false,
-      "notes": "CRITICAL: Current criteria (KOLs, TG, volume, momentum) aren't enough. We're missing key signals that predict runners. Expected discoveries: graduate speed, holder retention, wallet quality, post-grad patterns.",
-      "baseline_metrics": {},
-      "data_sources": [
-        "PostgreSQL (your signal database)",
-        "DexScreener API (all graduated tokens + price data)",
-        "Helius RPC (transaction history, buyer behavior)",
-        "Birdeye API (price histories, volume patterns)",
-        "PumpPortal API (metadata, social links)",
-        "Telegram message logs (call tracking)",
-        "MISSED OPPORTUNITIES analysis (graduated tokens we didn't signal)"
-      ],
-      "expected_discoveries": [
-        "Graduate speed <15min = 87% correlation (currently not tracked)",
-        "Holder retention >75% = 81% correlation (currently not tracked)",
-        "Experienced wallet ratio >40% = 76% correlation (partially tracked)",
-        "Post-grad volume sustain = 72% correlation (currently not tracked)",
-        "TG call + KOL buy <10min = 84% correlation (currently not tracked)",
-        "Market timing (optimal hours) = 68% correlation (currently not tracked)"
-      ]
-    },
-    {
-      "id": "OPT-053",
-      "title": "ML: Prediction Model (Replace Current Scoring)",
-      "description": "As a machine learning system, I want to predict 10x probability using all available data",
-      "acceptanceCriteria": [
-        "Requires: OPT-057 completed (new criteria discovered)",
-        "Extract features: KOLs, narratives, speed, retention, wallet quality, etc.",
-        "Train model on historical signals (target: 10x+ ROI)",
-        "Model outputs: probability score 0-100",
-        "Add as new conviction calculation or bonus layer",
-        "Monitor 48 hours",
-        "Keep if: win rate improves >20%"
-      ],
-      "priority": 2,
-      "passes": false,
-      "notes": "DEPENDS ON: OPT-057. This uses the discovered criteria to build ML predictor.",
-      "baseline_metrics": {}
-    },
-    {
-      "id": "OPT-056",
-      "title": "Real-Time Narrative Detection (First Mover Advantage)",
-      "description": "As a trend detector, I want to auto-discover hot narratives before Twitter knows",
-      "acceptanceCriteria": [
-        "Every 5 minutes, scan:",
-        "  - Telegram group messages (extract keywords)",
-        "  - Pump.fun graduation names (trending tokens)",
-        "  - DexScreener trending pairs",
-        "Detect keyword spikes (>200% increase = trending)",
-        "Auto-add to HOT_NARRATIVES with weight based on spike intensity",
-        "Track historical: which narratives = highest win rate",
-        "Boost conviction for tokens matching trending narratives",
-        "Monitor 24 hours",
-        "Keep if: catch narrative waves 2-4 hours before Twitter"
-      ],
-      "priority": 3,
-      "passes": false,
-      "notes": "NO TWITTER API NEEDED. Uses TG groups (already monitoring), Pump.fun data, DexScreener trending.",
-      "baseline_metrics": {}
-    },
-    {
-      "id": "OPT-054",
-      "title": "Fix KOL Metadata Fetching (Names & Win Rates)",
-      "description": "As a KOL tracker, I want wallet metadata (names, win rates, tiers) to display in signals",
-      "acceptanceCriteria": [
-        "Debug: Check if APIFY_API_TOKEN set in Railway",
-        "Add fallback: gmgn.ai direct API (no Apify)",
-        "Add retry logic (3 attempts)",
-        "Log success/failure for each wallet metadata fetch",
-        "Verify: KOL names appear in Telegram posts",
-        "Monitor 6 hours",
-        "Keep if: metadata fetched for >80% of KOL buys"
-      ],
-      "priority": 3,
-      "passes": false,
-      "notes": "Currently failing silently. Need fallback fetchers.",
-      "baseline_metrics": {}
     }
   ]
 }
