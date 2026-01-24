@@ -39,6 +39,7 @@ class PerformanceTracker:
         asyncio.create_task(self._pumpportal_websocket_loop())
         asyncio.create_task(self._monitoring_loop())
         asyncio.create_task(self._daily_report_loop())
+        asyncio.create_task(self._outcome_tracking_loop())  # OPT-000 prerequisite
     
     async def stop(self):
         """Stop monitoring"""
@@ -446,3 +447,139 @@ class PerformanceTracker:
         except Exception as e:
             logger.error(f"Error getting stats: {e}")
             return {}
+
+    async def _outcome_tracking_loop(self):
+        """
+        OPT-000 PREREQUISITE: Track signal outcomes after 24 hours
+
+        Runs every hour to check signals that are 24-25 hours old
+        and determine their final outcome for pattern analysis.
+        """
+        while self.running:
+            try:
+                await self._determine_outcomes()
+                await asyncio.sleep(3600)  # Check every hour
+            except Exception as e:
+                logger.error(f"❌ Error in outcome tracking loop: {e}")
+                await asyncio.sleep(3600)
+
+    async def _determine_outcomes(self):
+        """
+        OPT-000 PREREQUISITE: Determine outcomes for signals 24+ hours old
+
+        Outcome categories:
+        - rug: Price went to $0 or dropped >90%
+        - loss: Price below entry (no 2x)
+        - 2x, 5x, 10x, 50x, 100x: Maximum milestone reached
+        """
+        try:
+            # Get signals from 24-48 hours ago that don't have outcomes yet
+            async with self.db.pool.acquire() as conn:
+                signals = await conn.fetch('''
+                    SELECT s.*,
+                           COALESCE(MAX(p.milestone), 0) as max_milestone_reached
+                    FROM signals s
+                    LEFT JOIN performance p ON s.token_address = p.token_address
+                    WHERE s.signal_posted = TRUE
+                    AND s.outcome IS NULL
+                    AND s.created_at BETWEEN NOW() - INTERVAL '48 hours' AND NOW() - INTERVAL '24 hours'
+                    GROUP BY s.id
+                    ORDER BY s.created_at DESC
+                ''')
+
+            for signal_row in signals:
+                signal = dict(signal_row)
+                await self._determine_single_outcome(signal)
+
+            if signals:
+                logger.info(f"📊 Determined outcomes for {len(signals)} signals")
+
+        except Exception as e:
+            logger.error(f"❌ Error determining outcomes: {e}")
+
+    async def _determine_single_outcome(self, signal: Dict):
+        """Determine outcome for a single signal"""
+        try:
+            token_address = signal['token_address']
+            entry_price = signal.get('entry_price')
+            signal_type = signal.get('signal_type', 'POST_GRADUATION')
+
+            if not entry_price or entry_price == 0:
+                logger.debug(f"Skipping outcome for {signal['token_symbol']}: no entry price")
+                return
+
+            # Get current price
+            if signal_type == 'PRE_GRADUATION':
+                current_price = await self._get_pumpfun_price(token_address)
+                if not current_price:
+                    # Might have graduated, try DexScreener
+                    current_price = await self._get_dexscreener_price(token_address)
+            else:
+                current_price = await self._get_dexscreener_price(token_address)
+
+            if not current_price:
+                logger.debug(f"Could not get current price for {signal['token_symbol']}, will retry")
+                return
+
+            # Calculate max ROI
+            max_milestone = signal.get('max_milestone_reached', 0)
+            current_roi = current_price / entry_price
+            max_roi = max(max_milestone, current_roi)
+
+            # Determine outcome
+            outcome = self._calculate_outcome(entry_price, current_price, max_milestone)
+
+            # Get the highest price ever reached
+            max_price_reached = entry_price * max_roi
+
+            # Update database with outcome
+            await self.db.update_signal_outcome(
+                token_address=token_address,
+                outcome=outcome,
+                outcome_price=current_price,
+                max_price_reached=max_price_reached,
+                max_roi=max_roi
+            )
+
+            logger.info(
+                f"📊 Outcome determined: {signal['token_symbol']} = {outcome} "
+                f"(max {max_roi:.2f}x, now {current_roi:.2f}x)"
+            )
+
+        except Exception as e:
+            logger.error(f"❌ Error determining outcome for {signal.get('token_symbol')}: {e}")
+
+    def _calculate_outcome(self, entry_price: float, current_price: float, max_milestone: float) -> str:
+        """
+        Calculate outcome category based on price performance
+
+        Args:
+            entry_price: Entry price when signal was posted
+            current_price: Current price after 24h
+            max_milestone: Maximum milestone reached (2, 5, 10, 50, 100)
+
+        Returns:
+            Outcome category: rug, loss, 2x, 5x, 10x, 50x, 100x
+        """
+        # Check if rugged (price went to ~$0 or dropped >90%)
+        if current_price == 0 or (current_price / entry_price) < 0.1:
+            return 'rug'
+
+        # Use maximum milestone reached (if any)
+        if max_milestone >= 100:
+            return '100x'
+        elif max_milestone >= 50:
+            return '50x'
+        elif max_milestone >= 10:
+            return '10x'
+        elif max_milestone >= 5:
+            return '5x'
+        elif max_milestone >= 2:
+            return '2x'
+        else:
+            # No milestone reached - check current price
+            current_multiple = current_price / entry_price
+            if current_multiple >= 2:
+                return '2x'
+            else:
+                return 'loss'
