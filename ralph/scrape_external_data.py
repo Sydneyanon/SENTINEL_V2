@@ -259,16 +259,32 @@ class ExternalDataScraper:
             # Rate limit to avoid API throttling
             await asyncio.sleep(0.5)
 
-        # Find wallets that bought 2+ winners (potential new KOLs to track)
+        # Find wallets that bought 2+ winners (potential new KOLs/smart money to track)
+        # Classify by performance tier for easy addition to curated_wallets.py
         discovered_kols = {}
         for wallet, appearances in wallet_appearances.items():
             if len(appearances) >= 2:  # Bought 2+ winners
                 avg_gain = sum(a['gain'] for a in appearances) / len(appearances)
+                max_gain = max(a['gain'] for a in appearances)
+                winner_count = len(appearances)
+
+                # Classify wallet tier based on performance
+                if winner_count >= 5 and avg_gain >= 500:
+                    tier = 'elite_tier'  # Exceptional performance
+                elif winner_count >= 3 and avg_gain >= 400:
+                    tier = 'god_tier'  # Very strong performance
+                elif winner_count >= 3 or avg_gain >= 300:
+                    tier = 'smart_money'  # Solid smart money
+                else:
+                    tier = 'potential'  # Worth watching
+
                 discovered_kols[wallet] = {
-                    'winner_count': len(appearances),
+                    'winner_count': winner_count,
                     'tokens': [a['token'] for a in appearances],
                     'avg_gain': avg_gain,
-                    'max_gain': max(a['gain'] for a in appearances)
+                    'max_gain': max_gain,
+                    'suggested_tier': tier,  # Where to add them in curated_wallets.py
+                    'win_rate': 100.0  # They only bought winners (100% in this sample)
                 }
 
         logger.info(f"💰 Analysis complete. Used ~{credits_used} Helius credits")
@@ -365,21 +381,37 @@ class ExternalDataScraper:
                 print(f"   Avg gain (no our KOLs): {avg_gain_no_kols:.0f}%")
                 print(f"   Our KOL advantage: {avg_gain_with_kols - avg_gain_no_kols:.0f}% higher gains")
 
-        # Discovered KOLs
+        # Discovered KOLs/Smart Money
         if discovered_kols:
-            print(f"\n🔍 Discovered Potential New KOLs:")
+            # Count by tier
+            tiers = {}
+            for wallet, data in discovered_kols.items():
+                tier = data['suggested_tier']
+                tiers[tier] = tiers.get(tier, 0) + 1
+
+            print(f"\n🔍 Discovered Potential New Wallets:")
             print(f"   Total discovered: {len(discovered_kols)}")
-            print(f"   Top 10 by winner count:")
+            print(f"\n   By tier:")
+            for tier in ['elite_tier', 'god_tier', 'smart_money', 'potential']:
+                if tier in tiers:
+                    print(f"      {tier}: {tiers[tier]}")
+
+            print(f"\n   Top 15 by winner count:")
 
             sorted_kols = sorted(discovered_kols.items(),
-                               key=lambda x: x[1]['winner_count'],
-                               reverse=True)[:10]
+                               key=lambda x: (x[1]['winner_count'], x[1]['avg_gain']),
+                               reverse=True)[:15]
 
             for i, (wallet, data) in enumerate(sorted_kols, 1):
-                print(f"\n   {i}. {wallet[:8]}...{wallet[-4:]}")
-                print(f"      Winners bought: {data['winner_count']}")
-                print(f"      Avg gain: {data['avg_gain']:.0f}%")
-                print(f"      Max gain: {data['max_gain']:.0f}%")
+                tier_emoji = {
+                    'elite_tier': '🔥',
+                    'god_tier': '👑',
+                    'smart_money': '💰',
+                    'potential': '👀'
+                }.get(data['suggested_tier'], '❓')
+
+                print(f"\n   {i}. {tier_emoji} {wallet[:8]}...{wallet[-4:]} ({data['suggested_tier']})")
+                print(f"      Winners: {data['winner_count']} | Avg gain: {data['avg_gain']:.0f}% | Max: {data['max_gain']:.0f}%")
                 print(f"      Tokens: {', '.join(data['tokens'][:3])}{'...' if len(data['tokens']) > 3 else ''}")
 
         print("\n" + "="*70)
@@ -388,8 +420,8 @@ class ExternalDataScraper:
 async def main():
     """Main scraping workflow"""
     # Configurable parameters
-    MIN_GAIN = 200  # 200% = 3x minimum
-    MAX_TOKENS = 500  # Analyze up to 500 tokens (can increase to 1000+)
+    MIN_GAIN = 200  # 200% = 3x minimum (lower to 100 for 2x tokens)
+    MAX_TOKENS = 1000  # Analyze up to 1000 tokens for comprehensive data
 
     logger.info("🚀 Starting external data scraper...")
     logger.info("📋 Configuration:")

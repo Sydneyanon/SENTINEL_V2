@@ -44,8 +44,8 @@ Creates `ralph/external_data.json` with:
 ```json
 {
   "scraped_at": "2026-01-24T...",
-  "token_count": 487,
-  "discovered_kols_count": 156,
+  "token_count": 973,
+  "discovered_kols_count": 287,
   "tokens": [
     {
       "address": "...",
@@ -60,10 +60,12 @@ Creates `ralph/external_data.json` with:
   ],
   "discovered_kols": {
     "GDfn...": {
-      "winner_count": 5,
-      "avg_gain": 450.2,
-      "max_gain": 1200.0,
-      "tokens": ["CATCOIN", "DOGGO", ...]
+      "winner_count": 7,
+      "avg_gain": 650.2,
+      "max_gain": 2400.0,
+      "suggested_tier": "god_tier",
+      "win_rate": 100.0,
+      "tokens": ["CATCOIN", "DOGGO", "PEPE", ...]
     }
   }
 }
@@ -75,9 +77,10 @@ Creates `ralph/external_data.json` with:
 - "Which of our KOLs actually bought winners?"
 - "Should we demote/remove underperformers?"
 
-### 2. Discover New KOLs
-- "Wallet XYZ bought 5 tokens that went 10x+"
-- "Add them to curated_wallets.py!"
+### 2. Discover New KOLs & Smart Money
+- "Wallet XYZ bought 7 winners, avg 650% gain → god_tier"
+- "Wallet ABC bought 3 winners, avg 400% gain → smart_money"
+- "Auto-classified by tier for easy addition to curated_wallets.py!"
 
 ### 3. Find Patterns
 - "Tokens with 3+ KOLs have 78% win rate"
@@ -94,17 +97,16 @@ Based on real data:
 
 - **DexScreener**: FREE (no API key needed)
 - **Helius** (checking KOL involvement): ~2 credits per token
-- **Total for 500 tokens** (default): ~1,000 credits (0.01% of remaining budget)
-- **Total for 1000 tokens** (max): ~2,000 credits (0.02% of remaining budget)
+- **Total for 1000 tokens** (default): ~2,000 credits (0.02% of remaining 8.9M budget)
 
-**ROI**: Massive! Learn from 500-1000 real outcomes for <0.02% of your credit budget.
+**ROI**: MASSIVE! Learn from 1000 real outcomes for only 0.02% of your credit budget.
 
 ### Configurable Parameters
 
 In `ralph/scrape_external_data.py`, adjust:
 ```python
-MIN_GAIN = 200  # 200% = 3x minimum (can lower to 100 for 2x)
-MAX_TOKENS = 500  # Default 500, can increase to 1000+
+MIN_GAIN = 200    # 200% = 3x minimum (lower to 100 for 2x tokens)
+MAX_TOKENS = 1000 # Analyze up to 1000 tokens (can increase to 2000+)
 ```
 
 ## Next Steps After Running
@@ -124,8 +126,16 @@ Instead of waiting days for OUR signals (getting none at 75 threshold), we:
 - Apply learnings to fix our conviction scoring
 
 **Sample Size Matters:**
-- 100 tokens: OK, but limited statistical power
-- **500 tokens: STRONG** - can find real patterns with confidence
-- **1000 tokens: EXCELLENT** - discover even rare but profitable patterns
+- 100 tokens: Limited statistical power
+- 500 tokens: Good pattern detection
+- **1000 tokens: EXCELLENT** - discover rare patterns, high confidence
+- 2000+ tokens: Maximum statistical power (if needed)
 
-**Result**: Tomorrow Ralph can optimize based on REAL DATA from hundreds of tokens, not guesses.
+**Smart Wallet Discovery:**
+With 1000 tokens, we discover:
+- **Elite tier** wallets: 5+ winners, 500%+ avg gain
+- **God tier** wallets: 3+ winners, 400%+ avg gain
+- **Smart money**: 3+ winners OR 300%+ avg gain
+- **Potential**: 2+ winners, worth watching
+
+**Result**: Ralph can optimize based on REAL DATA from 1000 tokens + discover 200-300 new high-performing wallets!
