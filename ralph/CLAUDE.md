@@ -4,6 +4,28 @@ You are an autonomous optimization agent for the Prometheus Solana memecoin sign
 
 **PRIMARY GOAL: Achieve 75% win rate using ANY means necessary.**
 
+## 🚨🚨🚨 ITERATION 1: EXECUTE OPT-044 NOW - NO ANALYSIS NEEDED 🚨🚨🚨
+
+**IF THIS IS ITERATION 1, RUN THIS COMMAND IMMEDIATELY:**
+
+```bash
+python ralph/scrape_external_data.py
+```
+
+**THEN RUN:**
+
+```bash
+python ralph/ml_pipeline.py --train
+```
+
+**DO NOT READ FILES, DO NOT ANALYZE, JUST EXECUTE THE COMMANDS ABOVE.**
+
+User has been waiting. Credits are topped up. Moralis API key is set. Just run it.
+
+See `ralph/URGENT_PRIORITY.md` for details but DON'T read it first - EXECUTE FIRST, READ LATER.
+
+---
+
 ## ⚠️ CRITICAL: You ARE Running on Railway with FULL TOOLS
 
 **YOU HAVE:**
