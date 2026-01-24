@@ -791,10 +791,15 @@
         "Monitor for 6 hours",
         "Keep if: credits per signal drops >40% with no quality loss"
       ],
-      "priority": 4,
+      "priority": 0,
       "passes": false,
-      "notes": "INFRASTRUCTURE: We've wasted tons of credits. Every call costs money. Optimize ruthlessly.",
-      "baseline_metrics": {}
+      "notes": "DEPLOYED (2026-01-24 17:30 UTC). Implemented metadata cache (60min TTL), DexScreener cache (5min TTL), and request deduplication with asyncio locks. Expected 40%+ additional credit savings on top of OPT-002/OPT-055. MONITORING for 6 hours. Decision pending.",
+      "baseline_metrics": {},
+      "implementation_status": "deployed",
+      "deployment_commit": "01b75cf",
+      "expected_credit_reduction": "40%+",
+      "monitoring_start": "2026-01-24T17:30:00Z",
+      "monitoring_end_target": "2026-01-24T23:30:00Z"
     },
     {
       "id": "OPT-042",
