@@ -10,7 +10,6 @@ from rug_detector import RugDetector
 from lunarcrush_fetcher import get_lunarcrush_fetcher
 from twitter_fetcher import get_twitter_fetcher
 from credit_tracker import get_credit_tracker  # OPT-055: Track credit usage
-from rugcheck_api import get_rugcheck_api  # RugCheck.xyz API integration
 
 
 class ConvictionEngine:
@@ -53,9 +52,6 @@ class ConvictionEngine:
 
         # OPT-055: Initialize credit tracker
         self.credit_tracker = get_credit_tracker()
-
-        # Initialize RugCheck.xyz API
-        self.rugcheck = get_rugcheck_api()
         
     async def analyze_token(
         self, 
@@ -332,65 +328,8 @@ class ConvictionEngine:
             # Better to miss a winner than post a rug AND save 10 credits
 
             emergency_blocks = []
-            rugcheck_penalty = 0
+            rugcheck_penalty = 0  # Not using RugCheck API (just on-chain checks)
             rugcheck_result = None
-
-            # 0. RugCheck.xyz API (FREE) - Check for rug risk
-            if config.RUG_DETECTION.get('enabled', True):
-                logger.info(f"   🔍 Checking RugCheck.xyz API...")
-                rugcheck_result = await self.rugcheck.check_token(token_address, timeout=8)
-
-                if rugcheck_result['success']:
-                    risk_level = rugcheck_result['risk_level']
-                    score_norm = rugcheck_result.get('score_normalised', rugcheck_result.get('score'))
-                    rugged = rugcheck_result.get('rugged', False)
-                    is_honeypot = rugcheck_result.get('is_honeypot', False)
-
-                    # ONLY BLOCK confirmed rugs/honeypots (not just high risk scores)
-                    # Most pump.fun tokens are high risk by nature - that's OK
-                    if rugged or is_honeypot:
-                        # HARD BLOCK: Confirmed rug or honeypot
-                        emergency_blocks.append(f"RugCheck: Confirmed {'RUG' if rugged else 'HONEYPOT'}")
-                        logger.error(f"   🚨 RugCheck: {'RUGGED' if rugged else 'HONEYPOT'} - BLOCKING")
-
-                    # Apply penalties for risk levels (but don't block)
-                    elif risk_level == 'critical':
-                        # Very high risk: -40 points (score 9-10)
-                        rugcheck_penalty = -40
-                        logger.warning(f"   🚨 RugCheck: VERY HIGH risk (score: {score_norm}/10) - {rugcheck_penalty} pts")
-
-                    elif risk_level == 'high':
-                        # High risk: -25 points (score 7-8)
-                        rugcheck_penalty = -25
-                        logger.warning(f"   ⛔ RugCheck: HIGH risk (score: {score_norm}/10) - {rugcheck_penalty} pts")
-
-                    elif risk_level == 'medium':
-                        # Moderate risk: -15 points (score 5-6)
-                        rugcheck_penalty = -15
-                        logger.info(f"   ⚠️  RugCheck: MEDIUM risk (score: {score_norm}/10) - {rugcheck_penalty} pts")
-
-                    elif risk_level == 'low':
-                        # Low risk: -5 points (score 3-4)
-                        rugcheck_penalty = -5
-                        logger.info(f"   ⚠️  RugCheck: LOW risk (score: {score_norm}/10) - {rugcheck_penalty} pts")
-
-                    else:  # 'good'
-                        # Very safe: no penalty (score 0-2)
-                        logger.info(f"   ✅ RugCheck: SAFE (score: {score_norm}/10)")
-
-                    # Log specific risk flags
-                    if rugcheck_result.get('mutable_metadata'):
-                        logger.info(f"      ℹ️  Mutable metadata (common for new tokens)")
-                    if rugcheck_result.get('critical_risks'):
-                        for risk in rugcheck_result['critical_risks'][:2]:  # Show top 2
-                            logger.warning(f"      🔴 {risk.get('name', 'Unknown risk')}")
-
-                else:
-                    # RugCheck failed - don't block, just log
-                    logger.debug(f"   ⚠️  RugCheck API unavailable: {rugcheck_result.get('error', 'Unknown error')}")
-
-            # Apply RugCheck penalty to mid_total
-            mid_total += rugcheck_penalty
 
             # 1. Liquidity < $5k (too thin, likely rug)
             liquidity = token_data.get('liquidity', 0)
