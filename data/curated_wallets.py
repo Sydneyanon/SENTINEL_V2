@@ -10,6 +10,47 @@ SMART_MONEY_WALLETS = {
     # Add elite sniper wallets here
 }
 
+# OPT-019: Blacklisted Wallets (Low win rate or high rug rate - moved to watchlist)
+# These wallets are still tracked but receive 0 conviction points
+# Criteria: win_rate < 35% OR rug_rate > 60% (based on 3+ tracked outcomes)
+BLACKLISTED_WALLETS = {
+    'sAdNbe1cKNMDqDsa4npB3TfL62T14uAo2MsUQfLvzLT': {
+        'name': 'KOL_sAdNbe1c',
+        'tier': 'watchlist',
+        'reason': 'win_rate=33.3%, rug_rate=66.7% (2/3 trades were rugs)',
+        'blacklisted_date': '2026-01-24',
+        'fetch_metadata': False
+    },
+    'BTf4A2exGK9BCVDNzy65b9dUzXgMqB4weVkvTMFQsadd': {
+        'name': 'KOL_BTf4A2',
+        'tier': 'watchlist',
+        'reason': 'win_rate=25.0% (worst performer)',
+        'blacklisted_date': '2026-01-24',
+        'fetch_metadata': False
+    },
+    '4vw54BmAogeRV3vPKWyFet5yf8DTLcREzdSzx4rw9Ud9': {
+        'name': 'KOL_4vw54B',
+        'tier': 'watchlist',
+        'reason': 'win_rate=33.3%',
+        'blacklisted_date': '2026-01-24',
+        'fetch_metadata': False
+    },
+    'Bi4rd5FH5bYEN8scZ7wevxNZyNmKHdaBcvewdPFxYdLT': {
+        'name': 'KOL_Bi4rd5',
+        'tier': 'watchlist',
+        'reason': 'win_rate=33.3%',
+        'blacklisted_date': '2026-01-24',
+        'fetch_metadata': False
+    },
+    'PMJA8UQDyWTFw2Smhyp9jGA6aTaP7jKHR7BPudrgyYN': {
+        'name': 'KOL_PMJA8U',
+        'tier': 'watchlist',
+        'reason': 'win_rate=33.3%',
+        'blacklisted_date': '2026-01-24',
+        'fetch_metadata': False
+    },
+}
+
 # High Win-Rate KOL Wallets (Known callers with proven track record)
 # Set 'fetch_metadata': True to fetch live stats from GMGN (direct scraper, free but rate-limited)
 # Set 'fetch_metadata': False to use static name only
@@ -29,11 +70,6 @@ KOL_WALLETS = {
         'tier': 'top_kol',
         'fetch_metadata': False
     },
-    'Bi4rd5FH5bYEN8scZ7wevxNZyNmKHdaBcvewdPFxYdLt': {
-        'name': None,
-        'tier': 'top_kol',
-        'fetch_metadata': True  # ← Test direct fetcher
-    },
     'G6fUXjMKPJzCY1rveAE6Qm7wy5U3vZgKDJmN1VPAdiZC': {
         'name': 'Clukz',
         'tier': 'top_kol',
@@ -50,11 +86,6 @@ KOL_WALLETS = {
         'fetch_metadata': False
     },
     'F5jWYuiDLTiaLYa54D88YbpXgEsA6NKHzWy4SN4bMYjt': {
-        'name': None,
-        'tier': 'top_kol',
-        'fetch_metadata': True  # ← Test direct fetcher
-    },
-    '4vw54BmAogeRV3vPKWyFet5yf8DTLcREzdSzx4rw9Ud9': {
         'name': None,
         'tier': 'top_kol',
         'fetch_metadata': True  # ← Test direct fetcher
@@ -134,18 +165,8 @@ KOL_WALLETS = {
         'tier': 'top_kol',
         'fetch_metadata': False
     },
-    'BTf4A2exGK9BCVDNzy65b9dUzXgMqB4weVkvTMFQsadd': {
-        'name': None,
-        'tier': 'top_kol',
-        'fetch_metadata': False
-    },
     'DYAn4XpAkN5mhiXkRB7dGq4Jadnx6XYgu8L5b3WGhbrt': {
         'name': 'The Doc',
-        'tier': 'top_kol',
-        'fetch_metadata': False
-    },
-    'sAdNbe1cKNMDqDsa4npB3TfL62T14uAo2MsUQfLvzLT': {
-        'name': None,
         'tier': 'top_kol',
         'fetch_metadata': False
     },
@@ -155,11 +176,6 @@ KOL_WALLETS = {
         'fetch_metadata': False
     },
     'DZAa55HwXgv5hStwaTEJGXZz1DhHejvpb7Yr762urXam': {
-        'name': None,
-        'tier': 'top_kol',
-        'fetch_metadata': False
-    },
-    'PMJA8UQDyWTFw2Smhyp9jGA6aTaP7jKHR7BPudrgyYN': {
         'name': None,
         'tier': 'top_kol',
         'fetch_metadata': False
@@ -197,8 +213,8 @@ KOL_WALLETS = {
 }
 
 def get_all_tracked_wallets():
-    """Get combined list of all tracked wallets"""
-    return {**SMART_MONEY_WALLETS, **KOL_WALLETS}
+    """Get combined list of all tracked wallets (including blacklisted for monitoring)"""
+    return {**SMART_MONEY_WALLETS, **KOL_WALLETS, **BLACKLISTED_WALLETS}
 
 def get_elite_wallets():
     """Get only elite tier wallets (85%+ win rate)"""
