@@ -400,17 +400,21 @@ class ConvictionEngine:
             # Apply RugCheck penalty to mid_total
             mid_total += rugcheck_penalty
 
-            # 1. Liquidity < $5k (too thin, likely rug)
+            # 1. Liquidity < $2k (too thin, likely rug)
+            # REDUCED from $5k to $2k: pump.fun tokens often <$5k during bonding
+            # Balance between safety and early entry opportunity
             liquidity = token_data.get('liquidity', 0)
-            if liquidity > 0 and liquidity < 5000:
-                emergency_blocks.append(f"Liquidity too low: ${liquidity:.0f} < $5k")
+            if liquidity > 0 and liquidity < 2000:
+                emergency_blocks.append(f"Liquidity too low: ${liquidity:.0f} < $2k")
 
-            # 2. Token age < 2 minutes (too fresh, wait for real activity)
+            # 2. Token age < 30 seconds (too fresh, wait for real activity)
+            # REDUCED from 2min to 30sec: KOLs buy within 0-60sec, we were too late!
+            # Still filters out instant rugs but allows early entry
             token_created_at = token_data.get('created_at')
             if token_created_at:
                 token_age_seconds = (datetime.utcnow() - token_created_at).total_seconds()
-                if token_age_seconds < 120:  # 2 minutes
-                    emergency_blocks.append(f"Token too new: {token_age_seconds:.0f}s old (< 2min)")
+                if token_age_seconds < 30:  # 30 seconds (was 2 minutes)
+                    emergency_blocks.append(f"Token too new: {token_age_seconds:.0f}s old (< 30sec)")
 
             # 3. No liquidity at all (pre-graduation tokens need some liquidity)
             if liquidity == 0 and bonding_pct < 100:
