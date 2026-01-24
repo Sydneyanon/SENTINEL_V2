@@ -1721,3 +1721,211 @@ Updated comments and docstrings to reflect:
 
 ---
 
+
+---
+
+## 2026-01-24 05:00 UTC - OPT-055: Smart Gating for Expensive Holder Checks (Save 60%+ Credits)
+
+### Problem Identified
+**COST ISSUE:** Helius API credits being wasted on low-probability tokens
+- **Current usage:** 1.1M credits / 10M quota (11% used)
+- **Cost per holder check:** 10 Helius credits  
+- **Problem:** Checking holders on tokens that fail early checks wastes credits
+- **Example:** Token with 0 KOLs, score 30, still runs 10-credit holder check only to be rejected
+- **Need:** Intelligent gating to skip expensive checks on obvious non-signals
+
+### Solution Implemented (OPT-055)
+
+#### 1. Multi-Factor Smart Gating Decision Logic ✅
+Enhanced `rug_detector.should_check_holders()` with 6-step priority-based logic:
+
+```python
+# Decision flow (in priority order):
+1. SKIP if emergency flags detected (obvious rug, why waste credits?)
+2. SKIP if too early (<30 buyers on pre-grad tokens)
+3. ALWAYS CHECK if 2+ KOLs (high-value signal worth spending credits)
+4. CHECK if post-grad + score >= 50 (more reliable data)
+5. CHECK if pre-grad + score >= 60 
+6. SKIP otherwise (save 10 credits)
+```
+
+**Threshold Optimizations:**
+- Pre-grad: 65 → 60 (catch more high-quality signals)
+- Post-grad: 60 → 50 (post-grad data more reliable, lower threshold justified)
+
+#### 2. Emergency Checks Moved Earlier ✅
+Reordered conviction_engine.py pipeline:
+```python
+# OLD: base_score → holder_check (10 credits) → emergency_checks → decision
+# NEW: base_score → emergency_checks (FREE) → holder_check (10 credits) → decision
+```
+
+**Emergency flags detected BEFORE expensive holder check:**
+- Liquidity < $5k
+- Token age < 2min
+- Zero liquidity on pre-grad
+- This saves 10 credits on every obvious rug
+
+#### 3. Credit Tracking System ✅
+New `credit_tracker.py` module:
+- Logs every holder check decision (executed or skipped)
+- Tracks: checks_executed, checks_skipped, credits_spent, credits_saved
+- Writes to `helius_credits.jsonl` for analysis
+- Provides session summaries with savings percentage
+- Real-time visibility into credit efficiency
+
+### Changes Made
+
+**rug_detector.py:**
+```python
+# Enhanced should_check_holders() (lines 300-398)
+- Multi-factor decision logic with 6 priority checks
+- Considers: emergency_flags, unique_buyers, kol_count, bonding_pct, base_score
+- Returns: {should_check, reason, credits_saved}
+- Optimized thresholds: pre-grad 60, post-grad 50
+```
+
+**conviction_engine.py:**
+```python
+# Phase reordering (lines 81-415)
+- PHASE 1: FREE BASE SCORE (0-60 pts) - smart wallets, narratives, volume, momentum
+- PHASE 2: FREE BUNDLE DETECTION - check bundles before spending credits
+- PHASE 3: FREE EMERGENCY CHECKS - liquidity, age, zero liquidity flags
+- PHASE 4: EXPENSIVE HOLDER CHECK (10 credits) - GATED by should_check_holders()
+- PHASE 5: FINAL SCORE CALCULATION
+```
+
+**credit_tracker.py:**
+```python
+# New module (lines 1-101)
+- CreditTracker class with session stats
+- log_holder_check(executed, credits, reason, token)
+- get_session_stats() with savings percentage
+- Appends to helius_credits.jsonl (JSON Lines format)
+```
+
+### Baseline Metrics
+**Credit Usage (before OPT-055):**
+- Credits used (30 days): 1,100,000
+- Total quota: 10,000,000
+- Usage: 11%
+- Estimated holder checks: ~110,000 (at 10 credits each)
+
+**Expected Improvement:**
+- **60-70% credit savings** on holder checks
+- Estimated: 66,000-77,000 fewer checks per 30 days
+- Projected savings: 660k-770k credits per month
+- **New usage projection: 4-6%** of quota (down from 11%)
+
+### Deployment Status
+- ✅ Code implemented: commits on ralph/optimize-v1
+- ✅ PR created: #79
+- ✅ Merged to main: commit 870bf16
+- ✅ Railway deployed: 2026-01-24 05:00 UTC
+- ⏳ **MONITORING for 6 hours** (until 2026-01-24 11:00 UTC)
+
+### Acceptance Criteria Status
+✅ Audit credit usage: mapped operations by credit cost
+✅ Identify waste: tokens failing early but checked holders anyway
+✅ Implement smart gating: 6-step decision logic
+✅ Request deduplication: emergency checks before holder check
+✅ Track credits saved: CreditTracker logs every decision
+⏳ **Monitor for 6 hours:** verify credits reduced >50% with <5% quality drop
+
+### Decision: PENDING MONITORING
+**Will KEEP if:**
+- Credits reduced >50% (primary metric)
+- Signal quality drop <5% (win rate, false positives)
+- No increase in missed high-quality signals
+- Credit tracker shows meaningful savings in logs
+
+**Will REVERT if:**
+- Credits savings <40% (not meeting target)
+- Signal quality drops >5% (too aggressive gating)
+- Missing obvious winners due to threshold changes
+
+### Expected Impact
+**Primary Goal: Cost Optimization**
+- 60-70% reduction in holder check credits
+- Projected: 660k-770k credits saved per month
+- Usage drops from 11% → 4-6% of quota
+
+**Secondary Goal: Maintain Quality**
+- No degradation in signal quality (smarter, not dumber)
+- Lower thresholds (60/50) catch more high-quality signals
+- Gating logic focuses spending on high-probability tokens
+
+**Tertiary Goal: Operational Insight**
+- Real-time visibility into credit efficiency
+- Actionable data for future optimizations
+- Session summaries for cost analysis
+
+### Monitoring Instructions
+1. **Check Railway logs after deployment:**
+   ```bash
+   railway logs --service prometheusbot-production --lines 500 | grep "OPT-055"
+   ```
+
+2. **Look for credit tracking messages:**
+   - "✅ FORCE holder check: 2 KOLs - high-value signal"
+   - "⏭️  SKIP holder check: Only 15 buyers (need 30+)"
+   - "💰 OPT-055: Saved 10 Helius credits by skipping holder check"
+
+3. **After 6 hours, analyze helius_credits.jsonl:**
+   ```bash
+   # Count executed vs skipped
+   grep "holder_check_executed" helius_credits.jsonl | wc -l
+   grep "holder_check_skipped" helius_credits.jsonl | wc -l
+   
+   # Calculate savings percentage
+   python3 << 'PYTHON'
+   import json
+   executed = 0
+   skipped = 0
+   with open('helius_credits.jsonl') as f:
+       for line in f:
+           entry = json.loads(line)
+           if entry['type'] == 'holder_check_executed':
+               executed += 1
+           elif entry['type'] == 'holder_check_skipped':
+               skipped += 1
+   total = executed + skipped
+   savings_pct = (skipped / total * 100) if total > 0 else 0
+   print(f"Executed: {executed}")
+   print(f"Skipped: {skipped}")
+   print(f"Total: {total}")
+   print(f"Savings: {savings_pct:.1f}%")
+   PYTHON
+   ```
+
+4. **Compare signal quality:**
+   - Query signals from last 6 hours
+   - Calculate win rate, false positive rate
+   - Compare to historical baseline
+   - Ensure quality drop <5%
+
+5. **Decision at 2026-01-24 11:00 UTC:**
+   - If savings >50% AND quality stable: KEEP
+   - If savings <40% OR quality drops >5%: REVERT
+
+### Learnings
+- **Cost optimization matters:** 11% quota usage is concerning, proactive optimization needed
+- **Cheap checks first:** Emergency flags are FREE, run them before expensive holder checks
+- **Multi-factor gating:** Single threshold insufficient, need kol_count + buyers + emergency_flags
+- **Threshold tuning:** Post-grad data more reliable, can use lower threshold (50 vs 60)
+- **Tracking is essential:** Can't optimize what you don't measure, CreditTracker provides visibility
+
+### Risk Assessment
+- **Low risk:** Gating logic conservative, only skips obvious non-signals
+- **Quality protection:** Lower thresholds (60/50) catch more signals, not fewer
+- **High confidence:** Multiple safety checks (2+ KOLs always checked, post-grad always checked if score >=50)
+- **Easy rollback:** Pure logic change, no data migrations, can revert cleanly if needed
+
+### Next Steps
+1. Monitor Railway logs for 6 hours
+2. Analyze helius_credits.jsonl for savings percentage
+3. Compare signal quality (win rate, false positives)
+4. Update PRD: set OPT-055 passes: true/false based on results
+5. Document decision in progress.txt
+
+---
