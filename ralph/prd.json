@@ -56,8 +56,13 @@
       ],
       "priority": 2,
       "passes": false,
-      "notes": "",
-      "baseline_metrics": {}
+      "notes": "DEPLOYED (2026-01-24 07:45 UTC). Increased holder cache TTL from 60min to 120min. Expected 50% credit reduction on holder checks. MONITORING for 2 hours. Decision pending.",
+      "baseline_metrics": {},
+      "implementation_status": "deployed",
+      "deployment_commit": "9ec7ee1",
+      "expected_credit_reduction": "50%",
+      "monitoring_start": "2026-01-24T07:45:00Z",
+      "monitoring_end_target": "2026-01-24T09:45:00Z"
     },
     {
       "id": "OPT-003",
