@@ -29,18 +29,20 @@ class TelegramMonitor:
     Integrates directly with SENTINEL's telegram_calls_cache
     """
 
-    def __init__(self, telegram_calls_cache: Dict):
+    def __init__(self, telegram_calls_cache: Dict, active_tracker=None):
         """
         Initialize Telegram monitor
 
         Args:
             telegram_calls_cache: Reference to main.telegram_calls_cache
+            active_tracker: Reference to ActiveTokenTracker for starting tracking
         """
         self.api_id = os.getenv('TELEGRAM_API_ID')
         self.api_hash = os.getenv('TELEGRAM_API_HASH')
         self.phone = os.getenv('TELEGRAM_PHONE')  # Optional: for first-time auth
 
         self.telegram_calls_cache = telegram_calls_cache
+        self.active_tracker = active_tracker  # OPT-052: For triggering tracking
         self.client = None
         self.monitored_groups: Dict[int, str] = {}  # {channel_id: group_name}
 
@@ -139,40 +141,64 @@ class TelegramMonitor:
             # Debug: Log every 100th message to show monitor is active
             if not hasattr(self, '_message_count'):
                 self._message_count = 0
+                self._calls_detected = 0
             self._message_count += 1
             if self._message_count % 100 == 0:
-                logger.info(f"📬 Telegram monitor active: {self._message_count} messages processed")
+                logger.info(f"📬 Telegram monitor active: {self._message_count} messages processed, {self._calls_detected} calls detected")
 
             # Get group info for logging
             chat_id = event.chat_id
             group_name = self.monitored_groups.get(chat_id, f"group_{chat_id}")
 
-            # Extract Solana CAs from message
-            potential_cas = self.ca_pattern.findall(text)
+            # Extract Solana CAs from message (multiple methods)
+            potential_cas = set()
+
+            # Method 1: Direct CA regex match
+            direct_matches = self.ca_pattern.findall(text)
+            potential_cas.update(direct_matches)
+
+            # Method 2: Extract from pump.fun URLs
+            # Matches: pump.fun/GDfn8... or pump.fun/coin/GDfn8...
+            pump_pattern = r'pump\.fun(?:/coin)?/([1-9A-HJ-NP-Za-km-z]{32,44})'
+            pump_matches = re.findall(pump_pattern, text, re.IGNORECASE)
+            potential_cas.update(pump_matches)
+
+            # Method 3: Extract from dexscreener URLs
+            # Matches: dexscreener.com/solana/GDfn8...
+            dex_pattern = r'dexscreener\.com/solana/([1-9A-HJ-NP-Za-km-z]{32,44})'
+            dex_matches = re.findall(dex_pattern, text, re.IGNORECASE)
+            potential_cas.update(dex_matches)
+
             if not potential_cas:
                 return
 
             logger.info(f"📨 Message from {group_name} has {len(potential_cas)} CA(s)")
+            logger.debug(f"   Message preview: {text[:100]}...")
 
             # Process each CA found
             for ca in potential_cas:
                 # Skip known non-token addresses
                 if ca in self.ignore_addresses:
+                    logger.debug(f"   ⏭️  Skipped (known address): {ca[:8]}...")
                     continue
 
                 # Basic validation (Solana CAs are typically 32-44 chars)
                 if len(ca) < 32 or len(ca) > 44:
+                    logger.debug(f"   ⏭️  Skipped (invalid length {len(ca)}): {ca}")
                     continue
 
                 # Add to cache
                 await self._add_call_to_cache(ca, group_name)
+                self._calls_detected += 1
 
         except Exception as e:
             logger.error(f"❌ Error handling Telegram message: {e}")
 
     async def _add_call_to_cache(self, token_address: str, group_name: str):
         """
-        OPT-028: Add detected call to telegram_calls_cache with enhanced logging
+        Add detected call to telegram_calls_cache
+        OPT-028: Enhanced logging with timestamps
+        OPT-052: Triggers full analysis just like KOL buys!
 
         Args:
             token_address: Solana CA
@@ -189,7 +215,8 @@ class TelegramMonitor:
                 self.telegram_calls_cache[token_address] = {
                     'mentions': [],
                     'first_seen': now,
-                    'groups': set()
+                    'groups': set(),
+                    'tracked': False  # Track if we've started tracking this CA
                 }
 
             # Add this mention
@@ -204,9 +231,24 @@ class TelegramMonitor:
 
             logger.info(f"   📊 Total mentions: {mention_count} from {group_count} group(s)")
 
-            # OPT-028: Log to database for tracking (if database is available)
-            # This helps with acceptance criteria: "Log all calls to database with timestamp and channel"
-            # Note: Database logging would be handled by the main tracker if it processes this call
+            # OPT-052: Start tracking IMMEDIATELY (same as KOL buy)
+            # This enables full analysis: data quality, emergency stops, rug detection, etc.
+            if not self.telegram_calls_cache[token_address]['tracked']:
+                logger.info(f"   🎯 OPT-052: Starting full analysis (same as KOL buy)")
+                self.telegram_calls_cache[token_address]['tracked'] = True
+
+                # Trigger tracking if active_tracker is available
+                if self.active_tracker:
+                    try:
+                        await self.active_tracker.start_tracking(
+                            token_address,
+                            source='telegram_call'
+                        )
+                        logger.info(f"   ✅ Tracking started for {token_address[:8]}...")
+                    except Exception as track_err:
+                        logger.error(f"   ❌ Failed to start tracking: {track_err}")
+                else:
+                    logger.warning(f"   ⚠️  active_tracker not available (will track via webhook)")
 
         except Exception as e:
             logger.error(f"❌ Error adding call to cache: {e}")
