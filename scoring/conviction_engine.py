@@ -345,6 +345,57 @@ class ConvictionEngine:
             if liquidity == 0 and bonding_pct < 100:
                 emergency_blocks.append(f"Zero liquidity on pre-grad token")
 
+            # ================================================================
+            # OPT-040: Require 2+ KOLs for risky tokens (rug prevention)
+            # ================================================================
+            # Single KOL buying a risky token = HIGH FALSE POSITIVE RISK
+            # Wait for confirmation from multiple smart money wallets
+
+            # Define "risky" criteria
+            is_risky = False
+            risk_reasons = []
+
+            # Check 1: Very new token (<5min old)
+            if token_created_at:
+                token_age_seconds = (datetime.utcnow() - token_created_at).total_seconds()
+                if token_age_seconds < 300:  # 5 minutes
+                    is_risky = True
+                    risk_reasons.append(f"very new ({token_age_seconds/60:.1f}min old)")
+
+            # Check 2: Low liquidity (<$10k)
+            if liquidity > 0 and liquidity < 10000:
+                is_risky = True
+                risk_reasons.append(f"low liquidity (${liquidity:,.0f})")
+
+            # Check 3: Suspicious holder pattern (will be checked later if applicable)
+            # This is handled post-holder-check, so we'll note it for later
+
+            # Get KOL information from smart wallet data
+            kol_count = smart_wallet_data.get('wallet_count', 0)
+            kol_tiers = smart_wallet_data.get('tiers', {})
+            god_tier_count = kol_tiers.get('god_tier', 0)
+            elite_count = kol_tiers.get('elite_tier', 0) + kol_tiers.get('god_tier', 0)  # God tier counts as elite
+
+            # If risky AND insufficient KOL confirmation: block signal
+            if is_risky and kol_count > 0:
+                # Require: 2+ elite KOLs OR 1+ god-tier KOL
+                has_sufficient_kols = (elite_count >= 2) or (god_tier_count >= 1)
+
+                if not has_sufficient_kols:
+                    risk_summary = ', '.join(risk_reasons)
+                    emergency_blocks.append(
+                        f"Risky token ({risk_summary}) needs 2+ elite KOLs or 1 god-tier "
+                        f"(has {kol_count} KOL: {elite_count} elite, {god_tier_count} god)"
+                    )
+                    logger.warning(f"   🚨 OPT-040: Blocking risky token - insufficient KOL confirmation")
+                    logger.warning(f"      Risk factors: {risk_summary}")
+                    logger.warning(f"      KOLs: {kol_count} total, {elite_count} elite, {god_tier_count} god")
+                    logger.warning(f"      Requirement: 2+ elite OR 1+ god-tier for risky tokens")
+                else:
+                    logger.info(f"   ✅ OPT-040: Risky token approved - sufficient KOL confirmation")
+                    logger.info(f"      Risk factors: {risk_summary}")
+                    logger.info(f"      KOLs: {kol_count} total ({elite_count} elite, {god_tier_count} god) - PASSED")
+
             # OPT-055: Count emergency flags for smart gating decision
             emergency_flag_count = len(emergency_blocks)
 
@@ -402,6 +453,30 @@ class ConvictionEngine:
                     if holder_result['kol_bonus'] > 0:
                         logger.info(f"   💎 KOL Bonus: +{holder_result['kol_bonus']} pts")
                         logger.info(f"      {holder_result['reason']}")
+
+                    # ================================================================
+                    # OPT-040: Check suspicious holders AFTER concentration analysis
+                    # ================================================================
+                    # If holder concentration is suspicious (penalty >= -15), check KOL requirement
+                    if holder_result['penalty'] <= -15 and not holder_result['hard_drop']:
+                        # Moderate to high holder concentration = suspicious
+                        # Require 2+ elite KOLs OR 1 god-tier for confirmation
+                        has_sufficient_kols = (elite_count >= 2) or (god_tier_count >= 1)
+
+                        if not has_sufficient_kols:
+                            emergency_blocks.append(
+                                f"Suspicious holder concentration (penalty: {holder_result['penalty']}) "
+                                f"needs 2+ elite KOLs or 1 god-tier (has {kol_count}: {elite_count} elite, {god_tier_count} god)"
+                            )
+                            logger.warning(f"   🚨 OPT-040: Blocking suspicious holder pattern - insufficient KOL confirmation")
+                            logger.warning(f"      Holder penalty: {holder_result['penalty']} pts")
+                            logger.warning(f"      KOLs: {kol_count} total, {elite_count} elite, {god_tier_count} god")
+                            logger.warning(f"      Requirement: 2+ elite OR 1+ god-tier for suspicious holders")
+                        else:
+                            logger.info(f"   ✅ OPT-040: Suspicious holders approved - sufficient KOL confirmation")
+                            logger.info(f"      Holder penalty: {holder_result['penalty']} pts")
+                            logger.info(f"      KOLs: {kol_count} total ({elite_count} elite, {god_tier_count} god) - PASSED")
+
                 else:
                     # OPT-055: Log credit savings
                     if credits_saved > 0:
