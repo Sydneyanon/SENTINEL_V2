@@ -298,29 +298,108 @@ class RugDetector:
             }
     
     def should_check_holders(
-        self, 
-        base_score: int, 
+        self,
+        base_score: int,
         bonding_pct: float,
-        pre_grad_threshold: int = 65,
-        post_grad_threshold: int = 60
-    ) -> bool:
+        unique_buyers: int = 0,
+        kol_count: int = 0,
+        emergency_flags: int = 0,
+        pre_grad_threshold: int = 60,
+        post_grad_threshold: int = 50
+    ) -> Dict:
         """
-        Decide if we should spend 10 credits checking holders
-        
-        Only check if:
-        - Base score is high enough (promising token)
-        - Pre-grad: base >= 65
-        - Post-grad: base >= 60 (always check, more accurate data)
+        OPT-055: Smart gating for expensive holder checks (10 credits each)
+
+        GOAL: Save 60%+ credits by only checking high-probability tokens
+
+        Decision logic (in priority order):
+        1. SKIP if emergency flags detected (obvious rug, why waste credits?)
+        2. SKIP if too early (<30 buyers on pre-grad tokens)
+        3. ALWAYS CHECK if 2+ KOLs (high-value signal worth spending credits)
+        4. ALWAYS CHECK if post-grad (more reliable data, lower threshold)
+        5. CHECK if base_score >= threshold
+        6. SKIP otherwise (save credits)
+
+        Args:
+            base_score: Current conviction score before holder check
+            bonding_pct: Bonding curve progress (0-100)
+            unique_buyers: Number of unique wallets that bought
+            kol_count: Number of tracked KOLs who bought
+            emergency_flags: Number of emergency red flags detected
+            pre_grad_threshold: Min score for pre-grad tokens (default: 60)
+            post_grad_threshold: Min score for post-grad tokens (default: 50)
+
+        Returns:
+            {
+                'should_check': bool,
+                'reason': str,
+                'credits_saved': int (10 if skipped, 0 if checking)
+            }
         """
-        threshold = pre_grad_threshold if bonding_pct < 100 else post_grad_threshold
-        should_check = base_score >= threshold
-        
-        if should_check:
-            logger.debug(f"   ✅ Base score {base_score} >= {threshold} → Checking holders")
-        else:
-            logger.debug(f"   ⏭️  Base score {base_score} < {threshold} → Skipping holder check (save 10 credits)")
-        
-        return should_check
+        # Phase 1 (FREE checks)
+        is_pre_grad = bonding_pct < 100
+        is_post_grad = bonding_pct >= 100
+
+        # 1. SKIP if emergency flags detected (obvious rug)
+        if emergency_flags > 0:
+            logger.info(f"   ⏭️  SKIP holder check: {emergency_flags} emergency flag(s) detected (save 10 credits)")
+            return {
+                'should_check': False,
+                'reason': f'{emergency_flags} emergency flags - obvious rug',
+                'credits_saved': 10
+            }
+
+        # 2. SKIP if too early (< 30 buyers on pre-grad)
+        if is_pre_grad and unique_buyers < 30:
+            logger.info(f"   ⏭️  SKIP holder check: Only {unique_buyers} buyers (need 30+ for pre-grad) (save 10 credits)")
+            return {
+                'should_check': False,
+                'reason': f'Too early: {unique_buyers} buyers < 30',
+                'credits_saved': 10
+            }
+
+        # 3. ALWAYS CHECK if 2+ KOLs (high-value signal)
+        if kol_count >= 2:
+            logger.info(f"   ✅ FORCE holder check: {kol_count} KOLs detected (high-value signal, spend 10 credits)")
+            return {
+                'should_check': True,
+                'reason': f'{kol_count} KOLs - high-value signal',
+                'credits_saved': 0
+            }
+
+        # 4. CHECK if post-grad (more reliable data, lower threshold)
+        if is_post_grad:
+            if base_score >= post_grad_threshold:
+                logger.info(f"   ✅ POST-GRAD holder check: score {base_score} >= {post_grad_threshold} (spend 10 credits)")
+                return {
+                    'should_check': True,
+                    'reason': f'Post-grad, score {base_score} >= {post_grad_threshold}',
+                    'credits_saved': 0
+                }
+            else:
+                logger.info(f"   ⏭️  SKIP holder check: Post-grad score {base_score} < {post_grad_threshold} (save 10 credits)")
+                return {
+                    'should_check': False,
+                    'reason': f'Post-grad score too low: {base_score} < {post_grad_threshold}',
+                    'credits_saved': 10
+                }
+
+        # 5. CHECK if pre-grad score meets threshold
+        if is_pre_grad and base_score >= pre_grad_threshold:
+            logger.info(f"   ✅ PRE-GRAD holder check: score {base_score} >= {pre_grad_threshold} (spend 10 credits)")
+            return {
+                'should_check': True,
+                'reason': f'Pre-grad, score {base_score} >= {pre_grad_threshold}',
+                'credits_saved': 0
+            }
+
+        # 6. SKIP - score too low
+        logger.info(f"   ⏭️  SKIP holder check: Score {base_score} < {pre_grad_threshold} (save 10 credits)")
+        return {
+            'should_check': False,
+            'reason': f'Score too low: {base_score} < {pre_grad_threshold}',
+            'credits_saved': 10
+        }
     
     def get_rug_score_adjustments(
         self,

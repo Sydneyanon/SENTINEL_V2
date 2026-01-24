@@ -9,6 +9,7 @@ import config
 from rug_detector import RugDetector
 from lunarcrush_fetcher import get_lunarcrush_fetcher
 from twitter_fetcher import get_twitter_fetcher
+from credit_tracker import get_credit_tracker  # OPT-055: Track credit usage
 
 
 class ConvictionEngine:
@@ -48,6 +49,9 @@ class ConvictionEngine:
 
         # Initialize Twitter fetcher
         self.twitter = get_twitter_fetcher()
+
+        # OPT-055: Initialize credit tracker
+        self.credit_tracker = get_credit_tracker()
         
     async def analyze_token(
         self, 
@@ -317,77 +321,97 @@ class ConvictionEngine:
             mid_total += social_confirmation_score
 
             # ================================================================
-            # PHASE 4: HOLDER CONCENTRATION CHECK (10 CREDITS) ⭐
+            # OPT-023/OPT-055: EMERGENCY STOP - Red Flag Detection (FREE)
             # ================================================================
-            
+            # OPT-055: Check emergency flags BEFORE expensive holder check
+            # Block signals with obvious rug indicators (paranoid filtering)
+            # Better to miss a winner than post a rug AND save 10 credits
+
+            emergency_blocks = []
+
+            # 1. Liquidity < $5k (too thin, likely rug)
+            liquidity = token_data.get('liquidity', 0)
+            if liquidity > 0 and liquidity < 5000:
+                emergency_blocks.append(f"Liquidity too low: ${liquidity:.0f} < $5k")
+
+            # 2. Token age < 2 minutes (too fresh, wait for real activity)
+            token_created_at = token_data.get('created_at')
+            if token_created_at:
+                token_age_seconds = (datetime.utcnow() - token_created_at).total_seconds()
+                if token_age_seconds < 120:  # 2 minutes
+                    emergency_blocks.append(f"Token too new: {token_age_seconds:.0f}s old (< 2min)")
+
+            # 3. No liquidity at all (pre-graduation tokens need some liquidity)
+            if liquidity == 0 and bonding_pct < 100:
+                emergency_blocks.append(f"Zero liquidity on pre-grad token")
+
+            # OPT-055: Count emergency flags for smart gating decision
+            emergency_flag_count = len(emergency_blocks)
+
+            # ================================================================
+            # PHASE 4: HOLDER CONCENTRATION CHECK (10 CREDITS) ⭐
+            # OPT-055: Smart gating to save 60%+ credits
+            # ================================================================
+
             holder_result = {'penalty': 0, 'kol_bonus': 0, 'hard_drop': False}
-            
+            credits_saved = 0  # OPT-055: Track credit savings
+
             if config.RUG_DETECTION['enabled'] and config.RUG_DETECTION['holder_concentration']['check']:
-                # Decide if we should spend 10 credits
-                should_check = self.rug_detector.should_check_holders(
-                    mid_total,
-                    bonding_pct
+                # OPT-055: Smart gating decision with multiple factors
+                # Calculate total KOL count from smart wallet data
+                kol_count = smart_wallet_data.get('wallet_count', 0)
+
+                check_decision = self.rug_detector.should_check_holders(
+                    base_score=mid_total,
+                    bonding_pct=bonding_pct,
+                    unique_buyers=unique_buyers,
+                    kol_count=kol_count,
+                    emergency_flags=emergency_flag_count
                 )
-                
+
+                should_check = check_decision['should_check']
+                credits_saved = check_decision['credits_saved']
+
+                # OPT-055: Log decision reason
+                logger.info(f"   💡 Holder check decision: {check_decision['reason']}")
+
                 if should_check and self.helius_fetcher:
+                    # OPT-055: Log credit spend
+                    self.credit_tracker.log_holder_check(
+                        executed=True,
+                        credits=10,
+                        reason=check_decision['reason'],
+                        token_address=token_address
+                    )
+
                     holder_result = await self.rug_detector.check_holder_concentration(
                         token_address,
                         self.helius_fetcher,
                         kol_wallets=set(self.smart_wallet_tracker.tracked_wallets.keys())
                     )
-                    
+
+                    # Check for hard drop from holder concentration
                     if holder_result['hard_drop']:
                         logger.error(f"   💀 HARD DROP: {holder_result['reason']}")
-                        return {
-                            'score': 0,
-                            'passed': False,
-                            'reason': holder_result['reason'],
-                            'token_address': token_address,  # FIXED: Include token address
-                            'token_data': token_data,  # FIXED: Include token data
-                            'breakdown': {
-                                **base_scores,
-                                'bundle_penalty': bundle_result['penalty'],
-                                'unique_buyers': unique_buyers_score,
-                                'holder_penalty': -999,
-                                'total': 0
-                            }
-                        }
-                    
+                        emergency_blocks.append(f"Top holders >80% concentration")
+                        emergency_flag_count += 1
+
                     if holder_result['penalty'] != 0:
                         logger.warning(f"   ⚠️  Holder Concentration: {holder_result['penalty']} pts")
-                    
+
                     if holder_result['kol_bonus'] > 0:
                         logger.info(f"   💎 KOL Bonus: +{holder_result['kol_bonus']} pts")
                         logger.info(f"      {holder_result['reason']}")
-            
-            # ================================================================
-            # OPT-023: EMERGENCY STOP - Red Flag Detection
-            # ================================================================
-            # Block signals with obvious rug indicators (paranoid filtering)
-            # Better to miss a winner than post a rug
-
-            emergency_blocks = []
-
-            # 1. Top 3 holders > 80% (extreme concentration)
-            if holder_result.get('hard_drop', False):
-                emergency_blocks.append(f"Top holders >80% concentration")
-
-            # 2. Liquidity < $5k (too thin, likely rug)
-            liquidity = token_data.get('liquidity', 0)
-            if liquidity > 0 and liquidity < 5000:
-                emergency_blocks.append(f"Liquidity too low: ${liquidity:.0f} < $5k")
-
-            # 3. Token age < 2 minutes (too fresh, wait for real activity)
-            token_created_at = token_data.get('created_at')
-            if token_created_at:
-                from datetime import datetime
-                token_age_seconds = (datetime.utcnow() - token_created_at).total_seconds()
-                if token_age_seconds < 120:  # 2 minutes
-                    emergency_blocks.append(f"Token too new: {token_age_seconds:.0f}s old (< 2min)")
-
-            # 4. No liquidity at all (pre-graduation tokens need some liquidity)
-            if liquidity == 0 and bonding_pct < 100:
-                emergency_blocks.append(f"Zero liquidity on pre-grad token")
+                else:
+                    # OPT-055: Log credit savings
+                    if credits_saved > 0:
+                        self.credit_tracker.log_holder_check(
+                            executed=False,
+                            credits=10,
+                            reason=check_decision['reason'],
+                            token_address=token_address
+                        )
+                        logger.info(f"   💰 OPT-055: Saved {credits_saved} Helius credits by skipping holder check")
 
             # If any emergency blocks triggered, force score to 0
             if emergency_blocks:
