@@ -64,3 +64,4 @@ data/test_data/
 *.bak
 temp/
 PR_DETAILS.md
+ralph/external_data.json
