@@ -458,7 +458,8 @@ async def startup():
             logger.info("📱 Initializing built-in Telegram monitor...")
             try:
                 from telegram_monitor import TelegramMonitor
-                telegram_monitor = TelegramMonitor(telegram_calls_cache)
+                # OPT-052: Pass active_tracker so TG calls can trigger tracking immediately
+                telegram_monitor = TelegramMonitor(telegram_calls_cache, active_tracker=active_tracker)
 
                 success = await telegram_monitor.initialize(config.TELEGRAM_GROUPS)
                 if success:
@@ -573,19 +574,29 @@ async def telegram_call_webhook(token: str, group: str = "unknown"):
                 del telegram_calls_cache[ca]
                 logger.debug(f"   🧹 Cleaned up old call: {ca[:8]}")
 
-        # OPTIONAL: Call-triggered tracking (if enabled)
-        # Start tracking if mentioned in 2+ groups within 5 min
-        if config.TELEGRAM_CALL_TRIGGER_ENABLED and group_count >= 2:
-            # Check if mentions happened within 5 min window
+        # OPT-052: ALWAYS start tracking TG calls (same as KOL buys)
+        # This enables full analysis: data quality, emergency stops, rug detection, etc.
+        if 'tracked' not in telegram_calls_cache[token]:
+            telegram_calls_cache[token]['tracked'] = False
+
+        if not telegram_calls_cache[token]['tracked']:
+            logger.info(f"   🎯 OPT-052: Starting full analysis (same as KOL buy)")
+            telegram_calls_cache[token]['tracked'] = True
+
+            # Start tracking immediately
+            if active_tracker and not active_tracker.is_tracked(token):
+                try:
+                    await active_tracker.start_tracking(token, source='telegram_call')
+                    logger.info(f"   ✅ Tracking started for {token[:8]}...")
+                except Exception as track_err:
+                    logger.error(f"   ❌ Failed to start tracking: {track_err}")
+
+        # Additional bonus if multi-group call
+        if group_count >= 2:
             first_mention = telegram_calls_cache[token]['first_seen']
             time_spread = (now - first_mention).total_seconds()
-
             if time_spread <= 300:  # 5 minutes
-                logger.info(f"   🚨 MULTI-GROUP CALL: {group_count} groups in {time_spread:.0f}s - starting tracking!")
-
-                # Start tracking (even without KOL buy)
-                if active_tracker and not active_tracker.is_tracked(token):
-                    await active_tracker.start_tracking(token, source='telegram_call')
+                logger.info(f"   🔥 MULTI-GROUP CALL: {group_count} groups in {time_spread:.0f}s - extra conviction bonus!")
 
         return {
             "status": "received",

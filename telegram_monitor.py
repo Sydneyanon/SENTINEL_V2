@@ -20,18 +20,20 @@ class TelegramMonitor:
     Integrates directly with SENTINEL's telegram_calls_cache
     """
 
-    def __init__(self, telegram_calls_cache: Dict):
+    def __init__(self, telegram_calls_cache: Dict, active_tracker=None):
         """
         Initialize Telegram monitor
 
         Args:
             telegram_calls_cache: Reference to main.telegram_calls_cache
+            active_tracker: Reference to ActiveTokenTracker for starting tracking
         """
         self.api_id = os.getenv('TELEGRAM_API_ID')
         self.api_hash = os.getenv('TELEGRAM_API_HASH')
         self.phone = os.getenv('TELEGRAM_PHONE')  # Optional: for first-time auth
 
         self.telegram_calls_cache = telegram_calls_cache
+        self.active_tracker = active_tracker  # OPT-052: For triggering tracking
         self.client = None
         self.monitored_groups: Dict[int, str] = {}  # {channel_id: group_name}
 
@@ -150,6 +152,7 @@ class TelegramMonitor:
     async def _add_call_to_cache(self, token_address: str, group_name: str):
         """
         Add detected call to telegram_calls_cache
+        OPT-052: Now triggers full analysis just like KOL buys!
 
         Args:
             token_address: Solana CA
@@ -165,7 +168,8 @@ class TelegramMonitor:
                 self.telegram_calls_cache[token_address] = {
                     'mentions': [],
                     'first_seen': now,
-                    'groups': set()
+                    'groups': set(),
+                    'tracked': False  # Track if we've started tracking this CA
                 }
 
             # Add this mention
@@ -179,6 +183,25 @@ class TelegramMonitor:
             group_count = len(self.telegram_calls_cache[token_address]['groups'])
 
             logger.info(f"   📊 Total mentions: {mention_count} from {group_count} group(s)")
+
+            # OPT-052: Start tracking IMMEDIATELY (same as KOL buy)
+            # This enables full analysis: data quality, emergency stops, rug detection, etc.
+            if not self.telegram_calls_cache[token_address]['tracked']:
+                logger.info(f"   🎯 OPT-052: Starting full analysis (same as KOL buy)")
+                self.telegram_calls_cache[token_address]['tracked'] = True
+
+                # Trigger tracking if active_tracker is available
+                if self.active_tracker:
+                    try:
+                        await self.active_tracker.start_tracking(
+                            token_address,
+                            source='telegram_call'
+                        )
+                        logger.info(f"   ✅ Tracking started for {token_address[:8]}...")
+                    except Exception as track_err:
+                        logger.error(f"   ❌ Failed to start tracking: {track_err}")
+                else:
+                    logger.warning(f"   ⚠️  active_tracker not available (will track via webhook)")
 
         except Exception as e:
             logger.error(f"❌ Error adding call to cache: {e}")
