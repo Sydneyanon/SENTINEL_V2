@@ -342,43 +342,48 @@ class ConvictionEngine:
 
                 if rugcheck_result['success']:
                     risk_level = rugcheck_result['risk_level']
-                    score = rugcheck_result['score']
+                    score_norm = rugcheck_result.get('score_normalised', rugcheck_result.get('score'))
+                    rugged = rugcheck_result.get('rugged', False)
+                    is_honeypot = rugcheck_result.get('is_honeypot', False)
 
-                    # Apply penalties/blocks based on risk level
-                    if risk_level == 'critical':
-                        # BLOCK: Honeypot or 2+ critical risks
-                        emergency_blocks.append(f"RugCheck: CRITICAL risk (score: {score})")
-                        if rugcheck_result.get('is_honeypot'):
-                            emergency_blocks.append(f"RugCheck: Honeypot detected")
-                        logger.error(f"   🚨 RugCheck: CRITICAL RISK (score: {score}) - BLOCKING")
+                    # ONLY BLOCK confirmed rugs/honeypots (not just high risk scores)
+                    # Most pump.fun tokens are high risk by nature - that's OK
+                    if rugged or is_honeypot:
+                        # HARD BLOCK: Confirmed rug or honeypot
+                        emergency_blocks.append(f"RugCheck: Confirmed {'RUG' if rugged else 'HONEYPOT'}")
+                        logger.error(f"   🚨 RugCheck: {'RUGGED' if rugged else 'HONEYPOT'} - BLOCKING")
+
+                    # Apply penalties for risk levels (but don't block)
+                    elif risk_level == 'critical':
+                        # Very high risk: -40 points (score 9-10)
+                        rugcheck_penalty = -40
+                        logger.warning(f"   🚨 RugCheck: VERY HIGH risk (score: {score_norm}/10) - {rugcheck_penalty} pts")
 
                     elif risk_level == 'high':
-                        # Heavy penalty: -30 points (mutable metadata, freezeable, 1 critical risk)
-                        rugcheck_penalty = -30
-                        logger.warning(f"   ⛔ RugCheck: HIGH risk (score: {score}) - {rugcheck_penalty} pts")
-                        if rugcheck_result.get('mutable_metadata'):
-                            logger.warning(f"      ⚠️  Mutable metadata detected")
-                        if rugcheck_result.get('freezeable'):
-                            logger.warning(f"      ⚠️  Freezeable token detected")
+                        # High risk: -25 points (score 7-8)
+                        rugcheck_penalty = -25
+                        logger.warning(f"   ⛔ RugCheck: HIGH risk (score: {score_norm}/10) - {rugcheck_penalty} pts")
 
                     elif risk_level == 'medium':
-                        # Moderate penalty: -15 points
+                        # Moderate risk: -15 points (score 5-6)
                         rugcheck_penalty = -15
-                        logger.warning(f"   ⚠️  RugCheck: MEDIUM risk (score: {score}) - {rugcheck_penalty} pts")
+                        logger.info(f"   ⚠️  RugCheck: MEDIUM risk (score: {score_norm}/10) - {rugcheck_penalty} pts")
 
                     elif risk_level == 'low':
-                        # Small penalty: -5 points
+                        # Low risk: -5 points (score 3-4)
                         rugcheck_penalty = -5
-                        logger.info(f"   ⚠️  RugCheck: LOW risk (score: {score}) - {rugcheck_penalty} pts")
+                        logger.info(f"   ⚠️  RugCheck: LOW risk (score: {score_norm}/10) - {rugcheck_penalty} pts")
 
                     else:  # 'good'
-                        # No penalty - clean token
-                        logger.info(f"   ✅ RugCheck: GOOD (score: {score})")
+                        # Very safe: no penalty (score 0-2)
+                        logger.info(f"   ✅ RugCheck: SAFE (score: {score_norm}/10)")
 
-                    # Log critical risks if any
+                    # Log specific risk flags
+                    if rugcheck_result.get('mutable_metadata'):
+                        logger.info(f"      ℹ️  Mutable metadata (common for new tokens)")
                     if rugcheck_result.get('critical_risks'):
-                        for risk in rugcheck_result['critical_risks'][:3]:  # Show top 3
-                            logger.warning(f"      🔴 {risk.get('name', 'Unknown risk')}: {risk.get('description', 'N/A')}")
+                        for risk in rugcheck_result['critical_risks'][:2]:  # Show top 2
+                            logger.warning(f"      🔴 {risk.get('name', 'Unknown risk')}")
 
                 else:
                     # RugCheck failed - don't block, just log
