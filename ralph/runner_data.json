@@ -1,0 +1,74 @@
+{
+  "collected_at": "2026-01-24T23:31:39.604033",
+  "total_runners": 4,
+  "runners": [
+    {
+      "address": "ED5nyyWEzpPPiWimP8vYm7sD7TD3LAt3Q3gRTWHzPJBY",
+      "symbol": "MOODENG",
+      "name": "Moo Deng",
+      "current_mcap": 68205920.0,
+      "current_price": 0.06889,
+      "liquidity": 3618572.95,
+      "volume_24h": 127935.72,
+      "created_at": 1725994387000,
+      "dex_url": "https://dexscreener.com/solana/22wrmytj8x2trvqen3fxxi2r4rn6jdhwomtpssmn8rud",
+      "early_signal": {},
+      "onchain_metrics": {
+        "holder_count": 0
+      },
+      "outcome": "RUNNER",
+      "gain_multiple": 1136.7653333333333
+    },
+    {
+      "address": "CzLSujWBLFsSjncfkh59rUFqvafWcY5tzedWJSuypump",
+      "symbol": "GOAT",
+      "name": "Goatseus Maximus",
+      "current_mcap": 32073010.0,
+      "current_price": 0.03207,
+      "liquidity": 2243019.17,
+      "volume_24h": 70896.08,
+      "created_at": 1728595144000,
+      "dex_url": "https://dexscreener.com/solana/9tb2ohu5p16bpbarqd3n27wnkf51ukfs8z1gzzldxvzw",
+      "early_signal": {},
+      "onchain_metrics": {
+        "holder_count": 0
+      },
+      "outcome": "RUNNER",
+      "gain_multiple": 534.5501666666667
+    },
+    {
+      "address": "GJAFwWjJ3vnTsrQVabjBVK2TYB1YtRCQXRDfDgUnpump",
+      "symbol": "ACT",
+      "name": "Act I : The AI Prophecy",
+      "current_mcap": 21995799.0,
+      "current_price": 0.02319,
+      "liquidity": 2210691.47,
+      "volume_24h": 82368.9,
+      "created_at": 1729337799000,
+      "dex_url": "https://dexscreener.com/solana/b4phskl6cezbxvqm1aupquvpc5erfcazj7u9dhtphmvx",
+      "early_signal": {},
+      "onchain_metrics": {
+        "holder_count": 0
+      },
+      "outcome": "RUNNER",
+      "gain_multiple": 366.59665
+    },
+    {
+      "address": "8x5VqbHA8D7NkD52uNuS5nnt3PwA8pLD34ymskeSo2Wn",
+      "symbol": "ZEREBRO",
+      "name": "zerebro",
+      "current_mcap": 11973173.0,
+      "current_price": 0.01197,
+      "liquidity": 1672835.56,
+      "volume_24h": 290272.29,
+      "created_at": 1730142507000,
+      "dex_url": "https://dexscreener.com/solana/3sjnocnkkhwpvxygdtem8rccihsgc9jsfzuuazkbvrvp",
+      "early_signal": {},
+      "onchain_metrics": {
+        "holder_count": 0
+      },
+      "outcome": "RUNNER",
+      "gain_multiple": 199.55288333333334
+    }
+  ]
+}
