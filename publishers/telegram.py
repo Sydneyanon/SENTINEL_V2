@@ -156,15 +156,16 @@ class TelegramPublisher:
             message += f"<b>TOTAL: {breakdown.get('total', conviction)}/100</b>\n"
             message += "\n"
         
-        # Add smart wallet activity
+        # Add smart wallet activity (OPT-027: Enhanced with KOL names and tier badges)
         if wallets or elite_count > 0 or kol_count > 0:
             message += "<b>👑 Elite Trader Activity:</b>\n"
             if elite_count > 0:
                 message += f"🏆 {elite_count} Elite trader(s)\n"
             if kol_count > 0:
                 message += f"👑 {kol_count} Top KOL(s)\n"
-            
-            for wallet in wallets[:3]:  # Show top 3
+
+            # Show top 3 wallets with enhanced tier badges
+            for wallet in wallets[:3]:
                 name = wallet.get('name', 'Unknown')
                 # Fallback for None or empty names
                 if not name or name == 'None' or name is None:
@@ -174,15 +175,30 @@ class TelegramPublisher:
                 pnl_30d = wallet.get('pnl_30d', 0)
                 mins_ago = wallet.get('minutes_ago', 0)
 
-                tier_emoji = "🏆" if tier == 'elite' else "👑"
-
-                # Build wallet line with win rate and optional PnL
-                if win_rate > 0 and pnl_30d > 0:
-                    message += f"{tier_emoji} {name} ({win_rate*100:.0f}% WR, ${pnl_30d/1000:.0f}k PnL) - {mins_ago:.0f}m ago\n"
-                elif win_rate > 0:
-                    message += f"{tier_emoji} {name} ({win_rate*100:.0f}% WR) - {mins_ago:.0f}m ago\n"
+                # OPT-027: Enhanced tier badges with god/elite/whale distinction
+                if tier == 'god':
+                    tier_badge = "👑 GOD"
+                    tier_emoji = "👑"
+                elif tier == 'elite':
+                    tier_badge = "🔥 ELITE"
+                    tier_emoji = "🔥"
+                elif tier == 'top_kol':
+                    tier_badge = "⭐ TOP KOL"
+                    tier_emoji = "⭐"
+                elif tier == 'whale':
+                    tier_badge = "🐋 WHALE"
+                    tier_emoji = "🐋"
                 else:
-                    message += f"{tier_emoji} {name} - {mins_ago:.0f}m ago\n"
+                    tier_badge = "📊"
+                    tier_emoji = "📊"
+
+                # Build wallet line with tier badge, win rate, and optional PnL
+                if win_rate > 0 and pnl_30d > 0:
+                    message += f"{tier_emoji} <b>{name}</b> [{tier_badge}] - {win_rate*100:.0f}% WR, ${pnl_30d/1000:.0f}k PnL - {mins_ago:.0f}m ago\n"
+                elif win_rate > 0:
+                    message += f"{tier_emoji} <b>{name}</b> [{tier_badge}] - {win_rate*100:.0f}% WR - {mins_ago:.0f}m ago\n"
+                else:
+                    message += f"{tier_emoji} <b>{name}</b> [{tier_badge}] - {mins_ago:.0f}m ago\n"
             message += "\n"
         
         # Add narrative info

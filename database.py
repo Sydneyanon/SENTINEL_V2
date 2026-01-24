@@ -126,6 +126,49 @@ class Database:
             except Exception as e:
                 # Columns might already exist, ignore
                 pass
+
+            # OPT-000 PREREQUISITE: Add outcome tracking for data-driven optimizations
+            try:
+                await conn.execute('''
+                    ALTER TABLE signals
+                    ADD COLUMN IF NOT EXISTS outcome TEXT
+                ''')
+                await conn.execute('''
+                    ALTER TABLE signals
+                    ADD COLUMN IF NOT EXISTS outcome_price REAL
+                ''')
+                await conn.execute('''
+                    ALTER TABLE signals
+                    ADD COLUMN IF NOT EXISTS outcome_timestamp TIMESTAMP
+                ''')
+                await conn.execute('''
+                    ALTER TABLE signals
+                    ADD COLUMN IF NOT EXISTS max_price_reached REAL
+                ''')
+                await conn.execute('''
+                    ALTER TABLE signals
+                    ADD COLUMN IF NOT EXISTS max_roi REAL
+                ''')
+                await conn.execute('''
+                    ALTER TABLE signals
+                    ADD COLUMN IF NOT EXISTS narrative_tags TEXT[]
+                ''')
+                await conn.execute('''
+                    ALTER TABLE signals
+                    ADD COLUMN IF NOT EXISTS kol_wallets TEXT[]
+                ''')
+                await conn.execute('''
+                    ALTER TABLE signals
+                    ADD COLUMN IF NOT EXISTS kol_tiers TEXT[]
+                ''')
+                await conn.execute('''
+                    ALTER TABLE signals
+                    ADD COLUMN IF NOT EXISTS holder_pattern TEXT
+                ''')
+            except Exception as e:
+                # Columns might already exist, ignore
+                logger.debug(f"Outcome tracking columns migration: {e}")
+                pass
             
             # Create indexes separately (PostgreSQL syntax)
             await conn.execute('''
@@ -327,7 +370,7 @@ class Database:
             return [dict(row) for row in rows]
     
     async def get_wallet_performance(
-        self, 
+        self,
         wallet_address: str,
         days: int = 30
     ) -> Dict:
@@ -338,9 +381,131 @@ class Database:
                 WHERE wallet_address = $1
                 AND timestamp > NOW() - INTERVAL '{} days'
             '''.format(days), wallet_address)  # FIXED: Use .format() for interval
-            
+
             return {
                 'wallet_address': wallet_address,
                 'total_trades': total_trades or 0,
                 'period_days': days
             }
+
+    async def update_signal_outcome(
+        self,
+        token_address: str,
+        outcome: str,
+        outcome_price: float,
+        max_price_reached: float,
+        max_roi: float
+    ):
+        """
+        OPT-000 PREREQUISITE: Update signal outcome for tracking
+
+        Args:
+            token_address: Token contract address
+            outcome: rug, loss, 2x, 5x, 10x, 50x, 100x
+            outcome_price: Final price at outcome determination
+            max_price_reached: Highest price reached
+            max_roi: Maximum ROI achieved
+        """
+        async with self.pool.acquire() as conn:
+            await conn.execute('''
+                UPDATE signals
+                SET outcome = $1,
+                    outcome_price = $2,
+                    outcome_timestamp = NOW(),
+                    max_price_reached = $3,
+                    max_roi = $4,
+                    updated_at = NOW()
+                WHERE token_address = $5
+            ''', outcome, outcome_price, max_price_reached, max_roi, token_address)
+
+    async def update_signal_metadata(
+        self,
+        token_address: str,
+        narrative_tags: List[str],
+        kol_wallets: List[str],
+        kol_tiers: List[str],
+        holder_pattern: str
+    ):
+        """
+        OPT-000 PREREQUISITE: Update signal metadata for pattern analysis
+
+        Args:
+            token_address: Token contract address
+            narrative_tags: List of narratives (AI, meme, cat, etc.)
+            kol_wallets: List of KOL wallet addresses that bought
+            kol_tiers: List of KOL tiers (god, elite, whale)
+            holder_pattern: Holder distribution pattern (concentrated, distributed, etc.)
+        """
+        async with self.pool.acquire() as conn:
+            await conn.execute('''
+                UPDATE signals
+                SET narrative_tags = $1,
+                    kol_wallets = $2,
+                    kol_tiers = $3,
+                    holder_pattern = $4,
+                    updated_at = NOW()
+                WHERE token_address = $5
+            ''', narrative_tags, kol_wallets, kol_tiers, holder_pattern, token_address)
+
+    async def get_signals_with_outcomes(
+        self,
+        days: int = 7,
+        min_signals: int = 3
+    ) -> List[Dict]:
+        """
+        OPT-000: Get signals with outcomes for pattern analysis
+
+        Args:
+            days: Number of days to look back
+            min_signals: Minimum signals per pattern to consider
+
+        Returns:
+            List of signals with full metadata and outcomes
+        """
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch('''
+                SELECT * FROM signals
+                WHERE signal_posted = TRUE
+                AND outcome IS NOT NULL
+                AND created_at >= NOW() - make_interval(days => $1)
+                ORDER BY created_at DESC
+            ''', days)
+            return [dict(row) for row in rows]
+
+    async def get_pattern_win_rates(
+        self,
+        days: int = 7
+    ) -> List[Dict]:
+        """
+        OPT-000: Calculate win rate by pattern (KOL tier + narrative + holder pattern)
+
+        Args:
+            days: Number of days to analyze
+
+        Returns:
+            List of patterns with win rates
+        """
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch('''
+                SELECT
+                    kol_tiers,
+                    narrative_tags,
+                    holder_pattern,
+                    COUNT(*) as total_signals,
+                    SUM(CASE WHEN outcome IN ('2x', '5x', '10x', '50x', '100x') THEN 1 ELSE 0 END) as wins,
+                    SUM(CASE WHEN outcome = 'rug' THEN 1 ELSE 0 END) as rugs,
+                    ROUND(
+                        100.0 * SUM(CASE WHEN outcome IN ('2x', '5x', '10x', '50x', '100x') THEN 1 ELSE 0 END) /
+                        NULLIF(COUNT(*), 0),
+                        2
+                    ) as win_rate_pct,
+                    ROUND(AVG(max_roi), 2) as avg_roi
+                FROM signals
+                WHERE signal_posted = TRUE
+                AND outcome IS NOT NULL
+                AND created_at >= NOW() - make_interval(days => $1)
+                GROUP BY kol_tiers, narrative_tags, holder_pattern
+                HAVING COUNT(*) >= 3
+                ORDER BY win_rate_pct DESC
+            ''', days)
+            return [dict(row) for row in rows]
