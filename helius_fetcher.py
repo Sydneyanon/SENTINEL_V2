@@ -39,6 +39,11 @@ class HeliusDataFetcher:
         self.holder_cache = {}  # {token_address: {'data': {...}, 'timestamp': datetime}}
         self.cache_ttl_minutes = 60
 
+        # OPT-035: Cache for bonding curve data (5-second TTL for speed)
+        # Bonding curve changes slowly, so we can cache aggressively for short periods
+        self.bonding_curve_cache = {}  # {token_address: {'data': {...}, 'timestamp': datetime}}
+        self.bonding_curve_cache_seconds = 5  # 5-second cache for active tokens
+
         # Log data source strategy
         if SOLDERS_AVAILABLE:
             logger.info("   🔐 Bonding curve decoder enabled (primary for pump.fun)")
@@ -52,17 +57,27 @@ class HeliusDataFetcher:
         """
         Get bonding curve data for pump.fun token
         Decodes on-chain account to calculate price, mcap, bonding %
-        
+
+        OPT-035: Added 5-second cache for speed optimization
+
         Args:
             token_address: Token mint address
-            
+
         Returns:
             Dict with price_usd, market_cap, liquidity, bonding_curve_pct or None
         """
         if not SOLDERS_AVAILABLE:
             logger.debug(f"   ⚠️ Bonding curve decode skipped - solders not installed")
             return None
-            
+
+        # OPT-035: Check cache first (5-second TTL for speed)
+        if token_address in self.bonding_curve_cache:
+            cached = self.bonding_curve_cache[token_address]
+            cache_age = (datetime.utcnow() - cached['timestamp']).total_seconds()
+            if cache_age < self.bonding_curve_cache_seconds:
+                logger.debug(f"   ⚡ Using cached bonding curve data ({cache_age:.1f}s old)")
+                return cached['data']
+
         try:
             logger.debug(f"   🔐 Starting bonding curve decode...")
             
@@ -138,8 +153,8 @@ class HeliusDataFetcher:
             bonding_pct = min((virtual_sol / 85) * 100, 100)
             
             logger.info(f"   💰 Decoded: price=${price_usd:.8f}, mcap=${mcap_usd:.0f}, bonding={bonding_pct:.1f}%")
-            
-            return {
+
+            result = {
                 'price_usd': price_usd,
                 'market_cap': mcap_usd,
                 'liquidity': liquidity_usd,
@@ -147,6 +162,14 @@ class HeliusDataFetcher:
                 'virtual_sol_reserves': virtual_sol,
                 'virtual_token_reserves': virtual_token,
             }
+
+            # OPT-035: Cache the result for 5 seconds (speed optimization)
+            self.bonding_curve_cache[token_address] = {
+                'data': result,
+                'timestamp': datetime.utcnow()
+            }
+
+            return result
             
         except Exception as e:
             logger.error(f"   ❌ Bonding curve decode error: {e}")
