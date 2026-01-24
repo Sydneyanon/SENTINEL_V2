@@ -44,7 +44,7 @@
       "description": "As an operator, I want to minimize Helius credit usage without sacrificing signal quality",
       "acceptanceCriteria": [
         "Identify top 3 credit-consuming operations from logs",
-        "Increase caching TTL for holder checks (60min → 120min)",
+        "Increase caching TTL for holder checks (60min \u2192 120min)",
         "Monitor credit usage for 2 hours",
         "Ensure signal quality doesn't drop >5%",
         "Commit if credits reduced by >20%"
@@ -265,7 +265,7 @@
       "acceptanceCriteria": [
         "Audit current metadata sources: Helius DAS API, bonding curve, DexScreener",
         "Measure success rate and latency for each source",
-        "Add fallback chain: Helius → DexScreener → Jupiter API → Solscan",
+        "Add fallback chain: Helius \u2192 DexScreener \u2192 Jupiter API \u2192 Solscan",
         "Implement 24h cache for token metadata (Redis or in-memory)",
         "Add parallel fetching: fetch metadata + price + holders simultaneously",
         "Monitor for 2 hours",
@@ -496,7 +496,7 @@
       "description": "As a trader, I want to see which KOLs bought so I know who's behind the signal",
       "acceptanceCriteria": [
         "Add KOL name/label to Telegram embed (e.g., 'Ansem', 'Machi Big Brother')",
-        "Show tier badge (🔥 Elite, 👑 God, etc.)",
+        "Show tier badge (\ud83d\udd25 Elite, \ud83d\udc51 God, etc.)",
         "If multiple KOLs: show top 3 by tier",
         "Pull names from curated_wallets.py metadata",
         "Test Telegram formatting looks clean",
@@ -602,7 +602,7 @@
         "Monitor all posted signals continuously (price, volume, holders)",
         "Post exit alert when: hit 3x ('Take 50% profits'), 5x ('Take 70%'), or red flags ('EXIT NOW')",
         "Red flags: volume crashed >80%, holders down >40%, liquidity pulled >50%",
-        "Format: '🚨 EXIT SIGNAL: [TOKEN] hit 5x - Suggest taking 70% profits. Volume: -15%, Holders: +5%'",
+        "Format: '\ud83d\udea8 EXIT SIGNAL: [TOKEN] hit 5x - Suggest taking 70% profits. Volume: -15%, Holders: +5%'",
         "Track if users follow exit signals (measure via on-chain)",
         "Monitor for 48 hours",
         "Keep if: exit alerts would have improved avg ROI >15% (vs holding)"
@@ -635,7 +635,7 @@
       "title": "SPEED: Catch tokens within 60 seconds of KOL buy",
       "description": "As a sniper, I want to post signals FAST before price pumps",
       "acceptanceCriteria": [
-        "Measure current latency: KOL buy → signal posted (avg time)",
+        "Measure current latency: KOL buy \u2192 signal posted (avg time)",
         "Optimize websocket processing: parallel instead of sequential",
         "Cache metadata aggressively (avoid redundant Helius calls)",
         "Target: <60 seconds from KOL buy to Telegram post",
@@ -779,10 +779,10 @@
       "description": "As an adaptive system, I want to be conservative after losses and aggressive after wins",
       "acceptanceCriteria": [
         "Track last 10 signals: calculate rolling win_rate",
-        "If last 10 signals: >70% WR → AGGRESSIVE MODE (lower threshold by 10 pts)",
-        "If last 10 signals: <40% WR → DEFENSIVE MODE (raise threshold by 20 pts)",
+        "If last 10 signals: >70% WR \u2192 AGGRESSIVE MODE (lower threshold by 10 pts)",
+        "If last 10 signals: <40% WR \u2192 DEFENSIVE MODE (raise threshold by 20 pts)",
         "Reset to normal after 20 signals OR 6 hours",
-        "Add mode indicator to Telegram posts: 🔥 AGGRESSIVE or 🛡️ DEFENSIVE",
+        "Add mode indicator to Telegram posts: \ud83d\udd25 AGGRESSIVE or \ud83d\udee1\ufe0f DEFENSIVE",
         "Monitor for 48 hours",
         "Keep if: reduces losing streaks >50% (stop posting after 3 consecutive rugs)"
       ],
@@ -912,7 +912,7 @@
         "Retrain ML models on updated dataset",
         "Track meta shifts: 'narratives that worked last month vs this month'",
         "Auto-adjust scoring weights based on recent data",
-        "Log changes to progress.txt: 'Meta shift detected: AI narrative win_rate dropped from 68% → 42%, reducing weight'",
+        "Log changes to progress.txt: 'Meta shift detected: AI narrative win_rate dropped from 68% \u2192 42%, reducing weight'",
         "Monitor continuously",
         "Keep permanently (continuous learning)"
       ],
@@ -943,6 +943,140 @@
       "deployment_commit": "78d7c4e",
       "monitoring_start": null,
       "monitoring_duration_hours": 2
+    },
+    {
+      "id": "OPT-052",
+      "title": "Treat Telegram Calls Like KOL Buys (Full Analysis)",
+      "description": "As a quality filter, I want TG calls to undergo the same rigorous analysis as KOL buys to eliminate garbage",
+      "acceptanceCriteria": [
+        "Run full analysis pipeline on TG-called tokens (same as KOL buys)",
+        "Apply data quality checks (OPT-036): price>0, liq\u2265$1k, valid holders",
+        "Apply emergency stops (OPT-023): block >80% concentration, <$5k liq, <2min age",
+        "Apply rug detection: bundles, holder concentration",
+        "Require 75+ conviction score (same threshold as KOL signals)",
+        "Track: which groups call quality tokens vs garbage",
+        "Auto-disable groups with <40% quality rate after 20 calls",
+        "Monitor for 6 hours",
+        "Keep if: TG signal quality improves >30% (fewer rugs from TG calls)"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "USER REQUEST: Same standards for all triggers. Quality over quantity.",
+      "baseline_metrics": {}
+    },
+    {
+      "id": "OPT-055",
+      "title": "CREDITS: Smart Timing for Expensive Checks (Save 60%+ Credits)",
+      "description": "As a cost optimizer, I want to only run expensive checks (10 credits each) on high-probability tokens",
+      "acceptanceCriteria": [
+        "Audit credit usage: map every Helius call by operation type",
+        "Identify waste: tokens that fail early but we checked holders anyway",
+        "Implement smart gating:",
+        "  - Phase 1 (FREE): unique buyers, bonding %, KOL count",
+        "  - Phase 2 (CHEAP 1-2 credits): price check, liquidity validation",
+        "  - Phase 3 (EXPENSIVE 10+ credits): holders check, top 10 analysis",
+        "Only run Phase 3 if: base_score \u226560 OR 2+ KOLs OR post-graduation",
+        "Skip Phase 3 if: obvious rug flags, low base score, too early (<30 buyers)",
+        "Track: credits saved per hour, signals quality unchanged",
+        "Monitor for 6 hours",
+        "Keep if: credits reduced >50% with <5% quality drop"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "URGENT: 1.1M credits used (11% of quota). Need aggressive optimization. Expected savings: 60-70% credits.",
+      "baseline_metrics": {
+        "credits_used_30d": 1100000,
+        "credits_quota": 10000000,
+        "usage_pct": 11
+      }
+    },
+    {
+      "id": "OPT-057",
+      "title": "DATA MINING: Find Hidden Criteria (The Missing 30%)",
+      "description": "As a data scientist, I want to discover what criteria we're NOT tracking that separates 10x runners from rugs",
+      "acceptanceCriteria": [
+        "Query database: last 100 signals with outcomes (10x vs rug vs flat)",
+        "For each signal, re-fetch historical data from Helius/DexScreener:",
+        "  - Graduate speed (time from 0% to 100% bonding)",
+        "  - Holder retention (% of early buyers still holding at +1hr)",
+        "  - Wallet quality (% experienced wallets with 50+ trades)",
+        "  - Post-grad momentum (volume/buys in first hour after graduation)",
+        "  - Market timing (SOL price trend, competing launches)",
+        "  - Creator behavior (did dev sell? buy back? lock LP?)",
+        "Statistical analysis: which metrics correlate strongest with 10x?",
+        "Find: Top 5 hidden criteria currently NOT tracked",
+        "Implement top 5 in conviction_engine.py with weights based on correlation",
+        "Backtest on last 30 days data",
+        "Deploy and monitor 24 hours",
+        "Keep if: win rate improves >15% OR catch 10x runners earlier"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "CRITICAL: Current criteria (KOLs, TG, volume, momentum) aren't enough. We're missing key signals that predict runners. Expected discoveries: graduate speed, holder retention, wallet quality, post-grad patterns.",
+      "baseline_metrics": {},
+      "data_sources": [
+        "PostgreSQL (your signal history)",
+        "Helius RPC (transaction history, holders)",
+        "DexScreener (post-grad outcomes)",
+        "Birdeye (price histories)"
+      ]
+    },
+    {
+      "id": "OPT-053",
+      "title": "ML: Prediction Model (Replace Current Scoring)",
+      "description": "As a machine learning system, I want to predict 10x probability using all available data",
+      "acceptanceCriteria": [
+        "Requires: OPT-057 completed (new criteria discovered)",
+        "Extract features: KOLs, narratives, speed, retention, wallet quality, etc.",
+        "Train model on historical signals (target: 10x+ ROI)",
+        "Model outputs: probability score 0-100",
+        "Add as new conviction calculation or bonus layer",
+        "Monitor 48 hours",
+        "Keep if: win rate improves >20%"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "DEPENDS ON: OPT-057. This uses the discovered criteria to build ML predictor.",
+      "baseline_metrics": {}
+    },
+    {
+      "id": "OPT-056",
+      "title": "Real-Time Narrative Detection (First Mover Advantage)",
+      "description": "As a trend detector, I want to auto-discover hot narratives before Twitter knows",
+      "acceptanceCriteria": [
+        "Every 5 minutes, scan:",
+        "  - Telegram group messages (extract keywords)",
+        "  - Pump.fun graduation names (trending tokens)",
+        "  - DexScreener trending pairs",
+        "Detect keyword spikes (>200% increase = trending)",
+        "Auto-add to HOT_NARRATIVES with weight based on spike intensity",
+        "Track historical: which narratives = highest win rate",
+        "Boost conviction for tokens matching trending narratives",
+        "Monitor 24 hours",
+        "Keep if: catch narrative waves 2-4 hours before Twitter"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": "NO TWITTER API NEEDED. Uses TG groups (already monitoring), Pump.fun data, DexScreener trending.",
+      "baseline_metrics": {}
+    },
+    {
+      "id": "OPT-054",
+      "title": "Fix KOL Metadata Fetching (Names & Win Rates)",
+      "description": "As a KOL tracker, I want wallet metadata (names, win rates, tiers) to display in signals",
+      "acceptanceCriteria": [
+        "Debug: Check if APIFY_API_TOKEN set in Railway",
+        "Add fallback: gmgn.ai direct API (no Apify)",
+        "Add retry logic (3 attempts)",
+        "Log success/failure for each wallet metadata fetch",
+        "Verify: KOL names appear in Telegram posts",
+        "Monitor 6 hours",
+        "Keep if: metadata fetched for >80% of KOL buys"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": "Currently failing silently. Need fallback fetchers.",
+      "baseline_metrics": {}
     }
   ]
 }
