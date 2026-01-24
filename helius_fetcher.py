@@ -3,8 +3,9 @@ Helius Data Fetcher - Get token data from Helius RPC/API
 Uses bonding curve decoder for pump.fun tokens
 Falls back to DexScreener for graduated tokens
 """
-from typing import Dict, Optional
+from typing import Dict, Optional, Callable, Any
 import aiohttp
+import asyncio
 from loguru import logger
 import config
 import base64
@@ -26,6 +27,42 @@ except ImportError as e:
 # pump.fun constants
 PUMP_PROGRAM_ID = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"
 TOTAL_SUPPLY = 1_000_000_000  # 1 billion tokens fixed
+
+
+# OPT-013: Retry helper with exponential backoff
+async def retry_with_backoff(
+    func: Callable,
+    max_attempts: int = 3,
+    base_delay: float = 1.0,
+    max_delay: float = 10.0,
+    exceptions: tuple = (aiohttp.ClientError, asyncio.TimeoutError)
+) -> Any:
+    """
+    Retry async function with exponential backoff
+
+    Args:
+        func: Async function to retry
+        max_attempts: Maximum retry attempts (default: 3)
+        base_delay: Base delay in seconds (default: 1.0)
+        max_delay: Maximum delay in seconds (default: 10.0)
+        exceptions: Tuple of exceptions to catch and retry
+
+    Returns:
+        Result from func() or None if all attempts fail
+    """
+    for attempt in range(max_attempts):
+        try:
+            return await func()
+        except exceptions as e:
+            if attempt == max_attempts - 1:
+                # Last attempt failed
+                logger.warning(f"   ⚠️ All {max_attempts} retry attempts failed: {e}")
+                return None
+
+            # Calculate delay with exponential backoff
+            delay = min(base_delay * (2 ** attempt), max_delay)
+            logger.debug(f"   ⏳ Retry attempt {attempt + 1}/{max_attempts} after {delay:.1f}s delay")
+            await asyncio.sleep(delay)
 
 
 class HeliusDataFetcher:
@@ -106,7 +143,7 @@ class HeliusDataFetcher:
                             {"encoding": "base64"}
                         ]
                     },
-                    timeout=aiohttp.ClientTimeout(total=5)
+                    timeout=aiohttp.ClientTimeout(total=10)  # OPT-013: Increased from 5s to reduce timeout errors
                 ) as resp:
                     if resp.status != 200:
                         logger.warning(f"   ⚠️ Helius RPC returned {resp.status}")
@@ -114,12 +151,18 @@ class HeliusDataFetcher:
                     
                     data = await resp.json()
                     result = data.get('result')
-                    
+
                     if not result or not result.get('value'):
                         logger.warning(f"   ⚠️ No bonding curve account found")
                         return None
-                    
-                    account_data = result['value']['data'][0]  # Base64 encoded
+
+                    # OPT-013: Safe dictionary access with validation
+                    value_data = result.get('value', {}).get('data')
+                    if not value_data or not isinstance(value_data, list) or len(value_data) == 0:
+                        logger.warning(f"   ⚠️ Invalid bonding curve data structure")
+                        return None
+
+                    account_data = value_data[0]  # Base64 encoded
                     logger.debug(f"   📦 Got account data, length: {len(account_data)}")
                     
             # Decode the account data
@@ -311,7 +354,7 @@ class HeliusDataFetcher:
                 async with session.post(
                     url,
                     json={"mintAccounts": [token_address]},
-                    timeout=aiohttp.ClientTimeout(total=5)
+                    timeout=aiohttp.ClientTimeout(total=10)  # OPT-013: Increased from 5s to reduce timeout errors
                 ) as resp:
                     if resp.status != 200:
                         logger.warning(f"   ⚠️ Helius API returned status {resp.status}")
@@ -357,7 +400,7 @@ class HeliusDataFetcher:
                         "method": "getTokenLargestAccounts",
                         "params": [token_address]
                     },
-                    timeout=aiohttp.ClientTimeout(total=5)
+                    timeout=aiohttp.ClientTimeout(total=10)  # OPT-013: Increased from 5s to reduce timeout errors
                 ) as resp:
                     if resp.status != 200:
                         return 0
@@ -446,22 +489,34 @@ class HeliusDataFetcher:
 
                 supply_data = await supply_response.json()
 
-            # Parse response
+            # Parse response with safe type conversion (OPT-013)
             holders_result = holders_data.get('result', {})
             holders_value = holders_result.get('value', [])
 
             supply_result = supply_data.get('result', {})
             supply_value = supply_result.get('value', {})
-            total_supply = int(supply_value.get('amount', 0))
+
+            # Safe integer conversion
+            try:
+                total_supply = int(supply_value.get('amount', 0))
+            except (ValueError, TypeError):
+                logger.warning(f"   ⚠️ Invalid supply amount: {supply_value.get('amount')}")
+                total_supply = 0
 
             if not holders_value or not total_supply:
                 logger.warning(f"   ⚠️ No holder data or supply returned")
                 return None
 
-            # Format holders data (top N)
+            # Format holders data (top N) with safe parsing (OPT-013)
             holders = []
             for i, holder in enumerate(holders_value[:limit]):
-                amount = int(holder.get('amount', 0))
+                # Safe integer conversion
+                try:
+                    amount = int(holder.get('amount', 0))
+                except (ValueError, TypeError):
+                    logger.debug(f"   ⚠️ Invalid holder amount at index {i}, skipping")
+                    continue
+
                 # Note: We don't have wallet addresses in getTokenLargestAccounts response
                 # We have account addresses (token accounts, not wallet addresses)
                 holders.append({
@@ -543,7 +598,7 @@ class HeliusDataFetcher:
             url = f"https://api.dexscreener.com/latest/dex/tokens/{token_address}"
             
             async with aiohttp.ClientSession() as session:
-                async with session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as resp:
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:  # OPT-013: Increased from 5s to reduce timeout errors
                     if resp.status != 200:
                         return None
                     
