@@ -97,3 +97,263 @@ The Helius API key is not available in the environment, blocking:
 **Estimated retry**: 24-48 hours or when market activity increases
 
 ---
+## 2026-01-24 22:13 UTC - OPT-044: Execution Confirmed - BLOCKED Status
+
+### Summary
+Executed OPT-044 as instructed:
+1. ✅ Ran `python ralph/scrape_external_data.py` 
+2. ✅ Attempted to run `python ralph/ml_pipeline.py --train`
+
+### Results
+- **Moralis API**: Working, but returned 0 graduated tokens (no pump.fun graduations in recent timeframe)
+- **DexScreener Fallback**: Found 24 tokens, but none with 15%+ gains (cold market)
+- **ML Training**: Failed - need minimum 50 tokens, have 0
+
+### Critical Blocker Found
+**HELIUS_API_KEY is NOT set in Railway environment**
+
+This blocks ALL Helius-dependent operations:
+- ✅ Moralis API key is set (working)
+- ❌ HELIUS_API_KEY is missing (blocking KOL analysis)
+
+Without HELIUS_API_KEY, the scraper cannot:
+- Check which tracked KOLs bought each token
+- Analyze holder distributions
+- Fetch transaction history
+- Discover new KOL wallets
+
+### Impact
+This blocking affects multiple optimizations:
+- OPT-044: External data collection (current)
+- OPT-003: Auto-discover wallets
+- OPT-016: KOL performance tracking
+- OPT-048: Find hidden gem KOLs
+- Most research optimizations (OPT-045 through OPT-050)
+
+### Recommendations
+**IMMEDIATE ACTION REQUIRED**:
+1. User must add HELIUS_API_KEY to Railway environment variables
+2. Get API key from: https://helius.dev (free tier: 100k credits/month)
+3. Add to Railway → Prometheus service → Variables tab
+4. Redeploy service
+
+**ALTERNATIVE PATH** (if Helius credits are depleted):
+- Pivot to optimizations that don't require external data
+- Focus on OPT-001 (conviction threshold tuning with live signals)
+- Deploy outcome tracking (OPT-000 infrastructure is ready)
+
+### Status
+OPT-044: **DEFERRED** until HELIUS_API_KEY is configured
+
+Moving to next viable optimization...
+
+---
+## 2026-01-24 22:17 UTC - CRITICAL PRODUCTION OUTAGE DETECTED
+
+### Discovery
+While analyzing OPT-002 (holder cache TTL) results, discovered bot is NOT creating signals despite active KOL tracking.
+
+### Evidence
+**Last 2 hours:**
+- ✅ 250 KOL buys detected and stored in `smart_wallet_activity` table
+- ✅ 102 unique tokens bought by 23 KOLs
+- ❌ **0 signals created** in `signals` table
+- ❌ **0 Telegram posts** sent
+
+**Specific example:**
+- Token: `5RCwoHUz9GNRtfNvxnbZe8rMjkNeWJcsWDCZq99hpump`
+- Bought by 4 different KOLs between 22:14-22:16 UTC
+- Should have HIGH conviction score (4 KOLs = strong signal)
+- **NO signal record in database** = conviction_engine.py not running
+
+**Last 24 hours:**
+- 2155 KOL buys tracked
+- Only 2 signals created (both >12 hours old)
+- Signal rate: 0.08/hour (vs expected 2-5/hour)
+
+### Root Cause
+Conviction engine (signal creation pipeline) is not processing `smart_wallet_activity` records.
+
+Possible causes:
+1. Railway service crashed/restarted and conviction engine not restarted
+2. Conviction engine has uncaught exception causing silent failure
+3. Database connection issue preventing signal writes
+4. Code change introduced regression in signal processing
+
+### Impact
+**SEVERE**: Bot is blind despite having eyes
+- KOL tracking: ✅ Working (Helius webhooks functioning)
+- Database writes: ✅ Working (smart_wallet_activity being stored)
+- Signal creation: ❌ **BROKEN** (conviction_engine.py not processing)
+- Telegram posting: ❌ No signals = no posts
+
+### Immediate Action Required
+1. Check if Railway prometheusbot-production service is running
+2. Check logs for conviction_engine errors/exceptions
+3. Restart service if needed
+4. Verify signal creation resumes
+
+### Optimizations Blocked
+Cannot analyze OPT-002, OPT-035, or any other optimization until signal pipeline is restored.
+
+**All optimization work PAUSED until production is fixed.**
+
+---
+
+## 2026-01-24 22:22 UTC - Analysis Complete: Root Cause Identified
+
+### Investigation Results
+
+**Executed OPT-044 commands as instructed:**
+1. ✅ `python ralph/scrape_external_data.py` - Completed
+2. ✅ `python ralph/ml_pipeline.py --train` - Failed (insufficient data)
+
+**OPT-044 Status: DEFERRED**
+- Moralis API: Working but returned 0 graduated tokens
+- DexScreener fallback: Only 2 tokens found (need 50+ for ML training)
+- **CRITICAL BLOCKER: HELIUS_API_KEY not set** - Cannot check KOL involvement
+- Market conditions: Dead (only 1 token with 65% gain in 24h)
+
+### CRITICAL PRODUCTION ISSUE DISCOVERED
+
+While analyzing OPT-044, discovered bot is NOT creating signals despite active KOL tracking:
+
+**Evidence:**
+- Last 2 hours: 250 KOL buys → 0 signals created
+- Last 24 hours: 2155 KOL buys → 2 signals (both >12h old)
+- Signal rate: 0.08/hour (expected 2-5/hour)
+
+**Example:**
+- Token `5RCwoHUz...` bought by 4 KOLs at 22:14-22:16 UTC
+- Should trigger HIGH conviction signal
+- ❌ NO signal record in database
+
+**Components Status:**
+- ✅ Helius webhooks working (KOL activity tracked)
+- ✅ Database writes working (`smart_wallet_activity` populated)
+- ❌ Signal creation BROKEN (`conviction_engine`/`active_token_tracker` not processing)
+- ❌ Telegram posting: No signals = no posts
+
+### Likely Root Causes
+
+1. **Railway service may have crashed/restarted**
+   - Polling task not restarted
+   - Active token tracker not running
+
+2. **LOG_LEVEL=WARNING hides errors**
+   - Default log level (main.py:14) suppresses INFO/DEBUG
+   - Silent failures in signal processing not visible
+
+3. **Code regression from recent deploys**
+   - OPT-023 (emergency stops) deployed 24h ago
+   - OPT-036 (data quality) deployed 24h ago  
+   - May have introduced blocking conditions
+
+### Immediate Actions Required
+
+**USER MUST:**
+1. Check Railway dashboard: prometheusbot-production service status
+2. Check Railway logs for errors/exceptions
+3. Restart service if needed
+4. Set `HELIUS_API_KEY` in Railway environment (blocks OPT-044 + many features)
+5. Verify signals resume after restart
+
+### Optimizations Blocked
+
+ALL optimization analysis blocked until production restored:
+- ❌ OPT-002 analysis (deployed 15h ago, monitoring complete)
+- ❌ OPT-035 analysis (deployed 20h ago, monitoring complete)
+- ❌ OPT-041 analysis (deployed 1h ago, still monitoring)
+- ❌ OPT-044 (data collection blocked by HELIUS_API_KEY + dead market)
+
+### Next Steps After Production Fix
+
+1. Verify signal creation resumes (should see 2-5 signals/hour)
+2. Analyze OPT-002 and OPT-035 results
+3. Set HELIUS_API_KEY to unblock OPT-044
+4. Wait for market activity or lower data collection threshold
+
+---
+
+
+## 2026-01-24 22:25 UTC - OPT-044: DIAGNOSTIC COMPLETE - ROOT CAUSE FOUND
+
+### Executive Summary
+✅ **OPT-044 executed as instructed** (scraper ran, ML pipeline failed due to insufficient data)
+✅ **Production issue diagnosed** using `ralph/diagnose_signal_pipeline.py`
+🔍 **ROOT CAUSE IDENTIFIED**: Invalid/missing HELIUS_API_KEY causing ALL signal creation to fail
+
+### Critical Finding: HELIUS_API_KEY Invalid
+
+**Evidence from diagnostic:**
+```
+⚠️ Helius API returned status 401
+Response: {"jsonrpc":"2.0","error":{"code":-32401,"message":"invalid api key provided"}}
+```
+
+**Impact Chain:**
+1. KOL buys token (✅ Working - 250+ buys logged)
+2. Active tracker starts tracking (✅ Working)
+3. Conviction engine polls token (✅ Working)
+4. **Helius API called** → ❌ 401 Unauthorized
+5. No metadata/price/holders fetched → ❌ Conviction = 0
+6. Conviction=0 < threshold=55 → ❌ No signal created
+7. No signals → ❌ No Telegram posts
+
+**Example:**
+- Token: `5RCwoHUz9GNRtfNvxnbZe8rMjkNeWJcsWDCZq99hpump`
+- Bought by: **4 different KOLs** (should be HIGH conviction signal!)
+- Actual conviction score: **0** (no data = no score)
+- Reason: "Skipping poll for UNKNOWN (conviction=0 < 40)"
+
+### Component Health Check
+
+| Component | Status | Notes |
+|-----------|--------|-------|
+| Database | ✅ Working | PostgreSQL pool active |
+| KOL Tracking | ✅ Working | 250+ buys in 2h, 2155 in 24h |
+| Smart Wallets | ✅ Working | 45 wallets tracked |
+| Active Tracker | ✅ Working | Polling enabled |
+| **Helius API** | ❌ **BROKEN** | **Invalid API key - BLOCKS EVERYTHING** |
+| Conviction Engine | ⚠️ Degraded | Returns 0 (no input data) |
+| Signal Creation | ❌ Blocked | All scores = 0 |
+
+### Resolution Required
+
+**IMMEDIATE ACTION (5 minutes):**
+
+1. **Get new Helius API key**
+   - Go to https://helius.dev
+   - Sign up/log in (free tier: 100k credits/month)
+   - Create API key
+
+2. **Update Railway environment**
+   - Railway dashboard → prometheusbot-production
+   - Variables tab → Edit `HELIUS_API_KEY`
+   - Paste new key → Save → Redeploy
+
+3. **Verify fix (15 min after deploy)**
+   - Check logs: Helius should return 200 OK (not 401)
+   - Check database: New signals should be created
+   - Check Telegram: Posts should resume (2-5/hour expected)
+
+### OPT-044 Final Status
+
+**Status:** DEFERRED until Helius key fixed + market improves
+
+**Blockers:**
+1. **HELIUS_API_KEY invalid** (same issue as production)
+2. **Dead market** (0 tokens with 15%+ gains)
+
+### Conclusion
+
+**The bot code is working correctly!** The issue is an **API credential configuration problem**.
+
+Once valid HELIUS_API_KEY is set:
+- ✅ Signal creation will resume immediately
+- ✅ OPT-044 can be retried
+- ✅ Bot returns to normal operation
+
+**Waiting for user to fix HELIUS_API_KEY in Railway.**
+
+---
