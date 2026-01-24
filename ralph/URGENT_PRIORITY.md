@@ -2,18 +2,44 @@
 
 **USER REQUEST: Highest priority task - collect 1000 token dataset**
 
-## ✅ FIXED: Now Using DexScreener (Not pump.fun)
+## ✅ UPGRADED: Now Using Moralis API (Best Option!)
 
-The scraper has been updated to use **DexScreener API** which is:
-- ✅ FREE (no rate limits)
-- ✅ RELIABLE (works on Railway)
-- ✅ COMPREHENSIVE (all Solana tokens)
+The scraper has been updated to use **Moralis Solana API** which is:
+- ✅ FREE (generous tier: 2 calls/sec, 1M units/month - no credit card!)
+- ✅ DEDICATED pump.fun graduated tokens endpoint
+- ✅ EXACT graduation timestamps + historical data (10K+ tokens)
+- ✅ Rich metadata: price, liquidity, MCAP, volume
 
-**pump.fun API was failing - we switched to DexScreener**
+**Moralis is PERFECT for pump.fun analysis - Grok recommendation confirmed!**
+
+### Setup Required (1 minute):
+
+1. Sign up at https://moralis.com (free, no credit card)
+2. Get your API key from dashboard
+3. Add to Railway environment variables: `MORALIS_API_KEY=your_key_here`
+
+**pump.fun API was unreliable - Moralis is the professional solution**
+
+## What Moralis Provides (Perfect for ML!)
+
+Every graduated token includes:
+- ✅ `graduatedAt` - Exact ISO timestamp when bonding completed
+- ✅ `tokenAddress` - Mint address
+- ✅ `name`, `symbol`, `logo` - Token metadata
+- ✅ `priceUsd`, `priceNative` - Price at time of query
+- ✅ `liquidity` - Liquidity in SOL
+- ✅ `fullyDilutedValuation` - Market cap (FDV)
+
+**This is EXACTLY what we need for pattern analysis!**
+
+Example: "Tokens graduating between 2-4 PM UTC with >$200k MCAP had 85% win rate"
 
 ## What You Need to Do RIGHT NOW
 
 ```bash
+# Step 0: Add MORALIS_API_KEY to Railway environment (if not already set)
+# Get free key from https://moralis.com
+
 # Step 1: Run the scraper on Railway (where network access works)
 python ralph/scrape_external_data.py
 
