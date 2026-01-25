@@ -90,6 +90,15 @@ class EnhancedTokenAnalyzer:
                     # Get main pair (highest liquidity)
                     pair = max(pairs, key=lambda p: p.get('liquidity', {}).get('usd', 0))
 
+                    # Check for boost status (paid promotion on DexScreener)
+                    boosts = pair.get('boosts')
+                    is_boosted = boosts and boosts.get('active')
+
+                    # Calculate volume spike indicator (5m vs 1h average)
+                    volume_5m = float(pair.get('volume', {}).get('m5', 0) or 0)
+                    volume_1h = float(pair.get('volume', {}).get('h1', 0) or 0)
+                    volume_spike_ratio = (volume_5m * 12) / volume_1h if volume_1h > 0 else 0  # Normalize 5m to 1h
+
                     return {
                         'symbol': pair.get('baseToken', {}).get('symbol'),
                         'name': pair.get('baseToken', {}).get('name'),
@@ -116,6 +125,9 @@ class EnhancedTokenAnalyzer:
                         'dex_url': pair.get('url'),
                         'dex_id': pair.get('dexId'),
                         'pair_address': pair.get('pairAddress'),
+                        # NEW: Boost detection (coordinated pump/dump signals)
+                        'is_boosted': is_boosted,
+                        'volume_spike_ratio': volume_spike_ratio,  # >5 = suspicious volume spike
                     }
         except Exception as e:
             logger.debug(f"   DexScreener error: {e}")

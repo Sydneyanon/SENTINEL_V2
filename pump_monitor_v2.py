@@ -32,6 +32,11 @@ class PumpMonitorV2:
         self.trade_counts = {}  # {token_address: total_trade_count}
         self.sol_raised = {}  # {token_address: cumulative_sol}
 
+        # NEW: Velocity spike detection (FOMO acceleration)
+        # Track buyer count in 60-second windows to detect >2x spikes after 50% bonding
+        self.buyer_history = {}  # {token_address: [(timestamp, buyer_count), ...]}
+        self.velocity_spikes = {}  # {token_address: {'detected': bool, 'spike_at_pct': int}}
+
         self.running = False
         self.connection_attempts = 0
         self.messages_received = 0
@@ -192,6 +197,46 @@ class PumpMonitorV2:
             buyer_count = len(self.unique_buyers[token_address])
             if buyer_count in [10, 25, 50, 75, 100]:
                 logger.info(f"👥 {data.get('symbol', token_address[:8])} hit {buyer_count} unique buyers")
+
+            # NEW: Velocity spike detection (>2x buyer count in 60s after 50% bonding)
+            if bonding_pct >= 50:  # Only check after 50% bonding
+                now = datetime.now()
+
+                # Initialize buyer history if needed
+                if token_address not in self.buyer_history:
+                    self.buyer_history[token_address] = []
+                    self.velocity_spikes[token_address] = {'detected': False, 'spike_at_pct': 0}
+
+                # Add current buyer count snapshot
+                self.buyer_history[token_address].append((now, buyer_count))
+
+                # Clean old history (keep last 2 minutes for analysis)
+                self.buyer_history[token_address] = [
+                    (ts, count) for ts, count in self.buyer_history[token_address]
+                    if (now - ts).total_seconds() <= 120
+                ]
+
+                # Check for velocity spike (>2x in last 60s)
+                if not self.velocity_spikes[token_address]['detected']:
+                    history = self.buyer_history[token_address]
+                    if len(history) >= 2:
+                        # Get buyer counts from 60s ago and now
+                        sixty_sec_ago = now - timedelta(seconds=60)
+                        buyers_60s_ago = None
+                        buyers_now = buyer_count
+
+                        # Find buyer count closest to 60s ago
+                        for ts, count in history:
+                            if (now - ts).total_seconds() >= 60:
+                                buyers_60s_ago = count
+
+                        # Detect spike: >2x increase in 60s
+                        if buyers_60s_ago and buyers_now > buyers_60s_ago * 2:
+                            self.velocity_spikes[token_address]['detected'] = True
+                            self.velocity_spikes[token_address]['spike_at_pct'] = int(bonding_pct)
+                            increase_pct = ((buyers_now - buyers_60s_ago) / buyers_60s_ago * 100)
+                            symbol = data.get('symbol', token_address[:8])
+                            logger.info(f"🚀 VELOCITY SPIKE: ${symbol} buyers: {buyers_60s_ago} → {buyers_now} (+{increase_pct:.0f}%) in 60s at {bonding_pct:.0f}% bonding!")
 
         # NEW: Track bonding curve milestones (SOL raised, velocity, trade counts)
         if token_address not in self.bonding_milestones:
@@ -388,14 +433,33 @@ class PumpMonitorV2:
     def get_unique_buyers(self, token_address: str) -> int:
         """
         Get count of unique buyers for a token
-        
+
         Args:
             token_address: Token mint address
-            
+
         Returns:
             Number of unique buyers tracked
         """
         return len(self.unique_buyers.get(token_address, set()))
+
+    def get_velocity_spike(self, token_address: str) -> Optional[Dict]:
+        """
+        Get velocity spike data for a token (FOMO acceleration detection)
+
+        Args:
+            token_address: Token mint address
+
+        Returns:
+            Dict with spike info or None if no spike detected
+        """
+        spike_data = self.velocity_spikes.get(token_address)
+        if spike_data and spike_data['detected']:
+            return {
+                'detected': True,
+                'spike_at_pct': spike_data['spike_at_pct'],
+                'bonus_points': 10 if spike_data['spike_at_pct'] >= 60 else 5  # Higher bonus if late-stage spike
+            }
+        return None
     
     def get_buyer_tracking_duration(self, token_address: str) -> float:
         """
