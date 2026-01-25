@@ -133,16 +133,17 @@ class DailyTokenCollector:
                             market_cap = token_data.get('market_cap', 0)
 
                             # Filters for "yesterday's winners":
+                            # ADJUSTED: More realistic thresholds for graduated pump.fun tokens
                             # 1. Minimum 100% gain (2x) in 24h - they already ran
-                            # 2. Minimum $100K volume - real activity
-                            # 3. Minimum $500K MCAP - not too small
+                            # 2. Minimum $50K volume - real activity (lowered from $100K)
+                            # 3. Minimum $100K MCAP - not too small (lowered from $500K)
                             if price_change_24h < 100:  # Less than 2x = skip
                                 continue
 
-                            if volume_24h < 100000:  # Less than $100K volume = skip
+                            if volume_24h < 50000:  # Less than $50K volume = skip
                                 continue
 
-                            if market_cap < 500000:  # Less than $500K MCAP = too small
+                            if market_cap < 100000:  # Less than $100K MCAP = too small
                                 continue
 
                             # This is a winner! Add it
@@ -231,6 +232,15 @@ class DailyTokenCollector:
 
                 await asyncio.sleep(1.5)  # Rate limit
 
+        # Save results
+        await self._save_daily_results(tokens_data)
+
+        logger.info("\n" + "=" * 80)
+        logger.info("✅ DAILY COLLECTION COMPLETE")
+        logger.info("=" * 80)
+        logger.info(f"   Collected: {len(tokens_data)} tokens")
+        logger.info(f"   Whales found: {len(self.collector.whale_wallets)}")
+
     async def _extract_early_whales(self, token_address: str, token_symbol: str,
                                     current_price: float, created_at: int) -> list:
         """
@@ -284,15 +294,6 @@ class DailyTokenCollector:
         except Exception as e:
             logger.debug(f"   Error extracting early whales: {e}")
             return []
-
-        # Save results
-        await self._save_daily_results(tokens_data)
-
-        logger.info("\n" + "=" * 80)
-        logger.info("✅ DAILY COLLECTION COMPLETE")
-        logger.info("=" * 80)
-        logger.info(f"   Collected: {len(tokens_data)} tokens")
-        logger.info(f"   Whales found: {len(self.collector.whale_wallets)}")
 
     async def _save_daily_results(self, tokens_data: list):
         """Save daily collection results"""
