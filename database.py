@@ -165,6 +165,23 @@ class Database:
                     ALTER TABLE signals
                     ADD COLUMN IF NOT EXISTS holder_pattern TEXT
                 ''')
+                # Buy/Sell ratio tracking for ML (2026-01-25)
+                await conn.execute('''
+                    ALTER TABLE signals
+                    ADD COLUMN IF NOT EXISTS buys_24h INTEGER
+                ''')
+                await conn.execute('''
+                    ALTER TABLE signals
+                    ADD COLUMN IF NOT EXISTS sells_24h INTEGER
+                ''')
+                await conn.execute('''
+                    ALTER TABLE signals
+                    ADD COLUMN IF NOT EXISTS buy_percentage REAL
+                ''')
+                await conn.execute('''
+                    ALTER TABLE signals
+                    ADD COLUMN IF NOT EXISTS buy_sell_score INTEGER
+                ''')
             except Exception as e:
                 # Columns might already exist, ignore
                 logger.debug(f"Outcome tracking columns migration: {e}")
@@ -190,19 +207,26 @@ class Database:
         """Insert a new signal"""
         async with self.pool.acquire() as conn:
             await conn.execute('''
-                INSERT INTO signals 
-                (token_address, token_name, token_symbol, signal_type, bonding_curve_pct, 
-                 conviction_score, entry_price, liquidity, volume_24h, market_cap)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                INSERT INTO signals
+                (token_address, token_name, token_symbol, signal_type, bonding_curve_pct,
+                 conviction_score, entry_price, liquidity, volume_24h, market_cap,
+                 buys_24h, sells_24h, buy_percentage, buy_sell_score)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
                 ON CONFLICT (token_address) DO UPDATE SET
                     conviction_score = EXCLUDED.conviction_score,
                     bonding_curve_pct = EXCLUDED.bonding_curve_pct,
+                    buys_24h = EXCLUDED.buys_24h,
+                    sells_24h = EXCLUDED.sells_24h,
+                    buy_percentage = EXCLUDED.buy_percentage,
+                    buy_sell_score = EXCLUDED.buy_sell_score,
                     updated_at = NOW()
             ''', signal_data['token_address'], signal_data.get('token_name'),
                 signal_data.get('token_symbol'), signal_data['signal_type'],
                 signal_data.get('bonding_curve_pct'), signal_data['conviction_score'],
                 signal_data.get('entry_price'), signal_data.get('liquidity'),
-                signal_data.get('volume_24h'), signal_data.get('market_cap'))
+                signal_data.get('volume_24h'), signal_data.get('market_cap'),
+                signal_data.get('buys_24h'), signal_data.get('sells_24h'),
+                signal_data.get('buy_percentage'), signal_data.get('buy_sell_score'))
     
     async def mark_signal_posted(self, token_address: str, message_id: int):
         """Mark a signal as posted to Telegram"""

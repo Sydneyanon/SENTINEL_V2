@@ -21,6 +21,7 @@ class ConvictionEngine:
     Scoring breakdown (with rug detection):
     - Smart Wallet Activity: 0-40 points
     - Narrative Detection: 0-25 points (if enabled)
+    - Buy/Sell Ratio: 0-20 points (percentage-based)
     - Unique Buyers: 0-15 points
     - Volume Velocity: 0-10 points
     - Price Momentum: 0-10 points
@@ -28,7 +29,7 @@ class ConvictionEngine:
     - Twitter Buzz: 0-15 points (if enabled)
     - Bundle Penalty: -5 to -40 points (with overrides)
     - Holder Concentration: -15 to -40 points (with KOL bonus)
-    Total: 0-135+ points (can exceed with bonuses)
+    Total: 0-145+ points (can exceed with bonuses)
     """
     
     def __init__(
@@ -130,10 +131,10 @@ class ConvictionEngine:
             base_scores['momentum'] = momentum_score
             logger.info(f"   🚀 Momentum: {momentum_score} points")
 
-            # 5. Buy/Sell Ratio (0-10 points) - OPT-044: ML identified as 4th most important feature
+            # 5. Buy/Sell Ratio (0-20 points) - Updated: Percentage-based scoring
             buy_sell_score = self._score_buy_sell_ratio(token_data)
             base_scores['buy_sell_ratio'] = buy_sell_score
-            logger.info(f"   💹 Buy/Sell Ratio: {buy_sell_score} points")
+            logger.info(f"   💹 Buy/Sell Ratio: {buy_sell_score}/20 points")
 
             # 6. Volume/Liquidity Velocity (0-8 points) - OPT-044: High velocity = early momentum
             velocity_score = self._score_volume_liquidity_velocity(token_data)
@@ -147,7 +148,7 @@ class ConvictionEngine:
                 logger.warning(f"   📉 MCAP Penalty: {mcap_penalty} points (too late to enter)")
 
             base_total = sum(base_scores.values())
-            logger.info(f"   💰 BASE SCORE: {base_total}/113")
+            logger.info(f"   💰 BASE SCORE: {base_total}/123")
             
             # ================================================================
             # PHASE 2: BUNDLE DETECTION (FREE) ⭐
@@ -769,39 +770,69 @@ class ConvictionEngine:
 
     def _score_buy_sell_ratio(self, token_data: Dict) -> int:
         """
-        Score based on buy/sell ratio (0-10 points)
-        OPT-044: ML identified as 4th most important feature (0.0959 importance)
+        Score based on buy/sell ratio percentage (0-20 points)
+        Updated 2026-01-25: Percentage-based scoring for better ML training data
 
-        Pattern from 36 runners:
-        - Small runners (<10x): avg ratio = 1.29 (bullish momentum)
-        - Mega runners (1000x+): avg ratio = 0.53 (profit-taking phase)
+        Formula: buy_percentage = (buys / (buys + sells)) * 100
 
-        High buy/sell ratio = early-stage accumulation (GOOD)
-        Low buy/sell ratio = profit-taking/distribution (BAD)
+        Thresholds (based on 2025-2026 Solana memecoin data):
+        - >80% buys (Very Bullish): 16-20 points - Strong accumulation signal
+        - 70-80% buys (Bullish): 12-16 points - Positive momentum building
+        - 50-70% buys (Neutral): 8-12 points - Balanced, watch for shift
+        - 30-50% buys (Bearish): 4-8 points - Caution, potential distribution
+        - <30% buys (Very Bearish): 0-4 points - Red flag, heavy selling
+
+        Edge cases:
+        - Ignore if total txs < 20 (insufficient data)
+        - Prefer volume-weighted for accuracy (filters bot noise)
         """
+        # Get transaction counts
         buys_24h = token_data.get('buys_24h', 0)
-        sells_24h = token_data.get('sells_24h', 1)  # Avoid div by zero
+        sells_24h = token_data.get('sells_24h', 0)
 
-        # If no data available, return 0 (neutral)
-        if buys_24h == 0 and sells_24h == 0:
-            return 0
+        # Get volume data (if available) for volume-weighted calculation
+        buy_volume = token_data.get('buy_volume_24h', 0)
+        sell_volume = token_data.get('sell_volume_24h', 0)
 
-        # Calculate ratio (handle edge cases)
-        buy_sell_ratio = buys_24h / max(sells_24h, 0.1)
+        # Check if we have sufficient data
+        total_txs = buys_24h + sells_24h
 
-        # Scoring logic
-        if buy_sell_ratio > 2.0:  # Very strong accumulation
-            return 10
-        elif buy_sell_ratio > 1.5:  # Strong bullish momentum
-            return 8
-        elif buy_sell_ratio > 1.2:  # Good momentum
-            return 6
-        elif buy_sell_ratio > 1.0:  # Slight bullish
-            return 3
-        elif buy_sell_ratio < 0.6:  # Heavy distribution (red flag)
-            return -5
+        if total_txs < 20:
+            # Insufficient data - return neutral score
+            logger.debug(f"      Insufficient buy/sell data ({total_txs} txs)")
+            return 8  # Neutral score (middle of range)
+
+        # Prefer volume-weighted if available (more accurate, filters small bot txs)
+        if buy_volume > 0 and sell_volume > 0:
+            total_volume = buy_volume + sell_volume
+            buy_percentage = (buy_volume / total_volume) * 100
+            logger.debug(f"      Volume-weighted: {buy_percentage:.1f}% buys (${buy_volume:.0f}/${sell_volume:.0f})")
         else:
-            return 0
+            # Fall back to transaction count
+            buy_percentage = (buys_24h / total_txs) * 100
+            logger.debug(f"      Count-based: {buy_percentage:.1f}% buys ({buys_24h}/{sells_24h})")
+
+        # Score based on buy percentage
+        if buy_percentage >= 80:
+            # Very Bullish: Aggressive accumulation
+            score = 16 + int((buy_percentage - 80) / 5)  # 16-20 points
+            return min(score, 20)
+        elif buy_percentage >= 70:
+            # Bullish: Positive momentum
+            score = 12 + int((buy_percentage - 70) / 2.5)  # 12-16 points
+            return score
+        elif buy_percentage >= 50:
+            # Neutral: Balanced
+            score = 8 + int((buy_percentage - 50) / 5)  # 8-12 points
+            return score
+        elif buy_percentage >= 30:
+            # Bearish: Caution
+            score = 4 + int((buy_percentage - 30) / 5)  # 4-8 points
+            return score
+        else:
+            # Very Bearish: Heavy distribution
+            score = int(buy_percentage / 7.5)  # 0-4 points
+            return max(score, 0)
 
     def _score_volume_liquidity_velocity(self, token_data: Dict) -> int:
         """
