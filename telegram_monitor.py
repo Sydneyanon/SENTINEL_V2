@@ -18,9 +18,12 @@ from telethon.errors import (
     FloodWaitError,
     AuthKeyUnregisteredError,
     PhoneNumberBannedError,
-    NetworkMigrateError,
-    ConnectionError as TelethonConnectionError
+    NetworkMigrateError
 )
+
+# Use Python's built-in exceptions for network errors
+# Telethon doesn't export ConnectionError, use OSError instead
+TelethonConnectionError = OSError
 
 
 class TelegramMonitor:
