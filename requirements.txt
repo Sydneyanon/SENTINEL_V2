@@ -33,6 +33,9 @@ python-dateutil>=2.8.2
 # Task Scheduling (Daily Pipeline)
 apscheduler>=3.10.4
 
+# Retry Logic (API resilience)
+tenacity>=8.2.3
+
 # JSON Handling (faster than standard json)
 orjson>=3.9.10
 
