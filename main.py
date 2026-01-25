@@ -31,6 +31,7 @@ from publishers.telegram import TelegramPublisher
 from active_token_tracker import ActiveTokenTracker
 from helius_fetcher import HeliusDataFetcher
 from wallet_enrichment import initialize_smart_wallets  # ← NEW: Auto-discover wallet metadata
+from startup_diagnostics import run_diagnostics  # ← Diagnostics for database & OPT-041
 
 # ============================================================================
 # GLOBAL INSTANCES
@@ -295,7 +296,10 @@ async def startup():
     db = Database()
     await db.connect()
     logger.info("✅ Database connected and tables created")
-    
+
+    # Run startup diagnostics (database check + OPT-041 verification)
+    asyncio.create_task(run_diagnostics(db))
+
     # Initialize smart wallet tracker with enriched wallets (NEW!)
     logger.info("🔍 Enriching smart wallets with metadata...")
     enriched_wallets, wallet_addresses = await initialize_smart_wallets()
