@@ -53,10 +53,15 @@ class HistoricalDataCollector:
         self.existing_tokens = set()
 
     async def initialize(self):
-        """Initialize database"""
-        self.db = Database()
-        await self.db.connect()
-        logger.info("✅ Database connected")
+        """Initialize database (optional - only needed for saving whales to DB)"""
+        try:
+            self.db = Database()
+            await self.db.connect()
+            logger.info("✅ Database connected")
+        except Exception as e:
+            logger.warning(f"⚠️  Database not available: {e}")
+            logger.info("   Collector will still work - output saved to JSON files only")
+            self.db = None
 
     async def scan_moralis_for_pumpfun_graduates(self, min_mcap: int = 1000000, max_mcap: int = 100000000, limit: int = 150) -> list:
         """
