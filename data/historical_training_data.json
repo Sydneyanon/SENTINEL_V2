@@ -1,0 +1,16 @@
+{
+  "collected_at": "2026-01-25T18:16:00Z",
+  "total_tokens": 0,
+  "cu_used_estimate": 0,
+  "outcome_distribution": {},
+  "tokens": [],
+  "note": "Placeholder - will be populated by automated collector on Railway",
+  "automated_collector_status": "ready",
+  "config": {
+    "enabled": true,
+    "interval_hours": 168,
+    "tokens_per_run": 50,
+    "min_mcap": 1000000,
+    "max_mcap": 100000000
+  }
+}
