@@ -478,10 +478,15 @@ async def startup():
             logger.warning("⚠️ ENABLE_BUILTIN_TELEGRAM_MONITOR=True but no TELEGRAM_GROUPS configured")
             logger.info("   Run: python telegram_monitor.py to generate group list")
 
-    # Start automated historical data collector
-    logger.info("🤖 Starting automated historical data collector...")
+    # Start automated historical data collector (weekly)
+    logger.info("🤖 Starting automated historical data collector (weekly)...")
     from automated_collector import start_automated_collector
     await start_automated_collector()
+
+    # Start automated DAILY token collector (midnight UTC)
+    logger.info("📅 Starting automated daily token collector (midnight UTC)...")
+    from automated_daily_collector import start_automated_daily_collector
+    await start_automated_daily_collector()
 
     # Start background tasks
     asyncio.create_task(cleanup_task())
