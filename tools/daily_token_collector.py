@@ -27,6 +27,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config
 from database import Database
 from tools.historical_data_collector import HistoricalDataCollector
+from tools.enhanced_token_analyzer import EnhancedTokenAnalyzer
 
 
 class DailyTokenCollector:
@@ -35,6 +36,12 @@ class DailyTokenCollector:
     def __init__(self):
         self.collector = HistoricalDataCollector()
         self.tokens_per_day = int(os.getenv('DAILY_COLLECTOR_COUNT', '50'))  # Default: 50 tokens/day
+
+        # Enhanced analyzer for maximum data extraction
+        self.analyzer = EnhancedTokenAnalyzer(
+            helius_rpc_url=self.collector.helius_rpc_url,
+            moralis_headers=self.collector.moralis_headers
+        ) if self.collector.helius_rpc_url else None
 
     async def get_daily_top_tokens(self, limit: int = 100) -> list:
         """
@@ -106,8 +113,13 @@ class DailyTokenCollector:
                                 if chain_id != 'solana':
                                     continue
 
-                                # Get full data from DexScreener
-                                token_data = await self.collector.get_dexscreener_data(token_addr, session)
+                                # ENHANCED: Get MAXIMUM data using enhanced analyzer
+                                if self.analyzer:
+                                    token_data = await self.analyzer.analyze_token_complete(token_addr, session)
+                                else:
+                                    # Fallback to basic DexScreener data
+                                    token_data = await self.collector.get_dexscreener_data(token_addr, session)
+
                                 if not token_data:
                                     continue
 
@@ -133,7 +145,11 @@ class DailyTokenCollector:
                                 token_addresses.add(token_addr)
                                 tokens_data.append(token_data)
 
-                                logger.debug(f"   ✅ {token_data['symbol']}: +{price_change_24h:.0f}% (${market_cap/1e6:.1f}M MCAP)")
+                                # Log comprehensive data collected
+                                logger.debug(f"   ✅ {token_data.get('symbol')}: +{price_change_24h:.0f}% "
+                                           f"(${market_cap/1e6:.1f}M MCAP, "
+                                           f"Top10: {token_data.get('top_10_holder_pct', 0):.1f}%, "
+                                           f"Buy ratio: {token_data.get('buy_ratio_24h', 0):.1f}%)")
 
                                 await asyncio.sleep(0.5)  # Rate limiting
 
