@@ -29,6 +29,13 @@ TWITTER_BEARER_TOKEN = os.getenv('TWITTER_BEARER_TOKEN')  # Twitter API v2 (free
 # Moralis API (for historical data + whale tracking)
 MORALIS_API_KEY = os.getenv('MORALIS_API_KEY')  # Free tier: 40K CU/day - Get at https://admin.moralis.io
 
+# Automated Historical Data Collector (Background ML Training Dataset Builder)
+AUTO_COLLECTOR_ENABLED = os.getenv('AUTO_COLLECTOR_ENABLED', 'true').lower() == 'true'  # Enable/disable automated collection
+AUTO_COLLECTOR_INTERVAL_HOURS = int(os.getenv('AUTO_COLLECTOR_INTERVAL_HOURS', '168'))  # Default: 168h = 7 days
+AUTO_COLLECTOR_COUNT = int(os.getenv('AUTO_COLLECTOR_COUNT', '50'))  # Collect 50 new tokens per run
+AUTO_COLLECTOR_MIN_MCAP = int(os.getenv('AUTO_COLLECTOR_MIN_MCAP', '1000000'))  # Min MCAP: $1M
+AUTO_COLLECTOR_MAX_MCAP = int(os.getenv('AUTO_COLLECTOR_MAX_MCAP', '100000000'))  # Max MCAP: $100M
+
 # Telegram Monitor (Built-in) - Alternative to solana-token-scraper
 TELEGRAM_API_ID = os.getenv('TELEGRAM_API_ID')  # From https://my.telegram.org
 TELEGRAM_API_HASH = os.getenv('TELEGRAM_API_HASH')  # From https://my.telegram.org

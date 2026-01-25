@@ -1,8 +1,146 @@
 # Historical Data Collector - Usage Guide
 
-**Purpose**: Collect 150 tokens that graduated from pump.fun (40-60% bonding → 100%) and reached 6-7-8 figure market caps for ML training.
+**Purpose**: Collect tokens that graduated from pump.fun (40-60% bonding → 100%) and reached 6-7-8 figure market caps for ML training.
 
-**What it does**:
+## Two Collection Modes
+
+### 1. **Automatic Mode** (Recommended - Runs in Background)
+- ✅ **Enabled by default** - Runs weekly automatically
+- Collects 50 new tokens per week
+- Incremental updates (doesn't re-collect existing tokens)
+- Zero manual intervention required
+- Configurable via environment variables
+
+### 2. **Manual Mode** (For Custom Collection)
+- Run on-demand via SSH
+- Full control over parameters (count, MCAP range, etc.)
+- Useful for initial dataset or custom needs
+
+---
+
+## Prerequisites
+
+### Get Moralis API Key (5 minutes, FREE)
+
+**Why**: Needed for whale wallet extraction (works for both automatic and manual modes)
+
+**Steps**:
+1. Go to https://admin.moralis.io/register
+2. Sign up with email (free account)
+3. Verify email
+4. Dashboard → Web3 APIs → Get your API Key
+5. Copy the API key
+
+### Add to Railway
+
+1. Railway dashboard → Your project
+2. Click "Variables" tab
+3. Click "Add Variable"
+4. Name: `MORALIS_API_KEY`
+5. Value: Paste your API key
+6. Click "Add"
+
+**Note**: If you skip this, collector will still work but won't extract whale data (uses DexScreener only)
+
+---
+
+## Automatic Collection (Default)
+
+The collector runs automatically in the background, collecting 50 new tokens every week.
+
+### Configuration
+
+Set these environment variables in Railway (optional - defaults shown):
+
+```bash
+# Enable/disable automated collection (default: true)
+AUTO_COLLECTOR_ENABLED=true
+
+# Collection interval in hours (default: 168 = 7 days)
+AUTO_COLLECTOR_INTERVAL_HOURS=168
+
+# Tokens to collect per run (default: 50)
+AUTO_COLLECTOR_COUNT=50
+
+# MCAP range (default: $1M - $100M)
+AUTO_COLLECTOR_MIN_MCAP=1000000
+AUTO_COLLECTOR_MAX_MCAP=100000000
+```
+
+### How It Works
+
+1. **On bot startup**: Scheduler initializes and checks last run time
+2. **First run**: Waits 1 hour (gives bot time to stabilize)
+3. **Weekly runs**: Collects 50 new tokens automatically
+4. **Incremental**: Skips tokens already in `data/historical_training_data.json`
+5. **Logs**: All activity visible in Railway logs
+
+### Monitoring
+
+Check Railway logs for collector status:
+```
+🤖 AUTOMATED HISTORICAL COLLECTOR
+   Status: ENABLED
+   Schedule: Every 168 hours (7 days)
+   Tokens per run: 50
+   Last run: 2026-01-25T12:00:00 (48.5h ago)
+   Next run: 2026-02-01T12:00:00 (in 119.5h)
+```
+
+### To Disable Automatic Collection
+
+Set in Railway environment variables:
+```bash
+AUTO_COLLECTOR_ENABLED=false
+```
+
+Then restart the bot.
+
+### Benefits of Automatic Mode
+
+- 📈 **Continuous growth**: Dataset grows automatically over time
+- 🔄 **No manual work**: Set it and forget it
+- 💰 **Free**: Uses Moralis free tier (well under daily limits)
+- 📊 **Better ML**: More training data = better predictions
+
+**Expected Growth**:
+- Week 1: 50 tokens
+- Week 2: 100 tokens (50 new)
+- Week 3: 150 tokens (50 new)
+- Week 4: 200 tokens (50 new)
+- **Month 3**: 600+ tokens automatically collected!
+
+---
+
+## Manual Collection
+
+For custom collection or initial dataset building.
+
+### How to Run
+
+SSH into Railway and run the collector script:
+
+```bash
+# SSH into Railway
+railway shell
+
+# Run collector (default: 50 tokens)
+python tools/historical_data_collector.py
+
+# Or specify custom count
+python tools/historical_data_collector.py --count 100
+
+# Or specify MCAP range
+python tools/historical_data_collector.py --min-mcap 5000000 --max-mcap 50000000
+```
+
+**Runtime**: 5-10 minutes for 50 tokens, 10-15 minutes for 150 tokens
+
+---
+
+## What Collector Does
+
+**Data Collection**:
 1. **Uses Moralis** to find pump.fun bonding curve tokens that reached high MCaps ($1M-$100M)
 2. **Extracts whale wallets** (>$50K positions) using two methods:
    - Current top holders (Moralis)
@@ -16,85 +154,35 @@
 
 ---
 
-## Prerequisites
-
-### 1. Get Moralis API Key (5 minutes, FREE)
-
-**Why**: Needed for whale wallet extraction
-
-**Steps**:
-1. Go to https://admin.moralis.io/register
-2. Sign up with email (free account)
-3. Verify email
-4. Dashboard → Web3 APIs → Get your API Key
-5. Copy the API key
-
-### 2. Add to Railway
-
-1. Railway dashboard → Your project
-2. Click "Variables" tab
-3. Click "Add Variable"
-4. Name: `MORALIS_API_KEY`
-5. Value: Paste your API key
-6. Click "Add"
-
-**Note**: If you skip this, collector will still work but won't extract whale data (uses DexScreener only)
-
----
-
-## How to Run
-
-### On Railway (Recommended)
-
-After merging this PR to main, Railway will have the collector script:
-
-```bash
-# SSH into Railway
-railway shell
-
-# Run collector (default: 150 tokens)
-python tools/historical_data_collector.py
-
-# Or specify custom count
-python tools/historical_data_collector.py --count 100
-
-# Or specify MCAP range
-python tools/historical_data_collector.py --min-mcap 5000000 --max-mcap 50000000
-```
-
-**Runtime**: 10-15 minutes for 150 tokens
-
----
-
 ## What You'll See
 
-### Step 1: Finding Pump.Fun Graduates with Moralis
+### Step 1: Finding Pump.Fun Graduates with DexScreener
 ```
-🔍 USING MORALIS TO FIND 150 PUMP.FUN GRADUATES
+🔍 SCANNING DEXSCREENER FOR 50 PUMP.FUN GRADUATES
    MCAP Range: $1,000,000 - $100,000,000
-   Target: Bonding curve tokens → High MCaps
+   Target: Tokens that graduated from 40-60% bonding
+   Skipping: 100 already collected tokens
 
-📊 Fetching top Solana tokens from Moralis...
-   Got 500 tokens from Moralis
-   Filtering for pump.fun graduates in MCAP range...
+📊 Strategy 1: Fetching from DexScreener...
+   Got 500 tokens from API
 
    ✅ MOODENG: $68,205,920 MCAP
    ✅ GOAT: $32,073,010 MCAP
    ✅ ACT: $21,995,799 MCAP
    ...
-✅ Collected 150 tokens total
+✅ Collected 50 tokens for analysis
 ```
 
 ### Step 2: Extracting Whales (Current + Early Holders)
 ```
 🐋 EXTRACTING WHALE WALLETS (CURRENT + EARLY HOLDERS)
 
-[1/150] MOODENG...
+[1/50] MOODENG...
    Current holders: 18 whales
    Early buyers: +5 early whales
    🐋 Total whales found: 23
 
-[2/150] GOAT...
+[2/50] GOAT...
    Current holders: 15 whales
    Early buyers: +8 early whales
    🐋 Total whales found: 23
@@ -115,19 +203,19 @@ python tools/historical_data_collector.py --min-mcap 5000000 --max-mcap 50000000
 ```
 ✅ COLLECTION COMPLETE
 
-📊 Collected 150 tokens:
-   100x+: 7
-   50x: 15
-   10x: 48
-   2x: 60
-   small: 20
+📊 Collected 50 tokens:
+   100x+: 3
+   50x: 8
+   10x: 20
+   2x: 15
+   small: 4
 
-🐋 Identified 47 successful whales
+🐋 Identified 23 successful whales
    Can use these for whale-copy strategy!
 
-💰 Estimated Moralis CU used: 750
+💰 Estimated Moralis CU used: 250
    Daily free tier: 40,000 CU
-   Usage: 1.9%
+   Usage: 0.6%
 
 🚀 Ready for ML training!
 ```
@@ -232,16 +320,11 @@ Whales marked with `"early_buyer": true` bought the token within its first 100 t
   - Top holders: ~5 CU
   - Transfer history: ~5 CU
   - **Total: ~10 CU per token**
-- 150 tokens × 10 CU = 1,500 CU + 10 CU discovery = **1,510 CU**
+- 50 tokens × 10 CU = 500 CU + 10 CU discovery = **510 CU per week**
 - Daily free tier: 40,000 CU
-- **Usage: 3.8%** (still plenty of headroom!)
+- **Weekly usage: 1.3%** (still plenty of headroom!)
 
 **Total Cost: FREE** (well under all API limits)
-
-**Why this is better**:
-- Moralis finds pump.fun graduates directly (more accurate)
-- Early holder extraction identifies whales who bought early (more predictive!)
-- Combined whale data = better ML training
 
 ---
 
@@ -264,7 +347,7 @@ python ralph/ml_pipeline.py --train
 ```
 
 **Before**: 59 labeled examples
-**After**: 59 + 150 = 209+ labeled examples
+**After**: 59 + 150+ = 209+ labeled examples
 
 **Result**: ML learns from proven 100x winners at their early stages!
 
@@ -288,11 +371,17 @@ Model automatically loads on bot restart and adds ±30 conviction points per tok
 
 ### "Rate limit exceeded"
 **Fix**: Increase delay between requests
-**Edit**: Line 336 in historical_data_collector.py - change `await asyncio.sleep(1)` to `await asyncio.sleep(2)`
+**Edit**: Line 438 in historical_data_collector.py - change `await asyncio.sleep(1.5)` to `await asyncio.sleep(3)`
 
 ### "DexScreener timeout"
 **Fix**: Network issue, just retry the command
 **Why**: DexScreener API sometimes slow, retry usually works
+
+### Automatic collector not running
+**Check**: Railway logs for collector startup messages
+**Fix 1**: Verify `AUTO_COLLECTOR_ENABLED=true` in Railway variables
+**Fix 2**: Check bot startup logs for any errors
+**Fix 3**: Restart the bot to reinitialize scheduler
 
 ---
 
@@ -356,6 +445,21 @@ python tools/historical_data_collector.py \
   --max-mcap 1000000000
 ```
 
+### Adjust Automatic Collection Schedule
+
+Run every 3 days instead of 7:
+```bash
+# In Railway environment variables
+AUTO_COLLECTOR_INTERVAL_HOURS=72
+```
+
+Run daily (aggressive mode):
+```bash
+# In Railway environment variables
+AUTO_COLLECTOR_INTERVAL_HOURS=24
+AUTO_COLLECTOR_COUNT=20  # Collect fewer per run
+```
+
 ### Add More Known Tokens
 
 Edit `data/known_runner_tokens.json` to add manually curated tokens:
@@ -379,8 +483,10 @@ Collector will include these if DexScreener doesn't find enough.
 
 ### Training Dataset Size
 - **Before**: 59 examples (current signals with outcomes)
-- **After**: 209+ examples (59 + 150 historical)
-- **Increase**: 254% more training data!
+- **After Week 1**: 109+ examples (59 + 50 historical)
+- **After Month 1**: 259+ examples (59 + 200 historical)
+- **After Month 3**: 659+ examples (59 + 600 historical)
+- **Increase**: Exponential growth with automated collection!
 
 ### Prediction Accuracy
 - **Baseline**: ~60% (random is 50%)
@@ -394,26 +500,22 @@ Collector will include these if DexScreener doesn't find enough.
 
 ---
 
-## Next Steps
-
-1. ✅ Merge this PR
-2. ✅ Get Moralis API key (5 min)
-3. ✅ Add to Railway variables
-4. ✅ Run collector (10-15 min)
-5. ✅ Check output files
-6. ✅ Train ML model (30 min)
-7. ✅ Deploy predictions (automatic)
-
-**Total setup time**: ~1 hour
-**Total cost**: FREE
-**Impact**: Significant ML improvement
-
----
-
 ## Summary
 
+**Automatic Mode (Recommended)**:
+- ✅ Zero manual work
+- ✅ Continuous dataset growth
+- ✅ FREE (under all API limits)
+- ✅ Runs in background
+- ✅ Enabled by default
+
+**Manual Mode**:
+- ✅ Full control over parameters
+- ✅ On-demand collection
+- ✅ Useful for initial dataset
+
 **What you get**:
-- 150+ historical examples of successful tokens
+- Historical examples of successful tokens
 - Early-stage metrics (what 100x tokens looked like at 6h old)
 - Whale wallets that consistently pick winners
 - All data ready for ML training
@@ -424,10 +526,4 @@ Collector will include these if DexScreener doesn't find enough.
 - Identifies patterns that precede 100x gains
 - Automatic rug filtering
 
-**How to use**:
-1. Get Moralis API key (free)
-2. Run collector on Railway
-3. Train ML model
-4. Better signals automatically!
-
-🚀 **Ready to collect historical data and train ML!**
+🚀 **Ready to collect historical data and train ML automatically!**
