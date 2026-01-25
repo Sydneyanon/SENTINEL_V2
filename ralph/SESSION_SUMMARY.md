@@ -50,32 +50,51 @@
 - **Old threshold** missed the sweet spot entirely
 - **New threshold** catches tokens at optimal entry point
 
-### 5. **Moralis Historical Data Collector** ✅
+### 5. **Historical Data Collector** ✅
+
+**Enhanced & Reorganized**:
+- Moved from ralph/ to tools/historical_data_collector.py
+- Complete rewrite for 150-token collection
 
 **What it does**:
-- Collects data from 150+ known successful tokens
-- Gets early-stage metrics (what they looked like at 1h, 6h)
-- Saves to database for ML training
-- **Cost**: FREE (~28 CU for 7 tokens, 40K/day free tier)
+- Scans DexScreener for pump.fun graduates ($1M-$100M MCAP)
+- Finds tokens that went from 40-60% bonding → 6-7-8 figure MCaps
+- Extracts whale wallets (>$50K positions) using Moralis
+- Tracks whale win rates across successful tokens
+- **Cost**: ~750 CU for 150 tokens (1.9% of 40K/day free tier = FREE!)
+
+**Outputs**:
+- `data/historical_training_data.json` - 150 tokens with outcomes
+- `data/successful_whale_wallets.json` - Successful whale addresses
 
 **Why it matters**:
 - You have 100 current signals (59 with outcomes)
 - Historical adds 150+ examples (100% with outcomes!)
 - ML trains on 250+ examples instead of just 59
 - Learns what 100x winners look like when they're 6 hours old
+- Identifies whales who consistently pick winners
 
-**Tokens included**:
+**Mega runners included**:
 - MOODENG (1137x), GOAT (535x), ACT (367x), ZEREBRO (200x)
 - BONK (10000x), WIF (5000x), POPCAT (800x)
-- Can expand to 150+ tokens easily
+- Plus 143 more successful graduates automatically scanned
 
-### 6. **Whale Tracking Plan** ✅
+### 6. **Project Structure Reorganization** ✅
+- Moved files out of ralph/ directory to proper locations:
+  - `ralph/moralis_historical_collector.py` → `tools/historical_data_collector.py`
+  - `ralph/known_runner_tokens.json` → `data/known_runner_tokens.json`
+  - `ralph/MORALIS_SETUP_GUIDE.md` → `docs/MORALIS_SETUP.md`
+- Created `docs/HISTORICAL_COLLECTOR_GUIDE.md` - Complete usage guide
+- Ralph directory now only contains Ralph-specific autonomous agent code
+
+### 7. **Whale Tracking Plan** ✅
 - Documented strategy for tracking non-KOL whales (>$50K positions)
-- 0-15 conviction points based on whale count
-- Will implement after ML shows if whales predict success
-- Data-driven decision (don't build until proven valuable)
+- Integrated into historical collector (extracts whales automatically)
+- Identifies successful whales (50%+ win rate across multiple tokens)
+- 0-15 conviction points based on whale count (future feature)
+- Data-driven decision (collect data first, implement if proven valuable)
 
-### 7. **OPT-041 Verified** ✅
+### 8. **OPT-041 Verified** ✅
 - Code review confirmed full implementation
 - Metadata cache active (60min TTL)
 - Expected: 40-60% credit savings
@@ -155,18 +174,23 @@ Look for:
 ```bash
 # On Railway
 railway shell
-python ralph/moralis_historical_collector.py
+python tools/historical_data_collector.py
+
+# Or specify custom count
+python tools/historical_data_collector.py --count 100
 ```
-- Collects 7 mega runners (5-10 min)
-- Saves to `ralph/historical_training_data.json`
-- Cost: ~28 CU (0.07% of daily limit)
+- Scans DexScreener + extracts whales (10-15 min)
+- Saves to `data/historical_training_data.json` and `data/successful_whale_wallets.json`
+- Cost: ~750 CU for 150 tokens (1.9% of daily limit)
+- See full guide: `docs/HISTORICAL_COLLECTOR_GUIDE.md`
 
 **Step 6**: Train ML Model
 ```bash
 python ralph/ml_pipeline.py --train
 ```
-- Uses 100 current + 7 historical = 107+ examples
-- Learns patterns from 1000x winners
+- Uses 59 current + 150 historical = 209+ examples
+- Learns patterns from 100x winners
+- Learns whale accumulation patterns
 - Saves model to `ralph/models/`
 
 **Step 7**: Deploy ML Predictions
@@ -184,8 +208,9 @@ python ralph/ml_pipeline.py --train
 - Target: 200+ signals with outcomes
 
 **Step 9**: Expand Historical Dataset (Optional)
-- Add 50+ more successful tokens to `known_runner_tokens.json`
-- Run collector again
+- Collector automatically scans 150 tokens
+- Add more to `data/known_runner_tokens.json` if needed
+- Run collector with different MCAP ranges for variety
 - More training examples = better ML
 
 **Step 10**: Retrain ML Weekly
@@ -214,8 +239,8 @@ Increase: 60-80x more data collection!
 ### ML Training:
 ```
 Before: 59 labeled examples
-After historical: 107+ labeled examples
-After 2 weeks: 200+ labeled examples
+After historical: 209+ labeled examples
+After 2 weeks: 300+ labeled examples
 ```
 
 ### Prediction Accuracy:
@@ -250,11 +275,12 @@ ralph/ML_SYSTEM_STATUS.md          - ML system documentation
 ralph/NEXT_STEPS_RAILWAY.md        - Railway workflow guide
 ```
 
-### Moralis Integration:
+### Tools & Data:
 ```
-ralph/MORALIS_SETUP_GUIDE.md       - How to get API key & run
-ralph/moralis_historical_collector.py - Data collection script
-ralph/known_runner_tokens.json     - List of successful tokens
+tools/historical_data_collector.py - Enhanced collector (150 tokens + whales)
+data/known_runner_tokens.json      - Curated list of successful tokens
+docs/MORALIS_SETUP.md              - How to get API key
+docs/HISTORICAL_COLLECTOR_GUIDE.md - Complete usage guide
 ```
 
 ---
