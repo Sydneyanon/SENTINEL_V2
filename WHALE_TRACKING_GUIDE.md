@@ -125,26 +125,60 @@ DAILY_COLLECTOR_COUNT=50  # Tokens per day
 - ✅ Fresh data always available
 - ✅ Larger dataset over time (18K+ tokens/year)
 - ✅ Whales tracked across different periods
+- ✅ **CRITICAL**: Collects tokens that ALREADY RAN (known outcomes)
 
 ### What Gets Collected Daily
 
+**Key Insight: We collect YESTERDAY'S winners, not today's trending tokens**
+
+This gives us labeled training data:
+```
+Token XYZ at 10:00 AM → Had these signals → By 10:00 PM → 50x gain ✅
+```
+
+**Collection filters:**
 ```json
 {
-  "strategies": [
-    "Top gainers (24h price change)",
-    "High volume tokens (24h volume)",
-    "New pump.fun graduates",
-    "Trending on DexScreener"
-  ],
+  "required_criteria": {
+    "price_change_24h": ">100%",  // Already 2x+ (it RAN yesterday)
+    "volume_24h": ">$100K",        // Real activity
+    "market_cap": ">$500K",        // Not too small
+    "chain": "solana",             // Solana only
+    "outcome_known": true          // We know if it was 2x, 10x, 50x, etc.
+  },
   "per_token_data": {
-    "token_info": ["address", "symbol", "name"],
-    "metrics": ["price", "mcap", "liquidity", "volume"],
-    "activity": ["buys", "sells", "buy_ratio"],
-    "outcome": ["small", "2x", "10x", "50x", "100x+"],
-    "whales": ["top_holders", "positions", "win_rates"]
+    "outcome": "KNOWN (2x, 10x, 50x, 100x+)",  // ← CRITICAL
+    "early_whales": "Wallets that bought BEFORE pump",
+    "conditions_before_pump": "Volume, buys, ratios at early stage",
+    "final_result": "Peak MCAP, total gain, duration"
   }
 }
 ```
+
+**Example Daily Collection:**
+```
+Date: 2026-01-25
+Tokens: 50 that gained 100%+ in last 24h
+
+Token 1: PEPE2
+  - Started: $200K MCAP (yesterday 10am)
+  - Ended: $5M MCAP (today 10am)
+  - Outcome: 25x ✅
+  - Early whales: [0x7xKXtg..., 0x8BnEgH...]
+  - Early signals: 300 buys/hr, 75% buy ratio, 2 whales bought
+
+Token 2: SCAM
+  - Started: $150K MCAP
+  - Peaked: $800K MCAP (+5x)
+  - Ended: $50K MCAP (-67% from peak)
+  - Outcome: RUG ❌
+  - No early whale activity detected
+```
+
+This is PERFECT for ML training because:
+- We have the complete story (start → signals → outcome)
+- We know which whales picked winners vs losers
+- We can correlate early signals with final results
 
 ## 🎯 Conviction Scoring with Whales
 

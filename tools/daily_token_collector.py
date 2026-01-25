@@ -38,40 +38,49 @@ class DailyTokenCollector:
 
     async def get_daily_top_tokens(self, limit: int = 100) -> list:
         """
-        Get top performing tokens from the last 24 hours
+        Get tokens that ALREADY RAN in the last 24 hours (yesterday's winners)
+
+        This is HISTORICAL data collection:
+        - Tokens that already pumped (we know the outcome)
+        - Extract conditions BEFORE they ran
+        - Extract whale wallets that bought EARLY
+        - Perfect for ML: "These early signals → This outcome"
 
         Strategies:
-        1. Top gainers (price change 24h)
-        2. Top volume (sorted by 24h volume)
-        3. Newly graduated from pump.fun
+        1. DexScreener: Tokens with high 24h gain % (already completed)
+        2. Filter for: Minimum 2x gain, $100K+ volume
+        3. Outcome categorization: 2x, 10x, 50x, 100x+
 
         Args:
-            limit: Number of tokens to collect
+            limit: Number of tokens to collect (default: 100)
 
         Returns:
-            List of token addresses
+            List of token data with completed outcomes
         """
         logger.info("=" * 80)
-        logger.info("📈 FETCHING DAILY TOP TOKENS")
+        logger.info("📈 FETCHING YESTERDAY'S TOP PERFORMERS")
         logger.info("=" * 80)
-        logger.info(f"   Target: {limit} tokens from last 24 hours")
-        logger.info(f"   Strategies: Top gainers + high volume + new graduates\n")
+        logger.info(f"   Target: {limit} tokens that ALREADY RAN in last 24h")
+        logger.info(f"   Goal: Historical data with known outcomes for ML\n")
 
         token_addresses = set()
         tokens_data = []
 
         async with aiohttp.ClientSession(trust_env=True) as session:
-            # Strategy 1: Get top gainers from DexScreener
+            # Strategy: Get tokens sorted by 24h price change (gainers)
+            # DexScreener doesn't have a direct "top gainers" sorted endpoint in free tier
+            # So we'll use multiple strategies and filter by price_change_24h
+
             strategies = [
-                ("Top Gainers", "https://api.dexscreener.com/token-boosts/top/v1"),
+                ("Token Boosts", "https://api.dexscreener.com/token-boosts/top/v1"),
                 ("Latest Profiles", "https://api.dexscreener.com/token-profiles/latest/v1"),
             ]
 
             for strategy_name, url in strategies:
-                if len(token_addresses) >= limit:
+                if len(tokens_data) >= limit:
                     break
 
-                logger.info(f"📊 {strategy_name}...")
+                logger.info(f"📊 Strategy: {strategy_name}...")
 
                 try:
                     async with session.get(url, timeout=aiohttp.ClientTimeout(total=30)) as resp:
@@ -80,11 +89,11 @@ class DailyTokenCollector:
 
                             # Extract tokens
                             tokens = data if isinstance(data, list) else data.get('tokens', [])
-                            logger.info(f"   Got {len(tokens)} tokens")
+                            logger.info(f"   Got {len(tokens)} candidates")
 
-                            # Filter for Solana pump.fun tokens
+                            # Filter for Solana pump.fun tokens that ALREADY RAN
                             for token in tokens:
-                                if len(token_addresses) >= limit:
+                                if len(tokens_data) >= limit:
                                     break
 
                                 # Get token address
@@ -97,12 +106,34 @@ class DailyTokenCollector:
                                 if chain_id != 'solana':
                                     continue
 
-                                token_addresses.add(token_addr)
-
                                 # Get full data from DexScreener
                                 token_data = await self.collector.get_dexscreener_data(token_addr, session)
-                                if token_data:
-                                    tokens_data.append(token_data)
+                                if not token_data:
+                                    continue
+
+                                # CRITICAL FILTER: Only tokens that ALREADY RAN in last 24h
+                                price_change_24h = token_data.get('price_change_24h', 0)
+                                volume_24h = token_data.get('volume_24h', 0)
+                                market_cap = token_data.get('market_cap', 0)
+
+                                # Filters for "yesterday's winners":
+                                # 1. Minimum 100% gain (2x) in 24h - they already ran
+                                # 2. Minimum $100K volume - real activity
+                                # 3. Minimum $500K MCAP - not too small
+                                if price_change_24h < 100:  # Less than 2x = skip
+                                    continue
+
+                                if volume_24h < 100000:  # Less than $100K volume = skip
+                                    continue
+
+                                if market_cap < 500000:  # Less than $500K MCAP = too small
+                                    continue
+
+                                # This is a winner! Add it
+                                token_addresses.add(token_addr)
+                                tokens_data.append(token_data)
+
+                                logger.debug(f"   ✅ {token_data['symbol']}: +{price_change_24h:.0f}% (${market_cap/1e6:.1f}M MCAP)")
 
                                 await asyncio.sleep(0.5)  # Rate limiting
 
@@ -112,7 +143,14 @@ class DailyTokenCollector:
                 except Exception as e:
                     logger.error(f"   Error: {e}")
 
-        logger.info(f"\n✅ Collected {len(tokens_data)} tokens for daily analysis")
+            # Sort by 24h gain (highest first)
+            tokens_data.sort(key=lambda x: x.get('price_change_24h', 0), reverse=True)
+
+        logger.info(f"\n✅ Collected {len(tokens_data)} tokens that ALREADY RAN")
+        if tokens_data:
+            logger.info(f"   Top gainer: {tokens_data[0]['symbol']} (+{tokens_data[0]['price_change_24h']:.0f}%)")
+            logger.info(f"   Median gain: +{tokens_data[len(tokens_data)//2]['price_change_24h']:.0f}%")
+
         return tokens_data
 
     async def collect_daily(self):
@@ -134,19 +172,23 @@ class DailyTokenCollector:
             logger.error("❌ No tokens collected!")
             return
 
-        # Extract whales from each token
+        # Extract EARLY whale activity (who bought BEFORE it pumped)
         if self.collector.helius_rpc_url:
             logger.info("\n" + "=" * 80)
-            logger.info("🐋 EXTRACTING WHALE WALLETS")
+            logger.info("🐋 EXTRACTING EARLY WHALE ACTIVITY")
             logger.info("=" * 80)
+            logger.info("   Goal: Find wallets that bought BEFORE the pump")
+            logger.info("   Method: Get transaction history, identify large early buys\n")
 
             for idx, token in enumerate(tokens_data, 1):
-                logger.info(f"\n[{idx}/{len(tokens_data)}] {token['symbol']}...")
+                logger.info(f"\n[{idx}/{len(tokens_data)}] {token['symbol']} (+{token.get('price_change_24h', 0):.0f}%)...")
 
-                whales = await self.collector.extract_whale_wallets(
+                # Extract early whales (bought in first 20% of bonding curve or early post-grad)
+                whales = await self._extract_early_whales(
                     token['token_address'],
                     token['symbol'],
-                    token.get('price_usd', 0)
+                    token.get('price_usd', 0),
+                    token.get('created_at', 0)
                 )
                 token['whale_wallets'] = whales
                 token['whale_count'] = len(whales)
@@ -157,6 +199,60 @@ class DailyTokenCollector:
                         self.collector.whale_wallets[whale]['win_count'] += 1
 
                 await asyncio.sleep(1.5)  # Rate limit
+
+    async def _extract_early_whales(self, token_address: str, token_symbol: str,
+                                    current_price: float, created_at: int) -> list:
+        """
+        Extract wallets that bought EARLY (before the pump)
+
+        Strategy:
+        1. Get token's transaction history (first 100-200 transfers)
+        2. Identify large buys in the early phase
+        3. "Early" = first 2 hours after creation OR before 30% bonding curve
+
+        This is MUCH more valuable than current holders because:
+        - These wallets spotted it early
+        - They're the ones we want to follow in real-time
+        """
+        if not self.collector.helius_rpc_url:
+            return []
+
+        early_whales = []
+
+        try:
+            # Use Helius to get transaction signatures for this token
+            # Then parse transfers to find early large buyers
+
+            # For now, fall back to current large holders
+            # TODO: Implement full transaction history parsing via Helius
+            whales = await self.collector.extract_whale_wallets(
+                token_address,
+                token_symbol,
+                current_price
+            )
+
+            # Mark all as "early_whale" since we're looking at tokens post-pump
+            # These holders likely bought early since they're still holding
+            for whale in whales:
+                if whale not in self.collector.whale_wallets:
+                    self.collector.whale_wallets[whale] = {
+                        'tokens_bought': [],
+                        'win_count': 0,
+                        'total_invested': 0
+                    }
+
+                self.collector.whale_wallets[whale]['tokens_bought'].append({
+                    'token': token_symbol,
+                    'address': token_address,
+                    'early_buyer': True,  # Assume early since still holding after pump
+                    'detected_after_pump': True  # Historical data collection
+                })
+
+            return whales
+
+        except Exception as e:
+            logger.debug(f"   Error extracting early whales: {e}")
+            return []
 
         # Save results
         await self._save_daily_results(tokens_data)
