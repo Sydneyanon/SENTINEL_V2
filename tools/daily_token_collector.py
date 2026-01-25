@@ -54,9 +54,10 @@ class DailyTokenCollector:
         - Perfect for ML: "These early signals → This outcome"
 
         Strategies:
-        1. DexScreener: Tokens with high 24h gain % (already completed)
-        2. Filter for: Minimum 2x gain, $100K+ volume
-        3. Outcome categorization: 2x, 10x, 50x, 100x+
+        1. Moralis: Get recently graduated pump.fun tokens (last 24-48h)
+        2. Check each token's price performance
+        3. Filter for: Minimum 2x gain, $100K+ volume
+        4. Outcome categorization: 2x, 10x, 50x, 100x+
 
         Args:
             limit: Number of tokens to collect (default: 100)
@@ -65,99 +66,102 @@ class DailyTokenCollector:
             List of token data with completed outcomes
         """
         logger.info("=" * 80)
-        logger.info("📈 FETCHING YESTERDAY'S TOP PERFORMERS")
+        logger.info("📈 FETCHING YESTERDAY'S TOP PERFORMERS (MORALIS)")
         logger.info("=" * 80)
         logger.info(f"   Target: {limit} tokens that ALREADY RAN in last 24h")
+        logger.info(f"   Source: Moralis graduated pump.fun tokens")
         logger.info(f"   Goal: Historical data with known outcomes for ML\n")
+
+        if not self.collector.moralis_api_key:
+            logger.error("❌ MORALIS_API_KEY not set - cannot fetch tokens")
+            logger.error("   Get free API key at: https://admin.moralis.io")
+            return []
 
         token_addresses = set()
         tokens_data = []
 
         async with aiohttp.ClientSession(trust_env=True) as session:
-            # Strategy: Get tokens sorted by 24h price change (gainers)
-            # DexScreener doesn't have a direct "top gainers" sorted endpoint in free tier
-            # So we'll use multiple strategies and filter by price_change_24h
+            # Strategy: Use Moralis to get recently graduated pump.fun tokens
+            logger.info("📊 Fetching graduated tokens from Moralis...")
 
-            strategies = [
-                ("Token Boosts", "https://api.dexscreener.com/token-boosts/top/v1"),
-                ("Latest Profiles", "https://api.dexscreener.com/token-profiles/latest/v1"),
-            ]
+            url = "https://solana-gateway.moralis.io/token/mainnet/exchange/pumpfun/graduated?limit=200"
+            headers = {'x-api-key': self.collector.moralis_api_key}
 
-            for strategy_name, url in strategies:
-                if len(tokens_data) >= limit:
-                    break
+            try:
+                async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=30)) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
 
-                logger.info(f"📊 Strategy: {strategy_name}...")
+                        # Extract tokens - Moralis returns list directly or in 'result' key
+                        graduated_tokens = data if isinstance(data, list) else data.get('result', [])
+                        logger.info(f"   Got {len(graduated_tokens)} graduated pump.fun tokens")
 
-                try:
-                    async with session.get(url, timeout=aiohttp.ClientTimeout(total=30)) as resp:
-                        if resp.status == 200:
-                            data = await resp.json()
+                        # Process each graduated token
+                        for token in graduated_tokens:
+                            if len(tokens_data) >= limit:
+                                break
 
-                            # Extract tokens
-                            tokens = data if isinstance(data, list) else data.get('tokens', [])
-                            logger.info(f"   Got {len(tokens)} candidates")
+                            # Get token address from Moralis response
+                            token_addr = token.get('tokenAddress') or token.get('address') or token.get('mint')
+                            if not token_addr or token_addr in token_addresses:
+                                continue
 
-                            # Filter for Solana pump.fun tokens that ALREADY RAN
-                            for token in tokens:
-                                if len(tokens_data) >= limit:
-                                    break
+                            # ENHANCED: Get MAXIMUM data using enhanced analyzer
+                            if self.analyzer:
+                                token_data = await self.analyzer.analyze_token_complete(token_addr, session)
+                            else:
+                                # Fallback to basic DexScreener data
+                                token_data = await self.collector.get_dexscreener_data(token_addr, session)
 
-                                # Get token address
-                                token_addr = token.get('tokenAddress') or token.get('address')
-                                if not token_addr or token_addr in token_addresses:
-                                    continue
+                            if not token_data:
+                                continue
 
-                                # Only Solana tokens
-                                chain_id = token.get('chainId', '')
-                                if chain_id != 'solana':
-                                    continue
+                            # CRITICAL FILTER: Only tokens that ALREADY RAN in last 24h
+                            price_change_24h = token_data.get('price_change_24h', 0)
+                            volume_24h = token_data.get('volume_24h', 0)
+                            market_cap = token_data.get('market_cap', 0)
 
-                                # ENHANCED: Get MAXIMUM data using enhanced analyzer
-                                if self.analyzer:
-                                    token_data = await self.analyzer.analyze_token_complete(token_addr, session)
-                                else:
-                                    # Fallback to basic DexScreener data
-                                    token_data = await self.collector.get_dexscreener_data(token_addr, session)
+                            # Filters for "yesterday's winners":
+                            # 1. Minimum 100% gain (2x) in 24h - they already ran
+                            # 2. Minimum $100K volume - real activity
+                            # 3. Minimum $500K MCAP - not too small
+                            if price_change_24h < 100:  # Less than 2x = skip
+                                continue
 
-                                if not token_data:
-                                    continue
+                            if volume_24h < 100000:  # Less than $100K volume = skip
+                                continue
 
-                                # CRITICAL FILTER: Only tokens that ALREADY RAN in last 24h
-                                price_change_24h = token_data.get('price_change_24h', 0)
-                                volume_24h = token_data.get('volume_24h', 0)
-                                market_cap = token_data.get('market_cap', 0)
+                            if market_cap < 500000:  # Less than $500K MCAP = too small
+                                continue
 
-                                # Filters for "yesterday's winners":
-                                # 1. Minimum 100% gain (2x) in 24h - they already ran
-                                # 2. Minimum $100K volume - real activity
-                                # 3. Minimum $500K MCAP - not too small
-                                if price_change_24h < 100:  # Less than 2x = skip
-                                    continue
+                            # This is a winner! Add it
+                            token_addresses.add(token_addr)
+                            tokens_data.append(token_data)
 
-                                if volume_24h < 100000:  # Less than $100K volume = skip
-                                    continue
+                            # Log comprehensive data collected
+                            logger.info(f"   ✅ {token_data.get('symbol')}: +{price_change_24h:.0f}% "
+                                       f"(${market_cap/1e6:.1f}M MCAP, "
+                                       f"Vol: ${volume_24h/1e3:.0f}K, "
+                                       f"Top10: {token_data.get('top_10_holder_pct', 0):.1f}%)")
 
-                                if market_cap < 500000:  # Less than $500K MCAP = too small
-                                    continue
+                            await asyncio.sleep(0.5)  # Rate limiting
 
-                                # This is a winner! Add it
-                                token_addresses.add(token_addr)
-                                tokens_data.append(token_data)
+                    elif resp.status == 401:
+                        error_text = await resp.text()
+                        logger.error(f"   ❌ Authentication failed (401): {error_text}")
+                        logger.error(f"   Check MORALIS_API_KEY is set correctly")
+                        logger.error(f"   Key preview: {self.collector.moralis_api_key[:8]}..." if self.collector.moralis_api_key else "   Key is None/empty!")
+                    elif resp.status == 429:
+                        logger.error(f"   ❌ Rate limited (429) - hit daily CU limit or too many requests")
+                        logger.error(f"   Free tier: 40K CU/day, resets at midnight UTC")
+                    else:
+                        error_text = await resp.text()
+                        logger.warning(f"   Failed: HTTP {resp.status} - {error_text}")
 
-                                # Log comprehensive data collected
-                                logger.debug(f"   ✅ {token_data.get('symbol')}: +{price_change_24h:.0f}% "
-                                           f"(${market_cap/1e6:.1f}M MCAP, "
-                                           f"Top10: {token_data.get('top_10_holder_pct', 0):.1f}%, "
-                                           f"Buy ratio: {token_data.get('buy_ratio_24h', 0):.1f}%)")
-
-                                await asyncio.sleep(0.5)  # Rate limiting
-
-                        else:
-                            logger.warning(f"   Failed: HTTP {resp.status}")
-
-                except Exception as e:
-                    logger.error(f"   Error: {e}")
+            except Exception as e:
+                logger.error(f"   Error fetching from Moralis: {e}")
+                import traceback
+                logger.debug(traceback.format_exc())
 
             # Sort by 24h gain (highest first)
             tokens_data.sort(key=lambda x: x.get('price_change_24h', 0), reverse=True)
