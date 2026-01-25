@@ -61,8 +61,8 @@ DISABLE_POLLING_BELOW_THRESHOLD = True  # Only poll tokens >= 50 conviction
 #   - Signals 50-59: 50.0% WR (3/6) - BETTER quality at higher thresholds
 #   - Testing 60 to improve win rate while maintaining signal volume
 # Kept strict data quality filters (OPT-023, OPT-036) to prevent rugs
-MIN_CONVICTION_SCORE = 60  # Pre-graduation threshold - OPT-001: Quality improvement
-POST_GRAD_THRESHOLD = 60   # Post-graduation threshold - Slightly higher for graduated tokens
+MIN_CONVICTION_SCORE = 50  # Lowered to collect more data + test buy/sell ratio scoring
+POST_GRAD_THRESHOLD = 50   # Post-graduation threshold - Slightly higher for graduated tokens
 
 # Base score threshold for distribution checks
 # Only check distribution if base score >= this value

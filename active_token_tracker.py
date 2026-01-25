@@ -659,6 +659,12 @@ class ActiveTokenTracker:
             
             # Save to database
             if self.db:
+                # Calculate buy percentage for database storage
+                buys_24h = state.token_data.get('buys_24h', 0)
+                sells_24h = state.token_data.get('sells_24h', 0)
+                total_txs = buys_24h + sells_24h
+                buy_percentage = (buys_24h / total_txs * 100) if total_txs > 0 else None
+
                 await self.db.insert_signal({
                     'token_address': token_address,
                     'token_name': state.token_data.get('token_name'),
@@ -670,6 +676,10 @@ class ActiveTokenTracker:
                     'liquidity': state.token_data.get('liquidity', 0),
                     'volume_24h': state.token_data.get('volume_24h', 0),
                     'market_cap': state.token_data.get('market_cap', 0),
+                    'buys_24h': buys_24h,
+                    'sells_24h': sells_24h,
+                    'buy_percentage': buy_percentage,
+                    'buy_sell_score': conviction_data['breakdown'].get('buy_sell_ratio', 0),
                 })
             
             # Post to Telegram
