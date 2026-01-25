@@ -26,6 +26,9 @@ ENABLE_TELEGRAM = True  # Enable Telegram posting
 LUNARCRUSH_API_KEY = os.getenv('LUNARCRUSH_API_KEY')  # Social sentiment aggregator
 TWITTER_BEARER_TOKEN = os.getenv('TWITTER_BEARER_TOKEN')  # Twitter API v2 (free tier)
 
+# Moralis API (for historical data + whale tracking)
+MORALIS_API_KEY = os.getenv('MORALIS_API_KEY')  # Free tier: 40K CU/day - Get at https://admin.moralis.io
+
 # Telegram Monitor (Built-in) - Alternative to solana-token-scraper
 TELEGRAM_API_ID = os.getenv('TELEGRAM_API_ID')  # From https://my.telegram.org
 TELEGRAM_API_HASH = os.getenv('TELEGRAM_API_HASH')  # From https://my.telegram.org
