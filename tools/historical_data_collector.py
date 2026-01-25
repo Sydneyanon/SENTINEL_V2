@@ -49,6 +49,9 @@ class HistoricalDataCollector:
         self.whale_wallets = defaultdict(lambda: {"tokens_bought": [], "win_count": 0, "total_invested": 0})
         self.total_cu_used = 0
 
+        # For incremental collection: set of already collected token addresses
+        self.existing_tokens = set()
+
     async def initialize(self):
         """Initialize database"""
         self.db = Database()
@@ -112,7 +115,10 @@ class HistoricalDataCollector:
         logger.info(f"🔍 SCANNING DEXSCREENER FOR {limit} PUMP.FUN GRADUATES")
         logger.info("=" * 80)
         logger.info(f"   MCAP Range: ${min_mcap:,} - ${max_mcap:,}")
-        logger.info(f"   Target: Tokens that graduated from 40-60% bonding\n")
+        logger.info(f"   Target: Tokens that graduated from 40-60% bonding")
+        if self.existing_tokens:
+            logger.info(f"   Skipping: {len(self.existing_tokens)} already collected tokens")
+        logger.info("")
 
         # DexScreener API endpoints to try
         search_strategies = [
@@ -158,6 +164,11 @@ class HistoricalDataCollector:
                             # Get token address
                             token_address = token.get('tokenAddress') or token.get('address')
                             if not token_address or token_address in collected_addresses:
+                                continue
+
+                            # Skip if already collected (incremental mode)
+                            if token_address in self.existing_tokens:
+                                logger.debug(f"   ⏭️  Skipping existing: {token_address[:8]}...")
                                 continue
 
                             # Check if it's from pump.fun / Raydium
@@ -468,18 +479,32 @@ class HistoricalDataCollector:
         logger.info("💾 SAVING RESULTS")
         logger.info("=" * 80)
 
+        # Load existing data if available (for incremental updates)
+        existing_data = {}
+        try:
+            with open('data/historical_training_data.json', 'r') as f:
+                existing_data = json.load(f)
+                logger.info(f"   Found existing data: {existing_data.get('total_tokens', 0)} tokens")
+        except FileNotFoundError:
+            logger.info("   Creating new dataset")
+
+        # Merge with existing tokens
+        all_tokens = existing_data.get('tokens', []) + tokens_data
+        total_cu = existing_data.get('cu_used_estimate', 0) + self.total_cu_used
+
         # Save token data
         output = {
             'collected_at': datetime.utcnow().isoformat(),
-            'total_tokens': len(tokens_data),
-            'cu_used_estimate': self.total_cu_used,
-            'outcome_distribution': self._get_outcome_distribution(tokens_data),
-            'tokens': tokens_data
+            'total_tokens': len(all_tokens),
+            'cu_used_estimate': total_cu,
+            'outcome_distribution': self._get_outcome_distribution(all_tokens),
+            'tokens': all_tokens
         }
 
         with open('data/historical_training_data.json', 'w') as f:
             json.dump(output, f, indent=2)
-        logger.info("   ✅ Saved data/historical_training_data.json")
+        logger.info(f"   ✅ Saved data/historical_training_data.json")
+        logger.info(f"   Total: {len(all_tokens)} tokens (+{len(tokens_data)} new)")
 
         # Save successful whales
         if successful_whales:
