@@ -311,109 +311,27 @@ class HistoricalDataCollector:
 
     async def extract_whale_wallets(self, token_address: str, token_symbol: str, token_price: float = 0) -> list:
         """
-        Extract whale wallets (>$50K positions) using Moralis
+        Extract whale wallets (>$50K positions)
 
-        Combines:
-        1. Current top holders (Moralis)
-        2. Early holders from transfers (Moralis) - identifies whales who bought early
+        Note: Moralis free tier doesn't support Solana SPL token holder/transfer queries.
+        The endpoints /token/{network}/{address}/top-holders and /transfers return 404.
 
-        Cost: ~10 CU per token (5 for holders + 5 for transfers)
+        Future implementation options:
+        1. Use Helius RPC (already configured): getTokenLargestAccounts + getParsedAccountInfo
+        2. Upgrade to Moralis paid tier ($49/mo)
+        3. Use Birdeye API (has holder data)
+        4. Query Solana RPC directly via getProgramAccounts
+
+        For now: Token metrics (price, volume, buys/sells) are sufficient for ML training.
         """
         if not self.moralis_api_key:
             logger.debug(f"   Skipping whale extraction for {token_symbol} (no Moralis key)")
             return []
 
-        whale_addresses = []
-
-        try:
-            async with aiohttp.ClientSession(trust_env=True) as session:
-                # Strategy 1: Get current top holders
-                url = f"{self.moralis_base_url}/token/mainnet/{token_address}/top-holders"
-
-                async with session.get(url, headers=self.moralis_headers, timeout=aiohttp.ClientTimeout(total=15)) as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        self.total_cu_used += 5
-
-                        holders = data.get('result', [])
-
-                        for holder in holders[:30]:  # Top 30 holders
-                            balance = float(holder.get('balance', 0) or 0)
-                            address = holder.get('owner_address', '')
-
-                            # Skip contract addresses (very high balances)
-                            if balance > 1000000000000:
-                                continue
-
-                            # Estimate USD value if we have price
-                            if token_price > 0:
-                                usd_value = (balance / 1e9) * token_price  # Assuming 9 decimals
-                                if usd_value < 50000:  # Not a whale
-                                    continue
-
-                            if address and address not in whale_addresses:
-                                whale_addresses.append(address)
-
-                                # Track this whale
-                                self.whale_wallets[address]['tokens_bought'].append({
-                                    'token': token_symbol,
-                                    'address': token_address
-                                })
-
-                        logger.debug(f"   Current holders: {len(whale_addresses)} whales")
-
-                    else:
-                        logger.debug(f"   Top holders failed: HTTP {resp.status}")
-
-                # Strategy 2: Get early transfers to find early whales
-                # This identifies wallets that bought in early (more predictive!)
-                transfers_url = f"{self.moralis_base_url}/token/mainnet/{token_address}/transfers"
-                params = {
-                    'limit': 100,  # Get first 100 transfers
-                    'order': 'ASC'  # Oldest first = earliest buyers
-                }
-
-                async with session.get(transfers_url, headers=self.moralis_headers, params=params, timeout=aiohttp.ClientTimeout(total=15)) as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        self.total_cu_used += 5
-
-                        transfers = data.get('result', [])
-                        early_buyers = defaultdict(float)
-
-                        # Aggregate early buyers
-                        for transfer in transfers:
-                            to_address = transfer.get('to_address', '')
-                            value = float(transfer.get('value', 0) or 0)
-
-                            if to_address and value > 0:
-                                early_buyers[to_address] += value
-
-                        # Identify early whales (bought >$50K equivalent early)
-                        for address, total_bought in early_buyers.items():
-                            if token_price > 0:
-                                usd_value = (total_bought / 1e9) * token_price
-                                if usd_value >= 50000 and address not in whale_addresses:
-                                    whale_addresses.append(address)
-
-                                    # Track early whale
-                                    self.whale_wallets[address]['tokens_bought'].append({
-                                        'token': token_symbol,
-                                        'address': token_address,
-                                        'early_buyer': True  # Mark as early buyer
-                                    })
-
-                        logger.debug(f"   Early buyers: +{len([a for a in early_buyers if a in whale_addresses])} early whales")
-
-                    else:
-                        logger.debug(f"   Transfers failed: HTTP {resp.status}")
-
-                logger.info(f"   🐋 Total whales found: {len(whale_addresses)}")
-                return whale_addresses
-
-        except Exception as e:
-            logger.debug(f"   Whale extraction error: {e}")
-            return []
+        # Moralis free tier limitation: Solana holder queries not available
+        logger.debug(f"   Whale extraction skipped for {token_symbol} (Moralis free tier limitation)")
+        logger.info(f"   🐋 Total whales found: 0 (requires Helius or Moralis paid tier)")
+        return []
 
     async def collect_all(self, target_count: int = 150):
         """Collect historical data for target number of tokens"""
