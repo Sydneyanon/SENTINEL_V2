@@ -350,6 +350,69 @@ class ConvictionEngine:
             mid_total += social_confirmation_score
 
             # ================================================================
+            # PHASE 3.8: SOCIAL VERIFICATION (DEXSCREENER) - FREE
+            # ================================================================
+            # Verify token has legitimate social presence (Twitter, Telegram, website)
+            # This is different from buzz/sentiment - it's about legitimacy verification
+            # Data comes from DexScreener API (already fetched for graduated tokens)
+
+            social_verification_score = 0
+            social_verification_data = {}
+
+            # Only check for graduated tokens (DexScreener has this data)
+            if token_data.get('has_twitter') is not None:  # DexScreener data available
+                has_website = token_data.get('has_website', False)
+                has_twitter = token_data.get('has_twitter', False)
+                has_telegram = token_data.get('has_telegram', False)
+                has_discord = token_data.get('has_discord', False)
+                social_count = token_data.get('social_count', 0)
+
+                # Scoring logic
+                if has_twitter and has_telegram:
+                    # Both Twitter + Telegram = legit project (most important combo)
+                    social_verification_score += 8
+                    social_verification_data['multi_platform'] = True
+                elif has_twitter or has_telegram:
+                    # At least one social = some legitimacy
+                    social_verification_score += 4
+
+                if has_website:
+                    # Website = more effort/legitimacy
+                    social_verification_score += 5
+
+                if has_discord:
+                    # Discord community = additional legitimacy
+                    social_verification_score += 3
+
+                # PENALTY: No socials at all = likely anonymous scam
+                if social_count == 0:
+                    social_verification_score = -15
+                    social_verification_data['anonymous'] = True
+                    logger.warning(f"   ⚠️  No social presence: -15 pts (likely scam)")
+
+                if social_verification_score > 0:
+                    logger.info(f"   ✅ Social Verification: +{social_verification_score} pts")
+                    platforms = []
+                    if has_twitter: platforms.append('Twitter')
+                    if has_telegram: platforms.append('Telegram')
+                    if has_website: platforms.append('Website')
+                    if has_discord: platforms.append('Discord')
+                    logger.info(f"      Platforms: {', '.join(platforms)}")
+
+                social_verification_data.update({
+                    'has_website': has_website,
+                    'has_twitter': has_twitter,
+                    'has_telegram': has_telegram,
+                    'has_discord': has_discord,
+                    'social_count': social_count,
+                    'score': social_verification_score
+                })
+            else:
+                logger.debug(f"   ℹ️  Social verification skipped (DexScreener data not available)")
+
+            mid_total += social_verification_score
+
+            # ================================================================
             # OPT-023/OPT-055: EMERGENCY STOP - Red Flag Detection (FREE)
             # ================================================================
             # OPT-055: Check emergency flags BEFORE expensive holder check
@@ -416,6 +479,14 @@ class ConvictionEngine:
 
             # Apply RugCheck penalty to mid_total
             mid_total += rugcheck_penalty
+
+            # NEW: DexScreener Boost Detection (paid promotion = dump signal)
+            boost_penalty = 0
+            if token_data.get('boost_active', 0) > 0:
+                # Paid promotion detected - often precedes dumps
+                boost_penalty = -25
+                logger.warning(f"   🚨 PAID BOOST DETECTED: {boost_penalty} pts (potential pump & dump)")
+                mid_total += boost_penalty
 
             # 1. Liquidity < $20k (too thin, likely rug)
             # OPT-044: Increased from $2k to $20k (ML shows liquidity is 3rd most important feature)
@@ -581,6 +652,7 @@ class ConvictionEngine:
                     'social_sentiment': social_score,
                     'twitter_buzz': twitter_score,
                     'telegram_calls': social_confirmation_score,
+                    'social_verification': social_verification_score,
                     'rugcheck_penalty': rugcheck_penalty,
                     'holder_penalty': holder_result['penalty'],
                     'kol_bonus': holder_result['kol_bonus'],
@@ -595,6 +667,7 @@ class ConvictionEngine:
                 'social_data': social_data,
                 'twitter_data': twitter_data,
                 'telegram_call_data': telegram_call_data,
+                'social_verification_data': social_verification_data,
                 'smart_wallet_data': smart_wallet_data,  # FIXED: Include wallet data for display
                 'ml_prediction': ml_result  # ML prediction with class, confidence, and bonus
             }

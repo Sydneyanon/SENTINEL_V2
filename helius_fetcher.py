@@ -756,17 +756,103 @@ class HeliusDataFetcher:
 
                     # Extract buy/sell transaction data (for conviction scoring)
                     txns_24h = pair.get('txns', {}).get('h24', {})
+                    txns_6h = pair.get('txns', {}).get('h6', {})
+                    txns_1h = pair.get('txns', {}).get('h1', {})
                     buys_24h = txns_24h.get('buys', 0)
                     sells_24h = txns_24h.get('sells', 0)
+                    buys_6h = txns_6h.get('buys', 0)
+                    sells_6h = txns_6h.get('sells', 0)
+                    buys_1h = txns_1h.get('buys', 0)
+                    sells_1h = txns_1h.get('sells', 0)
+
+                    # Extract liquidity reserves
+                    liquidity_data = pair.get('liquidity', {})
+                    liquidity_usd = float(liquidity_data.get('usd', 0))
+                    liquidity_base = float(liquidity_data.get('base', 0))
+                    liquidity_quote = float(liquidity_data.get('quote', 0))
+
+                    # Extract volume data
+                    volume_data = pair.get('volume', {})
+                    volume_24h = float(volume_data.get('h24', 0))
+                    volume_6h = float(volume_data.get('h6', 0))
+                    volume_1h = float(volume_data.get('h1', 0))
+
+                    # Extract price changes
+                    price_changes = pair.get('priceChange', {})
+                    price_change_5m = float(price_changes.get('m5', 0))
+                    price_change_1h = float(price_changes.get('h1', 0))
+                    price_change_6h = float(price_changes.get('h6', 0))
+                    price_change_24h = float(price_changes.get('h24', 0))
+
+                    # Extract social/project info
+                    info = pair.get('info', {})
+                    websites = info.get('websites', [])
+                    socials = info.get('socials', [])
+                    has_website = len(websites) > 0
+                    has_twitter = any('twitter' in s.get('type', '').lower() for s in socials)
+                    has_telegram = any('telegram' in s.get('type', '').lower() for s in socials)
+                    has_discord = any('discord' in s.get('type', '').lower() for s in socials)
+
+                    # Extract boost status (paid promotion = potential dump signal)
+                    boosts = pair.get('boosts', {})
+                    boost_active = boosts.get('active', 0)
+
+                    # Extract pair creation time
+                    pair_created_at = pair.get('pairCreatedAt', 0)
+
+                    # Calculate derived metrics
+                    reserve_ratio = (liquidity_quote / liquidity_base) if liquidity_base > 0 else 0
+                    volume_velocity_1h = (volume_1h / liquidity_usd) if liquidity_usd > 0 else 0
+                    buy_pressure_1h = ((buys_1h - sells_1h) / (buys_1h + sells_1h)) if (buys_1h + sells_1h) > 0 else 0
+                    buy_pressure_6h = ((buys_6h - sells_6h) / (buys_6h + sells_6h)) if (buys_6h + sells_6h) > 0 else 0
+                    momentum_score = (price_change_1h * volume_1h) / liquidity_usd if liquidity_usd > 0 else 0
 
                     result = {
+                        # Price & Market Cap
                         'price_usd': float(pair.get('priceUsd', 0)),
                         'market_cap': float(pair.get('fdv', 0)),
-                        'liquidity': float(pair.get('liquidity', {}).get('usd', 0)),
-                        'volume_24h': float(pair.get('volume', {}).get('h24', 0)),
-                        'price_change_5m': float(pair.get('priceChange', {}).get('m5', 0)),
+
+                        # Liquidity
+                        'liquidity': liquidity_usd,
+                        'liquidity_base': liquidity_base,
+                        'liquidity_quote': liquidity_quote,
+                        'reserve_ratio': reserve_ratio,
+
+                        # Volume (multi-timeframe)
+                        'volume_24h': volume_24h,
+                        'volume_6h': volume_6h,
+                        'volume_1h': volume_1h,
+
+                        # Price changes (multi-timeframe)
+                        'price_change_5m': price_change_5m,
+                        'price_change_1h': price_change_1h,
+                        'price_change_6h': price_change_6h,
+                        'price_change_24h': price_change_24h,
+
+                        # Transaction counts (multi-timeframe)
                         'buys_24h': buys_24h,
                         'sells_24h': sells_24h,
+                        'buys_6h': buys_6h,
+                        'sells_6h': sells_6h,
+                        'buys_1h': buys_1h,
+                        'sells_1h': sells_1h,
+
+                        # Social verification
+                        'has_website': has_website,
+                        'has_twitter': has_twitter,
+                        'has_telegram': has_telegram,
+                        'has_discord': has_discord,
+                        'social_count': sum([has_website, has_twitter, has_telegram, has_discord]),
+
+                        # Risk signals
+                        'boost_active': boost_active,
+                        'pair_created_at': pair_created_at,
+
+                        # Derived metrics
+                        'volume_velocity_1h': volume_velocity_1h,
+                        'buy_pressure_1h': buy_pressure_1h,
+                        'buy_pressure_6h': buy_pressure_6h,
+                        'momentum_score': momentum_score,
                     }
 
                     # Include name/symbol if available and not empty

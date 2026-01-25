@@ -78,14 +78,49 @@ class MLPredictor:
                     token_data.get('volume', 0) / token_data.get('liquidity', 1)
                     if token_data.get('liquidity', 0) > 0 else 0
                 ),
-                'price_change_24h': 0,  # Not available for new tokens
-                'price_change_6h': 0,
-                'price_change_1h': 0,
+                'price_change_24h': token_data.get('price_change_24h', 0),
+                'price_change_6h': token_data.get('price_change_6h', 0),
+                'price_change_1h': token_data.get('price_change_1h', 0),
                 'rugcheck_score': 0,  # Would come from RugCheck if available
                 'is_rugged': 0,
                 'is_honeypot': 0,
                 'risk_level': 2,  # Default medium
-                'token_age_hours': 0  # New token
+                'token_age_hours': 0,  # New token
+
+                # NEW: Multi-timeframe volume
+                'volume_6h': token_data.get('volume_6h', 0),
+                'volume_1h': token_data.get('volume_1h', 0),
+
+                # NEW: Buy/sell counts
+                'buys_6h': token_data.get('buys_6h', 0),
+                'sells_6h': token_data.get('sells_6h', 0),
+                'buys_1h': token_data.get('buys_1h', 0),
+                'sells_1h': token_data.get('sells_1h', 0),
+
+                # NEW: Buy pressure
+                'buy_pressure_1h': token_data.get('buy_pressure_1h', 0),
+                'buy_pressure_6h': token_data.get('buy_pressure_6h', 0),
+
+                # NEW: Volume velocity
+                'volume_velocity_1h': token_data.get('volume_velocity_1h', 0),
+
+                # NEW: Liquidity reserves
+                'liquidity_base': token_data.get('liquidity_base', 0),
+                'liquidity_quote': token_data.get('liquidity_quote', 0),
+                'reserve_ratio': token_data.get('reserve_ratio', 0),
+
+                # NEW: Social verification
+                'has_website': 1 if token_data.get('has_website', False) else 0,
+                'has_twitter': 1 if token_data.get('has_twitter', False) else 0,
+                'has_telegram': 1 if token_data.get('has_telegram', False) else 0,
+                'social_count': token_data.get('social_count', 0),
+
+                # NEW: Risk signals
+                'boost_active': 1 if token_data.get('boost_active', 0) > 0 else 0,
+
+                # NEW: Derived metrics
+                'momentum_score': token_data.get('momentum_score', 0),
+                'bonding_velocity': token_data.get('bonding_velocity', 0)
             }
 
             # Get prediction

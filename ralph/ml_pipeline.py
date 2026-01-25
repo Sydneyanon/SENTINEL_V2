@@ -113,6 +113,41 @@ class MLPipeline:
         else:
             features['token_age_hours'] = 0
 
+        # NEW: DexScreener multi-timeframe features
+        features['volume_6h'] = token.get('volume_6h', 0)
+        features['volume_1h'] = token.get('volume_1h', 0)
+        features['buys_6h'] = token.get('buys_6h', 0)
+        features['sells_6h'] = token.get('sells_6h', 0)
+        features['buys_1h'] = token.get('buys_1h', 0)
+        features['sells_1h'] = token.get('sells_1h', 0)
+
+        # NEW: Buy pressure metrics
+        features['buy_pressure_1h'] = token.get('buy_pressure_1h', 0)
+        features['buy_pressure_6h'] = token.get('buy_pressure_6h', 0)
+
+        # NEW: Volume velocity (momentum indicator)
+        features['volume_velocity_1h'] = token.get('volume_velocity_1h', 0)
+
+        # NEW: Liquidity reserves
+        features['liquidity_base'] = token.get('liquidity_base', 0)
+        features['liquidity_quote'] = token.get('liquidity_quote', 0)
+        features['reserve_ratio'] = token.get('reserve_ratio', 0)
+
+        # NEW: Social verification (legitimacy indicators)
+        features['has_website'] = 1 if token.get('has_website', False) else 0
+        features['has_twitter'] = 1 if token.get('has_twitter', False) else 0
+        features['has_telegram'] = 1 if token.get('has_telegram', False) else 0
+        features['social_count'] = token.get('social_count', 0)
+
+        # NEW: Risk signals
+        features['boost_active'] = 1 if token.get('boost_active', 0) > 0 else 0
+
+        # NEW: Momentum score (price change * volume / liquidity)
+        features['momentum_score'] = token.get('momentum_score', 0)
+
+        # NEW: Pre-bonding velocity (if available)
+        features['bonding_velocity'] = token.get('bonding_velocity', 0)
+
         return features
 
     def classify_outcome(self, token: Dict) -> int:
