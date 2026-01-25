@@ -3,10 +3,12 @@
 **Purpose**: Collect 150 tokens that graduated from pump.fun (40-60% bonding → 100%) and reached 6-7-8 figure market caps for ML training.
 
 **What it does**:
-1. Scans DexScreener for successful pump.fun graduates ($1M-$100M MCAP)
-2. Extracts whale wallets (>$50K positions) using Moralis
-3. Tracks whale win rates across multiple successful tokens
-4. Outputs training data for ML model
+1. **Uses Moralis** to find pump.fun bonding curve tokens that reached high MCaps ($1M-$100M)
+2. **Extracts whale wallets** (>$50K positions) using two methods:
+   - Current top holders (Moralis)
+   - Early buyers from transfer history (Moralis) - identifies whales who bought early!
+3. **Tracks whale win rates** across multiple successful tokens
+4. **Outputs training data** for ML model with whale intelligence
 
 **Outputs**:
 - `data/historical_training_data.json` - Token metrics for ML training
@@ -66,28 +68,36 @@ python tools/historical_data_collector.py --min-mcap 5000000 --max-mcap 50000000
 
 ## What You'll See
 
-### Step 1: Scanning DexScreener
+### Step 1: Finding Pump.Fun Graduates with Moralis
 ```
-🔍 SCANNING FOR 150 SUCCESSFUL PUMP.FUN GRADUATES
+🔍 USING MORALIS TO FIND 150 PUMP.FUN GRADUATES
    MCAP Range: $1,000,000 - $100,000,000
-   Target: Tokens that graduated from 40-60% bonding
+   Target: Bonding curve tokens → High MCaps
 
-📊 Strategy 1: Fetching from DexScreener...
-   Got 500 tokens from API
+📊 Fetching top Solana tokens from Moralis...
+   Got 500 tokens from Moralis
+   Filtering for pump.fun graduates in MCAP range...
+
    ✅ MOODENG: $68,205,920 MCAP
    ✅ GOAT: $32,073,010 MCAP
+   ✅ ACT: $21,995,799 MCAP
    ...
-✅ Collected 150 tokens for analysis
+✅ Collected 150 tokens total
 ```
 
-### Step 2: Extracting Whales (if Moralis key set)
+### Step 2: Extracting Whales (Current + Early Holders)
 ```
-🐋 EXTRACTING WHALE WALLETS
+🐋 EXTRACTING WHALE WALLETS (CURRENT + EARLY HOLDERS)
 
 [1/150] MOODENG...
-   Found 15 whales in MOODENG
+   Current holders: 18 whales
+   Early buyers: +5 early whales
+   🐋 Total whales found: 23
+
 [2/150] GOAT...
-   Found 12 whales in GOAT
+   Current holders: 15 whales
+   Early buyers: +8 early whales
+   🐋 Total whales found: 23
 ...
 ```
 
@@ -146,6 +156,7 @@ python tools/historical_data_collector.py --min-mcap 5000000 --max-mcap 50000000
       "token_address": "ED5nyyWEzpPPiWimP8vYm7sD7TD3LAt3Q3gRTWHzPJBY",
       "symbol": "MOODENG",
       "name": "Moo Deng",
+      "price_usd": 0.068,
       "market_cap": 68205920,
       "liquidity": 2500000,
       "volume_24h": 15000000,
@@ -155,8 +166,8 @@ python tools/historical_data_collector.py --min-mcap 5000000 --max-mcap 50000000
       "buy_percentage_6h": 82.5,
       "price_change_24h": 45.2,
       "outcome": "100x+",
-      "whale_wallets": ["7xKXtg2CW...", "A8bQr5Ym9..."],
-      "whale_count": 15
+      "whale_wallets": ["7xKXtg2CW...", "A8bQr5Ym9...", "9KpLmN3Qw..."],
+      "whale_count": 23
     },
     ...
   ]
@@ -164,10 +175,11 @@ python tools/historical_data_collector.py --min-mcap 5000000 --max-mcap 50000000
 ```
 
 **ML Training Features**:
-- Buy/sell ratios (24h, 6h)
-- Volume metrics
-- Price momentum
-- Whale count
+- Buy/sell ratios (24h, 6h) - accumulation signals
+- Volume metrics - momentum indicators
+- Price momentum - trend strength
+- **Whale count (current + early)** - smart money validation
+- **Early whale presence** - identifies tokens whales bought early
 - Outcome labels (100% known!)
 
 ### `data/successful_whale_wallets.json`
@@ -184,8 +196,9 @@ python tools/historical_data_collector.py --min-mcap 5000000 --max-mcap 50000000
       "wins": 17,
       "win_rate": 0.85,
       "tokens": [
-        {"token": "MOODENG", "address": "ED5n..."},
-        {"token": "GOAT", "address": "CzLS..."},
+        {"token": "MOODENG", "address": "ED5n...", "early_buyer": true},
+        {"token": "GOAT", "address": "CzLS...", "early_buyer": true},
+        {"token": "ACT", "address": "GJAFw..."},
         ...
       ]
     },
@@ -196,23 +209,39 @@ python tools/historical_data_collector.py --min-mcap 5000000 --max-mcap 50000000
 
 **Use Case**: Whale-copy strategy - track what these successful whales buy next!
 
+**Early Buyer Intelligence**:
+Whales marked with `"early_buyer": true` bought the token within its first 100 transfers. This is highly predictive because:
+- Early whales have conviction before the crowd
+- They're not chasing pumps (low-risk entry)
+- ML can learn: "If wallet X bought early → 85% success rate"
+- Real-time: When wallet X buys a new token early → instant signal!
+
 ---
 
 ## Cost Analysis
 
 ### DexScreener (FREE!)
-- Token search: FREE
-- Historical data: FREE
 - Price/volume data: FREE
+- Transaction counts: FREE
+- Historical data: FREE
 - **Total: $0**
 
 ### Moralis (FREE TIER)
-- Whale extraction: ~5 CU per token
-- 150 tokens × 5 CU = 750 CU
+- Token discovery: ~10 CU (one-time batch)
+- Whale extraction per token:
+  - Top holders: ~5 CU
+  - Transfer history: ~5 CU
+  - **Total: ~10 CU per token**
+- 150 tokens × 10 CU = 1,500 CU + 10 CU discovery = **1,510 CU**
 - Daily free tier: 40,000 CU
-- **Usage: 1.9%** (plenty of headroom!)
+- **Usage: 3.8%** (still plenty of headroom!)
 
-**Total Cost: FREE** (under all API limits)
+**Total Cost: FREE** (well under all API limits)
+
+**Why this is better**:
+- Moralis finds pump.fun graduates directly (more accurate)
+- Early holder extraction identifies whales who bought early (more predictive!)
+- Combined whale data = better ML training
 
 ---
 
@@ -264,6 +293,44 @@ Model automatically loads on bot restart and adds ±30 conviction points per tok
 ### "DexScreener timeout"
 **Fix**: Network issue, just retry the command
 **Why**: DexScreener API sometimes slow, retry usually works
+
+---
+
+## Whale Intelligence Benefits
+
+### Early Detection Strategy
+
+**What makes early whales special**:
+- Bought within first 100 transfers (before the crowd)
+- Had conviction when token was unknown
+- Didn't chase pumps = lower risk entries
+- 85%+ win rate whales provide strongest signal
+
+**ML learns from this**:
+- "If wallet X bought early → 85% success rate"
+- Whale accumulation = bullish signal
+- Early whale absence = caution flag
+- Can weight signals: early whale (5x) > late whale (1x)
+
+**Real-time application**:
+- Track successful whales in real-time
+- When they buy a new token early → instant +15 conviction
+- Beat the crowd by following smart money
+- Whale-copy strategy enables alpha
+
+### Example Use Case
+
+**Scenario**: ML identifies whale `7xKXtg2CW...` with:
+- 17/20 wins (85% success rate)
+- Early buyer in MOODENG, GOAT, ACT (all 100x+)
+
+**Strategy**: Track this wallet in real-time
+- Wallet buys new token `ABC` in first hour
+- System detects: Successful early whale entering
+- Adds +15 conviction points automatically
+- You get signal before token pumps
+
+**Result**: Follow the smartest money on Solana!
 
 ---
 

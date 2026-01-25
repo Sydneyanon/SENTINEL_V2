@@ -55,9 +55,9 @@ class HistoricalDataCollector:
         await self.db.connect()
         logger.info("✅ Database connected")
 
-    async def scan_dexscreener_for_runners(self, min_mcap: int = 1000000, max_mcap: int = 100000000, limit: int = 150) -> list:
+    async def scan_moralis_for_pumpfun_graduates(self, min_mcap: int = 1000000, max_mcap: int = 100000000, limit: int = 150) -> list:
         """
-        Scan DexScreener for pump.fun graduates that reached high MCaps
+        Use Moralis to find pump.fun bonding curve tokens that graduated to high MCaps
 
         Args:
             min_mcap: Minimum market cap ($1M = 6 figures)
@@ -65,10 +65,97 @@ class HistoricalDataCollector:
             limit: How many tokens to collect
 
         Returns:
-            List of token addresses
+            List of token data
+        """
+        if not self.moralis_api_key:
+            logger.warning("⚠️  No Moralis API key - falling back to DexScreener only")
+            return await self.scan_dexscreener_for_runners(min_mcap, max_mcap, limit)
+
+        logger.info("=" * 80)
+        logger.info(f"🔍 USING MORALIS TO FIND {limit} PUMP.FUN GRADUATES")
+        logger.info("=" * 80)
+        logger.info(f"   MCAP Range: ${min_mcap:,} - ${max_mcap:,}")
+        logger.info(f"   Target: Bonding curve tokens → High MCaps\n")
+
+        collected_tokens = []
+
+        # Strategy: Use Moralis to get top tokens by market cap, then filter for pump.fun graduates
+        async with aiohttp.ClientSession() as session:
+            try:
+                # Moralis endpoint for top tokens by market cap
+                url = f"{self.moralis_base_url}/token/mainnet/top-tokens"
+                params = {
+                    'limit': 500  # Get large batch to filter
+                }
+
+                logger.info("📊 Fetching top Solana tokens from Moralis...")
+
+                async with session.get(url, headers=self.moralis_headers, params=params, timeout=aiohttp.ClientTimeout(total=30)) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        tokens = data.get('result', [])
+                        self.total_cu_used += 10  # Estimate
+
+                        logger.info(f"   Got {len(tokens)} tokens from Moralis")
+                        logger.info("   Filtering for pump.fun graduates in MCAP range...\n")
+
+                        # Process each token
+                        for token_info in tokens:
+                            if len(collected_tokens) >= limit:
+                                break
+
+                            token_address = token_info.get('token_address')
+                            if not token_address:
+                                continue
+
+                            # Get full data from DexScreener (has more metrics)
+                            token_data = await self.get_dexscreener_data(token_address, session)
+                            if not token_data:
+                                continue
+
+                            mcap = token_data.get('market_cap', 0)
+
+                            # Filter by MCAP range
+                            if min_mcap <= mcap <= max_mcap:
+                                collected_tokens.append(token_data)
+                                logger.info(f"   ✅ {token_data['symbol']}: ${mcap:,.0f} MCAP")
+
+                            await asyncio.sleep(0.5)  # Rate limit
+
+                    else:
+                        logger.warning(f"   Moralis failed: HTTP {resp.status}")
+
+            except Exception as e:
+                logger.error(f"   Moralis error: {e}")
+
+        # If we didn't get enough from Moralis, fall back to DexScreener + known tokens
+        if len(collected_tokens) < limit:
+            logger.info(f"\n📝 Got {len(collected_tokens)} from Moralis, using DexScreener for remainder...")
+            dex_tokens = await self.scan_dexscreener_for_runners(min_mcap, max_mcap, limit - len(collected_tokens))
+
+            # Add unique tokens from DexScreener
+            existing_addresses = {t['token_address'] for t in collected_tokens}
+            for token in dex_tokens:
+                if token['token_address'] not in existing_addresses:
+                    collected_tokens.append(token)
+
+        logger.info(f"\n✅ Collected {len(collected_tokens)} tokens total")
+        return collected_tokens
+
+    async def scan_dexscreener_for_runners(self, min_mcap: int = 1000000, max_mcap: int = 100000000, limit: int = 150) -> list:
+        """
+        Fallback: Scan DexScreener for pump.fun graduates that reached high MCaps
+
+        Args:
+            min_mcap: Minimum market cap ($1M = 6 figures)
+            max_mcap: Maximum market cap ($100M = 8 figures)
+            limit: How many tokens to collect
+
+        Returns:
+            List of token data
         """
         logger.info("=" * 80)
-        logger.info(f"🔍 SCANNING FOR {limit} SUCCESSFUL PUMP.FUN GRADUATES")
+        logger.info(f"🔍 SCANNING DEXSCREENER FOR {limit} PUMP.FUN GRADUATES")
         logger.info("=" * 80)
         logger.info(f"   MCAP Range: ${min_mcap:,} - ${max_mcap:,}")
         logger.info(f"   Target: Tokens that graduated from 40-60% bonding\n")
@@ -217,6 +304,7 @@ class HistoricalDataCollector:
                     'token_address': token_address,
                     'symbol': pair.get('baseToken', {}).get('symbol', 'UNKNOWN'),
                     'name': pair.get('baseToken', {}).get('name', 'Unknown'),
+                    'price_usd': float(pair.get('priceUsd', 0)),
                     'market_cap': mcap,
                     'liquidity': float(pair.get('liquidity', {}).get('usd', 0)),
                     'volume_24h': float(pair.get('volume', {}).get('h24', 0)),
@@ -251,52 +339,107 @@ class HistoricalDataCollector:
         else:
             return "small"
 
-    async def extract_whale_wallets(self, token_address: str, token_symbol: str) -> list:
+    async def extract_whale_wallets(self, token_address: str, token_symbol: str, token_price: float = 0) -> list:
         """
         Extract whale wallets (>$50K positions) using Moralis
 
-        Cost: ~5 CU per token
+        Combines:
+        1. Current top holders (Moralis)
+        2. Early holders from transfers (Moralis) - identifies whales who bought early
+
+        Cost: ~10 CU per token (5 for holders + 5 for transfers)
         """
         if not self.moralis_api_key:
             logger.debug(f"   Skipping whale extraction for {token_symbol} (no Moralis key)")
             return []
 
+        whale_addresses = []
+
         try:
-            url = f"{self.moralis_base_url}/token/mainnet/{token_address}/top-holders"
-
             async with aiohttp.ClientSession() as session:
+                # Strategy 1: Get current top holders
+                url = f"{self.moralis_base_url}/token/mainnet/{token_address}/top-holders"
+
                 async with session.get(url, headers=self.moralis_headers, timeout=aiohttp.ClientTimeout(total=15)) as resp:
-                    if resp.status != 200:
-                        logger.debug(f"   Whale extraction failed: HTTP {resp.status}")
-                        return []
+                    if resp.status == 200:
+                        data = await resp.json()
+                        self.total_cu_used += 5
 
-                    data = await resp.json()
-                    self.total_cu_used += 5  # Estimate
+                        holders = data.get('result', [])
 
-                    # Filter for whales (>$50K estimated value)
-                    # Note: Moralis gives holder balances, we estimate USD value
-                    holders = data.get('result', [])
-                    whale_addresses = []
+                        for holder in holders[:30]:  # Top 30 holders
+                            balance = float(holder.get('balance', 0) or 0)
+                            address = holder.get('owner_address', '')
 
-                    for holder in holders[:20]:  # Top 20 holders
-                        balance = float(holder.get('balance', 0))
-                        address = holder.get('owner_address', '')
+                            # Skip contract addresses (very high balances)
+                            if balance > 1000000000000:
+                                continue
 
-                        # Skip contract addresses (usually have very high balances)
-                        if balance > 1000000000000:  # Too high = likely contract
-                            continue
+                            # Estimate USD value if we have price
+                            if token_price > 0:
+                                usd_value = (balance / 1e9) * token_price  # Assuming 9 decimals
+                                if usd_value < 50000:  # Not a whale
+                                    continue
 
-                        if address:
-                            whale_addresses.append(address)
+                            if address and address not in whale_addresses:
+                                whale_addresses.append(address)
 
-                            # Track this whale
-                            self.whale_wallets[address]['tokens_bought'].append({
-                                'token': token_symbol,
-                                'address': token_address
-                            })
+                                # Track this whale
+                                self.whale_wallets[address]['tokens_bought'].append({
+                                    'token': token_symbol,
+                                    'address': token_address
+                                })
 
-                    logger.debug(f"   Found {len(whale_addresses)} whales in {token_symbol}")
-                    return whale_addresses
+                        logger.debug(f"   Current holders: {len(whale_addresses)} whales")
+
+                    else:
+                        logger.debug(f"   Top holders failed: HTTP {resp.status}")
+
+                # Strategy 2: Get early transfers to find early whales
+                # This identifies wallets that bought in early (more predictive!)
+                transfers_url = f"{self.moralis_base_url}/token/mainnet/{token_address}/transfers"
+                params = {
+                    'limit': 100,  # Get first 100 transfers
+                    'order': 'ASC'  # Oldest first = earliest buyers
+                }
+
+                async with session.get(transfers_url, headers=self.moralis_headers, params=params, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        self.total_cu_used += 5
+
+                        transfers = data.get('result', [])
+                        early_buyers = defaultdict(float)
+
+                        # Aggregate early buyers
+                        for transfer in transfers:
+                            to_address = transfer.get('to_address', '')
+                            value = float(transfer.get('value', 0) or 0)
+
+                            if to_address and value > 0:
+                                early_buyers[to_address] += value
+
+                        # Identify early whales (bought >$50K equivalent early)
+                        for address, total_bought in early_buyers.items():
+                            if token_price > 0:
+                                usd_value = (total_bought / 1e9) * token_price
+                                if usd_value >= 50000 and address not in whale_addresses:
+                                    whale_addresses.append(address)
+
+                                    # Track early whale
+                                    self.whale_wallets[address]['tokens_bought'].append({
+                                        'token': token_symbol,
+                                        'address': token_address,
+                                        'early_buyer': True  # Mark as early buyer
+                                    })
+
+                        logger.debug(f"   Early buyers: +{len([a for a in early_buyers if a in whale_addresses])} early whales")
+
+                    else:
+                        logger.debug(f"   Transfers failed: HTTP {resp.status}")
+
+                logger.info(f"   🐋 Total whales found: {len(whale_addresses)}")
+                return whale_addresses
 
         except Exception as e:
             logger.debug(f"   Whale extraction error: {e}")
@@ -305,11 +448,11 @@ class HistoricalDataCollector:
     async def collect_all(self, target_count: int = 150):
         """Collect historical data for target number of tokens"""
         logger.info("=" * 80)
-        logger.info("🚀 HISTORICAL DATA COLLECTION")
+        logger.info("🚀 HISTORICAL DATA COLLECTION - MORALIS + DEXSCREENER")
         logger.info("=" * 80)
 
-        # Step 1: Find successful tokens
-        tokens_data = await self.scan_dexscreener_for_runners(limit=target_count)
+        # Step 1: Find successful pump.fun graduates using Moralis
+        tokens_data = await self.scan_moralis_for_pumpfun_graduates(limit=target_count)
 
         if not tokens_data:
             logger.error("❌ No tokens found!")
@@ -318,13 +461,18 @@ class HistoricalDataCollector:
         # Step 2: Extract whales from each token (if Moralis key available)
         if self.moralis_api_key:
             logger.info("\n" + "=" * 80)
-            logger.info("🐋 EXTRACTING WHALE WALLETS")
+            logger.info("🐋 EXTRACTING WHALE WALLETS (CURRENT + EARLY HOLDERS)")
             logger.info("=" * 80)
 
             for idx, token in enumerate(tokens_data, 1):
                 logger.info(f"\n[{idx}/{len(tokens_data)}] {token['symbol']}...")
 
-                whales = await self.extract_whale_wallets(token['token_address'], token['symbol'])
+                # Extract whales with price for USD value calculation
+                whales = await self.extract_whale_wallets(
+                    token['token_address'],
+                    token['symbol'],
+                    token.get('price_usd', 0)
+                )
                 token['whale_wallets'] = whales
                 token['whale_count'] = len(whales)
 
@@ -333,7 +481,7 @@ class HistoricalDataCollector:
                     for whale in whales:
                         self.whale_wallets[whale]['win_count'] += 1
 
-                await asyncio.sleep(1)  # Rate limit
+                await asyncio.sleep(1.5)  # Rate limit for Moralis
 
         # Step 3: Analyze whale success rates
         successful_whales = []

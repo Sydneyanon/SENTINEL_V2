@@ -54,14 +54,16 @@
 
 **Enhanced & Reorganized**:
 - Moved from ralph/ to tools/historical_data_collector.py
-- Complete rewrite for 150-token collection
+- Complete rewrite for 150-token collection with Moralis integration
 
 **What it does**:
-- Scans DexScreener for pump.fun graduates ($1M-$100M MCAP)
-- Finds tokens that went from 40-60% bonding → 6-7-8 figure MCaps
-- Extracts whale wallets (>$50K positions) using Moralis
+- **Uses Moralis** to find pump.fun bonding curve tokens that reached high MCaps
+- Finds tokens that went from 40-60% bonding → 6-7-8 figure MCaps ($1M-$100M)
+- **Dual whale extraction**:
+  - Current top holders (Moralis)
+  - **Early buyers** from transfer history (first 100 transfers) - most predictive!
 - Tracks whale win rates across successful tokens
-- **Cost**: ~750 CU for 150 tokens (1.9% of 40K/day free tier = FREE!)
+- **Cost**: ~1,510 CU for 150 tokens (3.8% of 40K/day free tier = FREE!)
 
 **Outputs**:
 - `data/historical_training_data.json` - 150 tokens with outcomes
@@ -72,7 +74,9 @@
 - Historical adds 150+ examples (100% with outcomes!)
 - ML trains on 250+ examples instead of just 59
 - Learns what 100x winners look like when they're 6 hours old
-- Identifies whales who consistently pick winners
+- **Identifies early whale buyers** (bought in first 100 transfers)
+- **Tracks successful whales** (50%+ win rate across multiple tokens)
+- Enables whale-copy strategy (follow smart money in real-time)
 
 **Mega runners included**:
 - MOODENG (1137x), GOAT (535x), ACT (367x), ZEREBRO (200x)
