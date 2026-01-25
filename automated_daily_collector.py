@@ -127,9 +127,10 @@ class AutomatedDailyCollector:
                 await asyncio.sleep(3600)
 
     async def _run_daily_collection(self):
-        """Run the daily token collector"""
+        """Run the daily token collector + ML retraining pipeline"""
         try:
-            # Import here to avoid circular dependencies
+            # STEP 1: Collect yesterday's top tokens
+            logger.info("📊 STEP 1: Collecting yesterday's top tokens...")
             from tools.daily_token_collector import DailyTokenCollector
 
             # Initialize and run collector
@@ -137,6 +138,16 @@ class AutomatedDailyCollector:
             await collector.collect_daily()
 
             logger.info("✅ Daily collection complete")
+            logger.info("")
+
+            # STEP 2: ML model retraining (if enough new data)
+            logger.info("🎓 STEP 2: Checking if ML retraining needed...")
+            from tools.automated_ml_retrain import AutomatedMLRetrainer
+
+            retrainer = AutomatedMLRetrainer()
+            await retrainer.run()
+
+            logger.info("✅ ML retraining check complete")
 
         except Exception as e:
             logger.error(f"❌ Daily collection error: {e}")

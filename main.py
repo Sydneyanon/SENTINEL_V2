@@ -33,6 +33,15 @@ from helius_fetcher import HeliusDataFetcher
 from wallet_enrichment import initialize_smart_wallets  # ← NEW: Auto-discover wallet metadata
 from startup_diagnostics import run_diagnostics  # ← Diagnostics for database & OPT-041
 
+# NEW: Daily pipeline automation
+try:
+    from apscheduler.schedulers.asyncio import AsyncIOScheduler
+    from apscheduler.triggers.cron import CronTrigger
+    APSCHEDULER_AVAILABLE = True
+except ImportError:
+    APSCHEDULER_AVAILABLE = False
+    logger.warning("⚠️  APScheduler not installed - daily pipeline will not run automatically")
+
 # ============================================================================
 # GLOBAL INSTANCES
 # ============================================================================
@@ -64,6 +73,9 @@ telegram_calls_cache = {}
 
 # Telegram Monitor (Built-in) - optional alternative to external scraper
 telegram_monitor = None
+
+# Daily Pipeline Scheduler (NEW: Automated data collection + ML retraining)
+daily_pipeline_scheduler = None
 
 # ============================================================================
 # HELPER FUNCTIONS
@@ -277,6 +289,51 @@ async def cleanup_task():
             
         except Exception as e:
             logger.error(f"❌ Error in cleanup task: {e}")
+
+# ============================================================================
+# DAILY PIPELINE - Automated Data Collection + ML Retraining
+# ============================================================================
+
+async def run_daily_pipeline():
+    """
+    Daily pipeline that runs at midnight UTC:
+    1. Collects yesterday's top 50 tokens from DexScreener/Moralis
+    2. Extracts whale wallets and saves to database
+    3. Retrains ML model if enough new data (200+ tokens, 50+ new)
+    4. Deploys new model for next conviction scoring cycle
+    """
+    logger.info("=" * 80)
+    logger.info("🌅 DAILY PIPELINE STARTING")
+    logger.info("=" * 80)
+    logger.info(f"   Date: {datetime.utcnow().date()}")
+    logger.info("")
+
+    try:
+        # Step 1: Daily token collection
+        logger.info("📊 STEP 1: Collecting yesterday's top tokens...")
+        from tools.daily_token_collector import DailyTokenCollector
+        collector = DailyTokenCollector()
+        await collector.collect_daily()
+        logger.info("✅ Token collection complete")
+        logger.info("")
+
+        # Step 2: ML model retraining (if needed)
+        logger.info("🎓 STEP 2: Checking if ML retraining needed...")
+        from tools.automated_ml_retrain import AutomatedMLRetrainer
+        retrainer = AutomatedMLRetrainer()
+        await retrainer.run()
+        logger.info("✅ ML retraining check complete")
+        logger.info("")
+
+        logger.info("=" * 80)
+        logger.info("✅ DAILY PIPELINE COMPLETE")
+        logger.info("=" * 80)
+        logger.info("")
+
+    except Exception as e:
+        logger.error(f"❌ Daily pipeline failed: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
 
 # ============================================================================
 # STARTUP

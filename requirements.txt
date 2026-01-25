@@ -30,6 +30,9 @@ python-dotenv>=1.0.0
 # Date/Time Utilities
 python-dateutil>=2.8.2
 
+# Task Scheduling (Daily Pipeline)
+apscheduler>=3.10.4
+
 # JSON Handling (faster than standard json)
 orjson>=3.9.10
 

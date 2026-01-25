@@ -25,11 +25,17 @@ class PumpMonitorV2:
         # NEW: Track unique buyers per token (FREE distribution metric)
         self.unique_buyers = {}  # {token_address: set(buyer_wallets)}
         self.buyer_tracking_start = {}  # {token_address: datetime}
-        
+
+        # NEW: Pre-bonding milestone tracking (journey from 0% -> 100%)
+        self.bonding_milestones = {}  # {token_address: {milestone_pct: {'timestamp': datetime, 'sol_raised': float, 'buyer_count': int, 'trades_since_last': int}}}
+        self.milestone_percentages = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100]  # Track every 10%
+        self.trade_counts = {}  # {token_address: total_trade_count}
+        self.sol_raised = {}  # {token_address: cumulative_sol}
+
         self.running = False
         self.connection_attempts = 0
         self.messages_received = 0
-        logger.info("🎬 PumpMonitorV2 initialized with unique buyer tracking")
+        logger.info("🎬 PumpMonitorV2 initialized with unique buyer tracking + bonding milestone tracking")
         
     async def start(self):
         """Start monitoring"""
@@ -186,7 +192,59 @@ class PumpMonitorV2:
             buyer_count = len(self.unique_buyers[token_address])
             if buyer_count in [10, 25, 50, 75, 100]:
                 logger.info(f"👥 {data.get('symbol', token_address[:8])} hit {buyer_count} unique buyers")
-        
+
+        # NEW: Track bonding curve milestones (SOL raised, velocity, trade counts)
+        if token_address not in self.bonding_milestones:
+            self.bonding_milestones[token_address] = {}
+            self.trade_counts[token_address] = 0
+            self.sol_raised[token_address] = 0.0
+
+        # Increment trade count
+        self.trade_counts[token_address] += 1
+
+        # Track SOL raised (approximate from trade data if available)
+        sol_amount = data.get('solAmount', 0)
+        if sol_amount:
+            self.sol_raised[token_address] += float(sol_amount)
+
+        # Check if we hit a bonding milestone
+        current_bonding_pct = int(bonding_pct)
+        for milestone in self.milestone_percentages:
+            if milestone not in self.bonding_milestones[token_address]:
+                if current_bonding_pct >= milestone:
+                    # We just crossed this milestone!
+                    buyer_count = len(self.unique_buyers.get(token_address, set()))
+
+                    # Calculate trades since last milestone
+                    last_milestone = milestone - 10
+                    trades_since_last = self.trade_counts[token_address]
+                    if last_milestone > 0 and last_milestone in self.bonding_milestones[token_address]:
+                        trades_since_last = self.trade_counts[token_address] - self.bonding_milestones[token_address][last_milestone].get('total_trades', 0)
+
+                    # Calculate time since last milestone (velocity)
+                    time_since_last = None
+                    if last_milestone > 0 and last_milestone in self.bonding_milestones[token_address]:
+                        time_since_last = (datetime.now() - self.bonding_milestones[token_address][last_milestone]['timestamp']).total_seconds()
+
+                    # Record milestone
+                    self.bonding_milestones[token_address][milestone] = {
+                        'timestamp': datetime.now(),
+                        'sol_raised': self.sol_raised[token_address],
+                        'buyer_count': buyer_count,
+                        'total_trades': self.trade_counts[token_address],
+                        'trades_since_last': trades_since_last,
+                        'time_since_last_seconds': time_since_last
+                    }
+
+                    symbol = data.get('symbol', token_address[:8])
+
+                    # Calculate velocity
+                    if time_since_last:
+                        velocity = 10 / (time_since_last / 60)  # 10% per X minutes
+                        logger.info(f"📊 ${symbol} hit {milestone}% bonding | {buyer_count} buyers | {trades_since_last} trades in {time_since_last/60:.1f}min | Velocity: {velocity:.2f}%/min")
+                    else:
+                        logger.info(f"📊 ${symbol} hit {milestone}% bonding | {buyer_count} buyers | SOL raised: {self.sol_raised[token_address]:.2f}")
+
         # Check if this is a tracked token (KOL bought it)
         if self.active_tracker and self.active_tracker.is_tracked(token_address):
             # This is a tracked token! Update it in real-time
@@ -256,6 +314,19 @@ class PumpMonitorV2:
         
         # NEW: Add unique buyer count (FREE!)
         token_data['unique_buyers'] = len(self.unique_buyers.get(token_address, set()))
+
+        # NEW: Add bonding milestone data (velocity tracking)
+        if token_address in self.bonding_milestones:
+            token_data['bonding_milestones'] = self.bonding_milestones[token_address]
+
+            # Calculate overall bonding velocity (0% -> current%)
+            start_time = self.buyer_tracking_start.get(token_address)
+            if start_time and bonding_pct > 0:
+                elapsed_seconds = (datetime.now() - start_time).total_seconds()
+                bonding_velocity = bonding_pct / (elapsed_seconds / 60) if elapsed_seconds > 0 else 0  # %/minute
+                token_data['bonding_velocity'] = bonding_velocity
+            else:
+                token_data['bonding_velocity'] = 0
         
         # For post-graduation tokens, enrich with fresh DEX data
         if bonding_pct >= 100:
