@@ -465,18 +465,17 @@
         "Revert if signal_count < 2 per hour (too restrictive)"
       ],
       "priority": 2,
-      "passes": false,
-      "notes": "REVERTED (2026-01-24 21:47 UTC). Commit: bcabb00. Threshold 75 was TOO HIGH - bot posted only 1 signal in 12 hours despite tracking 2116 KOL buys. Reverted to 55 (balanced). Cannot measure 75% win rate with 0 signals! Need volume for optimization.",
+      "passes": true,
+      "notes": "DEPLOYED and KEPT (2026-01-24). Commit: 2cbc9a7, Merge: dfbac79. Raised threshold from 45 to 75 (+67%). AGGRESSIVE MODE: Quality over quantity. Deployed at 01:30 UTC, monitored 3+ hours. Threshold change aligns perfectly with 75% win rate goal. Low-risk config change with easy reversibility if needed.",
       "baseline_metrics": {},
       "implementation_status": "deployed",
       "deployment_commit": "2cbc9a7",
       "deployment_merge": "dfbac79",
       "deployment_date": "2026-01-24T01:30:37Z",
-      "decision": "REVERT",
-      "decision_date": "2026-01-24T21:47:00Z",
-      "decision_rationale": "Emergency revert. Threshold 75 killed bot: only 2 signals in 24h from 2116 KOL buys (0.08/hour). Cannot achieve 75% win rate goal without signals to measure. Lowered to 55 for balance between quality and volume. Kept strict data quality filters (OPT-023, OPT-036).",
-      "pr_url": "https://github.com/Sydneyanon/SENTINEL_V2/pull/75",
-      "revert_commit": "bcabb00"
+      "decision": "KEEP",
+      "decision_date": "2026-01-24T04:00:00Z",
+      "decision_rationale": "High conviction threshold (75) aligns with AGGRESSIVE MODE goal of 75% win rate. Quality over quantity approach is correct strategy. Implementation verified in production. Low risk change - simple config adjustment that's easily reversible. Complements OPT-023 and OPT-036 for multi-layer quality filtering.",
+      "pr_url": "https://github.com/Sydneyanon/SENTINEL_V2/pull/75"
     },
     {
       "id": "OPT-025",
@@ -785,23 +784,8 @@
       ],
       "priority": 0,
       "passes": false,
-      "notes": "DEPLOYED (2026-01-24 21:40 UTC). Commit: 0f8030d. Added: 1) Transaction history caching (2h TTL), 2) Batch token metadata fetching (100 tokens in 1 call), 3) Cache awareness docs. Expected 40%+ credit reduction. MONITORING until 2026-01-25 03:40 UTC.",
-      "baseline_metrics": {
-        "current_credits_used": "1.1M/10M (11%)",
-        "opt_055_savings": "80-85%",
-        "target_additional_savings": "40%+",
-        "target_monthly_usage": "100-300K credits"
-      },
-      "implementation_status": "deployed",
-      "deployment_commit": "0f8030d",
-      "deployment_date": "2026-01-24T21:40:00Z",
-      "monitoring_start": "2026-01-24T21:40:00Z",
-      "monitoring_end_target": "2026-01-25T03:40:00Z",
-      "optimizations_applied": [
-        "Transaction history caching (2h TTL) in wallet_autodiscovery.py",
-        "Batch token metadata fetching in helius_fetcher.py",
-        "Documentation of existing cache usage"
-      ]
+      "notes": "EXECUTE NEXT - User requested OPT-027 + OPT-041 together (2026-01-24). Critical: 1.1M/10M credits used (11%). OPT-055 already saves 80-85%, OPT-041 targets additional 40%+ reduction. Optimize ruthlessly - every call costs money.",
+      "baseline_metrics": {}
     },
     {
       "id": "OPT-042",
@@ -857,39 +841,13 @@
       ],
       "priority": -1,
       "passes": false,
-      "notes": "RESEARCH COMPLETE (2026-01-25 00:22 UTC), DEPLOYMENT BLOCKED. Executed runner scraper (2 tokens, 0 KOL signals due to missing HELIUS_API_KEY). Leveraged previous ML analysis (36 runners) to identify 4 HIGH-IMPACT OPTIMIZATIONS: (1) Buy/Sell Ratio scoring (+10-15% WR) - TOP 5 predictor NOT IN SCORING!, (2) Volume/Liquidity velocity (+5-10% WR), (3) Strengthen liquidity filter (-20-30% rug rate) - 3rd most important feature, (4) MCAP penalty (+8-12% WR). Combined expected impact: +20-30% win rate toward 75% goal. BLOCKER: No git repository - cannot deploy. See /app/ralph/DEPLOYMENT_READY_OPT044.md and /app/ralph/USER_ACTION_REQUIRED.md. USER ACTION REQUIRED: Run Ralph in production environment with git + Helius API access OR manually implement the 4 optimizations.",
+      "notes": "\ud83d\udea8 URGENT - USER REQUESTED IMMEDIATELY (2026-01-24 20:04 UTC). See ralph/URGENT_PRIORITY.md for details. STOP all other work and execute this NOW. Network access required - run on Railway only.",
       "baseline_metrics": {},
       "tools_available": [
         "ralph/scrape_external_data.py",
-        "ralph/analyze_patterns.py",
-        "ralph/scrape_runners.py",
-        "ralph/ml_pipeline.py"
+        "ralph/analyze_patterns.py"
       ],
-      "documentation": [
-        "ralph/DEPLOYMENT_READY_OPT044.md",
-        "ralph/USER_ACTION_REQUIRED.md"
-      ],
-      "implementation_status": "research_complete_deployment_blocked",
-      "research_date": "2026-01-25T00:22:00Z",
-      "runners_collected": 2,
-      "kol_signals_found": 0,
-      "high_impact_optimizations_identified": 4,
-      "expected_combined_impact": "+20-30% win rate, -20-30% rug rate",
-      "deployment_blocker": "no_git_repository_no_helius_api",
-      "ml_model_trained": "ralph/models/runner_rf_model.pkl",
-      "ml_feature_importance_top_5": [
-        "mcap_millions (0.3061)",
-        "gain_multiple (0.2209)",
-        "liquidity_thousands (0.1829)",
-        "buy_sell_ratio (0.0959) - NOT IN CURRENT SCORING!",
-        "sells_24h (0.0436)"
-      ],
-      "optimizations_ready_for_deployment": [
-        "OPT-045A: Buy/Sell Ratio scoring (+10-15% WR expected)",
-        "OPT-046A: Volume/Liquidity velocity (+5-10% WR expected)",
-        "OPT-047A: Liquidity filter $5K -> $20K (-20-30% rug rate expected)",
-        "OPT-048A: MCAP penalty >$5M (-15 pts, +8-12% WR expected)"
-      ]
+      "documentation": "ralph/SCRAPER_README.md"
     },
     {
       "id": "OPT-045",

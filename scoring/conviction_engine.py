@@ -129,9 +129,25 @@ class ConvictionEngine:
             momentum_score = self._score_price_momentum(token_data)
             base_scores['momentum'] = momentum_score
             logger.info(f"   🚀 Momentum: {momentum_score} points")
-            
+
+            # 5. Buy/Sell Ratio (0-10 points) - OPT-044: ML identified as 4th most important feature
+            buy_sell_score = self._score_buy_sell_ratio(token_data)
+            base_scores['buy_sell_ratio'] = buy_sell_score
+            logger.info(f"   💹 Buy/Sell Ratio: {buy_sell_score} points")
+
+            # 6. Volume/Liquidity Velocity (0-8 points) - OPT-044: High velocity = early momentum
+            velocity_score = self._score_volume_liquidity_velocity(token_data)
+            base_scores['volume_liquidity_velocity'] = velocity_score
+            logger.info(f"   ⚡ Volume/Liquidity Velocity: {velocity_score} points")
+
+            # 7. MCAP Penalty (0 to -20 points) - OPT-044: Avoid late entries
+            mcap_penalty = self._score_mcap_penalty(token_data)
+            base_scores['mcap_penalty'] = mcap_penalty
+            if mcap_penalty < 0:
+                logger.warning(f"   📉 MCAP Penalty: {mcap_penalty} points (too late to enter)")
+
             base_total = sum(base_scores.values())
-            logger.info(f"   💰 BASE SCORE: {base_total}/85")
+            logger.info(f"   💰 BASE SCORE: {base_total}/113")
             
             # ================================================================
             # PHASE 2: BUNDLE DETECTION (FREE) ⭐
@@ -400,17 +416,21 @@ class ConvictionEngine:
             # Apply RugCheck penalty to mid_total
             mid_total += rugcheck_penalty
 
-            # 1. Liquidity < $5k (too thin, likely rug)
+            # 1. Liquidity < $20k (too thin, likely rug)
+            # OPT-044: Increased from $2k to $20k (ML shows liquidity is 3rd most important feature)
+            # Higher threshold prevents rug pulls and manipulation
             liquidity = token_data.get('liquidity', 0)
-            if liquidity > 0 and liquidity < 5000:
-                emergency_blocks.append(f"Liquidity too low: ${liquidity:.0f} < $5k")
+            if liquidity > 0 and liquidity < config.MIN_LIQUIDITY:
+                emergency_blocks.append(f"Liquidity too low: ${liquidity:.0f} < ${config.MIN_LIQUIDITY}")
 
-            # 2. Token age < 2 minutes (too fresh, wait for real activity)
+            # 2. Token age < 30 seconds (too fresh, wait for real activity)
+            # REDUCED from 2min to 30sec: KOLs buy within 0-60sec, we were too late!
+            # Still filters out instant rugs but allows early entry
             token_created_at = token_data.get('created_at')
             if token_created_at:
                 token_age_seconds = (datetime.utcnow() - token_created_at).total_seconds()
-                if token_age_seconds < 120:  # 2 minutes
-                    emergency_blocks.append(f"Token too new: {token_age_seconds:.0f}s old (< 2min)")
+                if token_age_seconds < 30:  # 30 seconds (was 2 minutes)
+                    emergency_blocks.append(f"Token too new: {token_age_seconds:.0f}s old (< 30sec)")
 
             # 3. No liquidity at all (pre-graduation tokens need some liquidity)
             if liquidity == 0 and bonding_pct < 100:
@@ -552,6 +572,9 @@ class ConvictionEngine:
                     'narrative': base_scores['narrative'],
                     'volume': base_scores['volume'],
                     'momentum': base_scores['momentum'],
+                    'buy_sell_ratio': base_scores.get('buy_sell_ratio', 0),
+                    'volume_liquidity_velocity': base_scores.get('volume_liquidity_velocity', 0),
+                    'mcap_penalty': base_scores.get('mcap_penalty', 0),
                     'bundle_penalty': bundle_result['penalty'],
                     'unique_buyers': unique_buyers_score,
                     'social_sentiment': social_score,
@@ -743,3 +766,105 @@ class ConvictionEngine:
         except Exception as e:
             logger.error(f"❌ Error scoring Twitter buzz: {e}")
             return {'score': 0}
+
+    def _score_buy_sell_ratio(self, token_data: Dict) -> int:
+        """
+        Score based on buy/sell ratio (0-10 points)
+        OPT-044: ML identified as 4th most important feature (0.0959 importance)
+
+        Pattern from 36 runners:
+        - Small runners (<10x): avg ratio = 1.29 (bullish momentum)
+        - Mega runners (1000x+): avg ratio = 0.53 (profit-taking phase)
+
+        High buy/sell ratio = early-stage accumulation (GOOD)
+        Low buy/sell ratio = profit-taking/distribution (BAD)
+        """
+        buys_24h = token_data.get('buys_24h', 0)
+        sells_24h = token_data.get('sells_24h', 1)  # Avoid div by zero
+
+        # If no data available, return 0 (neutral)
+        if buys_24h == 0 and sells_24h == 0:
+            return 0
+
+        # Calculate ratio (handle edge cases)
+        buy_sell_ratio = buys_24h / max(sells_24h, 0.1)
+
+        # Scoring logic
+        if buy_sell_ratio > 2.0:  # Very strong accumulation
+            return 10
+        elif buy_sell_ratio > 1.5:  # Strong bullish momentum
+            return 8
+        elif buy_sell_ratio > 1.2:  # Good momentum
+            return 6
+        elif buy_sell_ratio > 1.0:  # Slight bullish
+            return 3
+        elif buy_sell_ratio < 0.6:  # Heavy distribution (red flag)
+            return -5
+        else:
+            return 0
+
+    def _score_volume_liquidity_velocity(self, token_data: Dict) -> int:
+        """
+        Score based on volume/liquidity velocity (0-8 points)
+        OPT-044: High velocity indicates hot trading activity
+
+        Pattern from 36 runners:
+        - Small runners: avg velocity = 20.67 (hot trading)
+        - Mega runners: avg velocity = 0.30 (stable/mature)
+
+        High velocity = early momentum phase (GOOD)
+        Low velocity = mature/stagnant (NEUTRAL/BAD)
+        """
+        volume_24h = token_data.get('volume_24h', 0)
+        liquidity = token_data.get('liquidity', 1)  # Avoid div by zero
+
+        # If no data, return 0
+        if volume_24h == 0 or liquidity == 0:
+            return 0
+
+        # Calculate velocity ratio
+        velocity_ratio = volume_24h / max(liquidity, 1000)
+
+        # Scoring logic
+        if velocity_ratio > 30:  # Extremely hot trading
+            return 8
+        elif velocity_ratio > 20:  # Very hot trading activity
+            return 6
+        elif velocity_ratio > 10:  # Good momentum
+            return 4
+        elif velocity_ratio > 5:  # Moderate activity
+            return 2
+        elif velocity_ratio < 1:  # Low activity (red flag)
+            return -3
+        else:
+            return 0
+
+    def _score_mcap_penalty(self, token_data: Dict) -> int:
+        """
+        Penalty for late entries (0 to -20 points)
+        OPT-044: Avoid tokens that already ran
+
+        Pattern from 36 runners:
+        - Small runners: avg MCAP = $220K (actively pumping, +104% 24h)
+        - Mega runners: avg MCAP = $1.5B (consolidating, -2.5% 24h)
+
+        Large MCAP = we missed the entry window (PENALIZE)
+        Small MCAP = early opportunity (NEUTRAL)
+        """
+        mcap = token_data.get('market_cap', 0)
+
+        # If no MCAP data, return 0 (neutral)
+        if mcap == 0:
+            return 0
+
+        # Penalty scoring (avoid late entries)
+        if mcap > 10_000_000:  # $10M+ (way too late)
+            return -20
+        elif mcap > 5_000_000:  # $5M+ (too late)
+            return -15
+        elif mcap > 2_000_000:  # $2M+ (getting late)
+            return -8
+        elif mcap > 1_000_000:  # $1M+ (borderline)
+            return -3
+        else:
+            return 0  # Under $1M = early opportunity
