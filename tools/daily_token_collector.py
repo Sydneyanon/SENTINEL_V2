@@ -99,7 +99,7 @@ class DailyTokenCollector:
             headers = {'x-api-key': self.collector.moralis_api_key}
 
             try:
-                async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=30)) as resp:
+                async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=30), ssl=False) as resp:
                     if resp.status == 200:
                         data = await resp.json()
 
