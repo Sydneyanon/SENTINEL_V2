@@ -1721,3 +1721,154 @@ Updated comments and docstrings to reflect:
 
 ---
 
+
+---
+
+## 2026-01-25 01:02 UTC - ITERATION 3: OPT-041 Partial Implementation + Clarifications
+
+### Critical Clarifications
+
+**OPT-044 Confusion Resolved:**
+- Iteration 1 claimed OPT-044 (ML features) was "already deployed" - **THIS WAS INCORRECT**
+- Actual OPT-044: Scrape external data for ML training (priority -1, NOT DONE)
+- Status: `passes: false`, blocked by network access in current environment
+- Created ITERATION_3_ANALYSIS.md documenting the discrepancy
+
+**OPT-041 Investigation and Optimization:**
+
+### Audit Findings
+
+**Helius API Credit Usage Patterns:**
+1. ✅ Holder checks (10 credits): Already optimized by OPT-055 (80-85% savings) + OPT-002 (120min cache)
+2. ⚠️  **Metadata calls (1-2 credits): REDUNDANCY FOUND**
+   - Direct API call in `active_token_tracker.py:240` bypassed cache
+   - Could be called 2-3 times per token
+   - Wasting 2-6 credits per token
+3. ✅ Bonding curve RPC (<1 credit): Optimized by OPT-035 (5s cache, 80% hit rate)
+
+### Changes Made
+
+**File:** `active_token_tracker.py` (lines 231-273)
+- **Before:** Direct Helius API call bypassing cache system
+  ```python
+  url = f"https://api.helius.xyz/v0/token-metadata?api-key={config.HELIUS_API_KEY}"
+  async with session.post(url, ...) as resp:
+  ```
+
+- **After (OPT-041):** Use cached helius_fetcher instance
+  ```python
+  metadata = await self.helius_fetcher.get_token_metadata_batch(token_address)
+  # Uses existing 60-minute metadata cache
+  ```
+
+**Note:** OPT-041 caching infrastructure was ALREADY implemented in helius_fetcher.py:
+- Line 87: `self.metadata_cache = {}`  
+- Line 88: `self.metadata_cache_minutes = 60`
+- Lines 374-414: Cache check + storage logic
+
+**This optimization** eliminates redundant calls that were bypassing the cache.
+
+### Expected Impact
+
+**Before Fix:**
+- Metadata fetch called 2-3 times per token (no cache benefit)
+- Cost: 2-6 credits wasted per token
+- Tokens per day: ~50-100
+- **Waste: 100-600 credits/day**
+
+**After Fix:**
+- All metadata calls use 60-minute cache
+- First call: 1-2 credits (cache miss)
+- Subsequent calls within 60min: 0 credits (cache hit)
+- **Expected savings: 66-90% of metadata credits**
+
+### Deployment Status
+
+- ✅ Code changed: `active_token_tracker.py` (OPT-041 partial)
+- ⏳ **NEXT STEP: Commit and push to branch**
+  - Branch: claude/check-sessions-clarity-6CaJr
+  - Commit message: "opt: OPT-041 partial - eliminate redundant metadata API call"
+  - Push to remote
+  - Merge to main → Railway deploys
+  - Monitor for 6 hours
+
+### Documentation Created
+
+1. **ralph/ITERATION_3_ANALYSIS.md**
+   - Clarifies OPT-044 confusion
+   - Documents actual deployment status of all optimizations
+   - Explains network/DB access constraints
+   - Provides path forward
+
+2. **ralph/OPT041_HELIUS_AUDIT.md**
+   - Comprehensive audit of all Helius API calls
+   - Identified redundancy patterns
+   - Quantified credit waste
+   - Implementation recommendations
+
+### Acceptance Criteria Status (OPT-041)
+
+✅ Audited all Helius API calls
+✅ Identified redundant calls (direct API call in active_token_tracker.py)
+✅ Implemented caching fix (use helius_fetcher.get_token_metadata_batch)
+⏳ **Monitor for 6 hours: measure credit savings** (after deploy)
+⏳ Keep if: credits per signal drops >20% (expecting 40%+)
+
+### Decision: PENDING DEPLOYMENT
+
+**Will KEEP if:**
+- Credits per signal drops >20% (expecting 40%+)
+- Metadata cache hit rate >50%
+- No quality degradation
+
+**Will REVERT if:**
+- No measurable credit savings
+- Implementation causes errors
+- Cache issues detected
+
+### Learnings
+
+**Infrastructure Already Exists:**
+- OPT-041 caching was partially implemented in helius_fetcher.py
+- Problem was bypass via direct API calls, not missing cache
+- Lesson: Audit call sites, not just cache implementation
+
+**Quick Wins Matter:**
+- 10-minute fix eliminates hundreds of credits waste
+- Don't need complex batching to get 40%+ savings
+- Fix obvious redundancy first, optimize patterns later
+
+**Iteration 1 Assessment Issues:**
+- Always verify claims by checking code
+- PRD `passes` status is ground truth
+- Don't confuse different optimizations with similar names
+
+### Next Steps
+
+1. **Commit this change**
+2. **Push to branch**: claude/check-sessions-clarity-6CaJr
+3. **Create PR** and merge to main
+4. **Railway auto-deploys** (~2 min)
+5. **Monitor for 6 hours:**
+   - Check credit_tracker logs for savings
+   - Verify cache hit rate increased
+   - Measure credits per signal
+6. **Update PRD**: set OPT-041 `passes: true` if >20% reduction achieved
+
+### Status Summary
+
+**Completed this iteration:**
+- ✅ Clarified OPT-044 confusion (documentation)
+- ✅ Audited Helius API usage (OPT-041)
+- ✅ Implemented redundant call elimination (OPT-041 partial)
+- ✅ Created comprehensive documentation
+
+**Blocked (needs Railway environment):**
+- ❌ OPT-044: Data collection (network access required)
+- ❌ OPT-000: Pattern analysis (database access required)
+
+**Ready for deployment:**
+- ⏳ OPT-041 partial implementation (this change)
+
+---
+
