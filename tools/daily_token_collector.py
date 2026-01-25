@@ -61,7 +61,7 @@ class DailyTokenCollector:
         1. DexScreener: Get recently boosted tokens (token-boosts endpoint)
         2. DexScreener: Get tokens with profiles (token-profiles endpoint)
         3. Check each token's price performance
-        4. Filter for: Minimum 2x gain, $50K+ volume, $100K+ MCAP
+        4. Filter for: Minimum 2x gain, $50K+ volume, $20K+ MCAP
         5. Outcome categorization: 2x, 10x, 50x, 100x+
 
         Args:
@@ -165,14 +165,14 @@ class DailyTokenCollector:
                     # Filters for "yesterday's winners":
                     # 1. Minimum 100% gain (2x) in 24h - they already ran
                     # 2. Minimum $50K volume - real activity
-                    # 3. Minimum $100K MCAP - not too small
+                    # 3. Minimum $20K MCAP - catch early tokens that bond/dip/rise
                     if price_change_24h < 100:  # Less than 2x = skip
                         continue
 
                     if volume_24h < 50000:  # Less than $50K volume = skip
                         continue
 
-                    if market_cap < 100000:  # Less than $100K MCAP = too small
+                    if market_cap < 20000:  # Less than $20K MCAP = too small
                         continue
 
                     # This is a winner! Add it
