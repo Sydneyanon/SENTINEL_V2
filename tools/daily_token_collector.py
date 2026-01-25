@@ -18,8 +18,13 @@ import aiohttp
 import json
 import os
 import sys
+import ssl
 from datetime import datetime, timedelta
 from loguru import logger
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Add parent to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -80,11 +85,17 @@ class DailyTokenCollector:
         token_addresses = set()
         tokens_data = []
 
-        async with aiohttp.ClientSession(trust_env=True) as session:
+        # Create SSL context that doesn't verify certificates (for Railway/Docker environments)
+        ssl_context = ssl.create_default_context()
+        ssl_context.check_hostname = False
+        ssl_context.verify_mode = ssl.CERT_NONE
+
+        connector = aiohttp.TCPConnector(ssl=ssl_context)
+        async with aiohttp.ClientSession(trust_env=True, connector=connector) as session:
             # Strategy: Use Moralis to get recently graduated pump.fun tokens
             logger.info("📊 Fetching graduated tokens from Moralis...")
 
-            url = "https://solana-gateway.moralis.io/token/mainnet/exchange/pumpfun/graduated?limit=200"
+            url = "https://solana-gateway.moralis.io/token/mainnet/exchange/pumpfun/graduated?limit=100"
             headers = {'x-api-key': self.collector.moralis_api_key}
 
             try:
