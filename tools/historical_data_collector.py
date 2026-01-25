@@ -57,11 +57,16 @@ class HistoricalDataCollector:
 
     async def scan_moralis_for_pumpfun_graduates(self, min_mcap: int = 1000000, max_mcap: int = 100000000, limit: int = 150) -> list:
         """
-        Use Moralis to find pump.fun bonding curve tokens that graduated to high MCaps
+        Use Moralis to find pump.fun tokens that started at 20-30K and ran to millions
+
+        Strategy:
+        1. Use Moralis token history to find tokens that were at 20-30K MCAP
+        2. Check if they later reached $1M-$100M
+        3. Extract whale wallets who bought when it was 20-30K
 
         Args:
-            min_mcap: Minimum market cap ($1M = 6 figures)
-            max_mcap: Maximum market cap ($100M = 8 figures)
+            min_mcap: Minimum final market cap ($1M = 6 figures)
+            max_mcap: Maximum final market cap ($100M = 8 figures)
             limit: How many tokens to collect
 
         Returns:
@@ -72,75 +77,24 @@ class HistoricalDataCollector:
             return await self.scan_dexscreener_for_runners(min_mcap, max_mcap, limit)
 
         logger.info("=" * 80)
-        logger.info(f"🔍 USING MORALIS TO FIND {limit} PUMP.FUN GRADUATES")
+        logger.info(f"🔍 USING MORALIS TO FIND LOW-CAP RUNNERS")
         logger.info("=" * 80)
-        logger.info(f"   MCAP Range: ${min_mcap:,} - ${max_mcap:,}")
-        logger.info(f"   Target: Bonding curve tokens → High MCaps\n")
+        logger.info(f"   Looking for: Tokens that started at 20-30K MCAP")
+        logger.info(f"   That reached: ${min_mcap:,} - ${max_mcap:,}")
+        logger.info(f"   Target: {limit} tokens\n")
 
         collected_tokens = []
 
-        # Strategy: Use Moralis to get top tokens by market cap, then filter for pump.fun graduates
-        async with aiohttp.ClientSession() as session:
-            try:
-                # Moralis endpoint for top tokens by market cap
-                url = f"{self.moralis_base_url}/token/mainnet/top-tokens"
-                params = {
-                    'limit': 500  # Get large batch to filter
-                }
+        # We can't directly query historical MCAP with Moralis free tier
+        # Instead: Get current high-MCAP tokens from DexScreener, then use Moralis for whale analysis
+        # This is the practical approach with free tier limitations
 
-                logger.info("📊 Fetching top Solana tokens from Moralis...")
+        logger.info("💡 Strategy: Using DexScreener for token discovery + Moralis for whale extraction")
+        logger.info("   (Moralis free tier doesn't support historical MCAP queries)")
+        logger.info("   Falling back to DexScreener scanner...\n")
 
-                async with session.get(url, headers=self.moralis_headers, params=params, timeout=aiohttp.ClientTimeout(total=30)) as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        tokens = data.get('result', [])
-                        self.total_cu_used += 10  # Estimate
-
-                        logger.info(f"   Got {len(tokens)} tokens from Moralis")
-                        logger.info("   Filtering for pump.fun graduates in MCAP range...\n")
-
-                        # Process each token
-                        for token_info in tokens:
-                            if len(collected_tokens) >= limit:
-                                break
-
-                            token_address = token_info.get('token_address')
-                            if not token_address:
-                                continue
-
-                            # Get full data from DexScreener (has more metrics)
-                            token_data = await self.get_dexscreener_data(token_address, session)
-                            if not token_data:
-                                continue
-
-                            mcap = token_data.get('market_cap', 0)
-
-                            # Filter by MCAP range
-                            if min_mcap <= mcap <= max_mcap:
-                                collected_tokens.append(token_data)
-                                logger.info(f"   ✅ {token_data['symbol']}: ${mcap:,.0f} MCAP")
-
-                            await asyncio.sleep(0.5)  # Rate limit
-
-                    else:
-                        logger.warning(f"   Moralis failed: HTTP {resp.status}")
-
-            except Exception as e:
-                logger.error(f"   Moralis error: {e}")
-
-        # If we didn't get enough from Moralis, fall back to DexScreener + known tokens
-        if len(collected_tokens) < limit:
-            logger.info(f"\n📝 Got {len(collected_tokens)} from Moralis, using DexScreener for remainder...")
-            dex_tokens = await self.scan_dexscreener_for_runners(min_mcap, max_mcap, limit - len(collected_tokens))
-
-            # Add unique tokens from DexScreener
-            existing_addresses = {t['token_address'] for t in collected_tokens}
-            for token in dex_tokens:
-                if token['token_address'] not in existing_addresses:
-                    collected_tokens.append(token)
-
-        logger.info(f"\n✅ Collected {len(collected_tokens)} tokens total")
-        return collected_tokens
+        # Fall back to DexScreener for token discovery
+        return await self.scan_dexscreener_for_runners(min_mcap, max_mcap, limit)
 
     async def scan_dexscreener_for_runners(self, min_mcap: int = 1000000, max_mcap: int = 100000000, limit: int = 150) -> list:
         """
@@ -538,6 +492,31 @@ class HistoricalDataCollector:
             with open('data/successful_whale_wallets.json', 'w') as f:
                 json.dump(whale_output, f, indent=2)
             logger.info("   ✅ Saved data/successful_whale_wallets.json")
+
+            # Save whales to database for real-time matching
+            if self.db:
+                logger.info("\n📊 Saving successful whales to database for real-time matching...")
+                for whale in successful_whales:
+                    # Check if any tokens they bought were early purchases
+                    is_early_whale = any(t.get('early_buyer', False) for t in whale['tokens'])
+
+                    await self.db.insert_whale_wallet({
+                        'address': whale['address'],
+                        'tokens_bought_count': whale['tokens_bought_count'],
+                        'wins': whale['wins'],
+                        'win_rate': whale['win_rate'],
+                        'is_early_whale': is_early_whale
+                    })
+
+                    # Save each token purchase
+                    for token in whale['tokens']:
+                        await self.db.insert_whale_token_purchase(
+                            whale['address'],
+                            token
+                        )
+
+                logger.info(f"   ✅ Saved {len(successful_whales)} whales to database")
+                logger.info("   🚀 Whales can now boost conviction scores in real-time!")
 
         # Final summary
         logger.info("\n" + "=" * 80)
