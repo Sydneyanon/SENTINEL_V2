@@ -197,10 +197,50 @@ class Database:
                 ON smart_wallet_activity(wallet_address)
             ''')
             await conn.execute('''
-                CREATE INDEX IF NOT EXISTS idx_smart_wallet_timestamp 
+                CREATE INDEX IF NOT EXISTS idx_smart_wallet_timestamp
                 ON smart_wallet_activity(timestamp)
             ''')
-            
+
+            # Whale wallets table (from historical data collector)
+            await conn.execute('''
+                CREATE TABLE IF NOT EXISTS whale_wallets (
+                    id SERIAL PRIMARY KEY,
+                    wallet_address TEXT UNIQUE NOT NULL,
+                    tokens_bought_count INTEGER DEFAULT 0,
+                    wins INTEGER DEFAULT 0,
+                    win_rate REAL DEFAULT 0.0,
+                    early_buyer BOOLEAN DEFAULT FALSE,
+                    is_early_whale BOOLEAN DEFAULT FALSE,
+                    last_updated TIMESTAMP DEFAULT NOW(),
+                    created_at TIMESTAMP DEFAULT NOW()
+                )
+            ''')
+
+            # Whale token purchases (many-to-many)
+            await conn.execute('''
+                CREATE TABLE IF NOT EXISTS whale_token_purchases (
+                    id SERIAL PRIMARY KEY,
+                    whale_address TEXT NOT NULL REFERENCES whale_wallets(wallet_address),
+                    token_address TEXT NOT NULL,
+                    token_symbol TEXT,
+                    early_buyer BOOLEAN DEFAULT FALSE,
+                    outcome TEXT,
+                    detected_at TIMESTAMP DEFAULT NOW(),
+                    UNIQUE(whale_address, token_address)
+                )
+            ''')
+
+            # Index for fast whale lookups
+            await conn.execute('''
+                CREATE INDEX IF NOT EXISTS idx_whale_address
+                ON whale_wallets(wallet_address)
+            ''')
+
+            await conn.execute('''
+                CREATE INDEX IF NOT EXISTS idx_whale_purchases
+                ON whale_token_purchases(whale_address)
+            ''')
+
             logger.info("✅ Database tables created/verified")
     
     async def insert_signal(self, signal_data: Dict):
@@ -533,3 +573,153 @@ class Database:
                 ORDER BY win_rate_pct DESC
             ''', days)
             return [dict(row) for row in rows]
+
+
+    # =========================================================================
+    # WHALE WALLET METHODS (for historical collector whale tracking)
+    # =========================================================================
+
+    async def insert_whale_wallet(self, whale_data: Dict):
+        """
+        Insert or update a whale wallet from historical data
+
+        Args:
+            whale_data: {
+                "address": "wallet_address",
+                "tokens_bought_count": 20,
+                "wins": 17,
+                "win_rate": 0.85,
+                "is_early_whale": True
+            }
+        """
+        async with self.pool.acquire() as conn:
+            await conn.execute("""
+                INSERT INTO whale_wallets (
+                    wallet_address, tokens_bought_count, wins, win_rate, is_early_whale, last_updated
+                )
+                VALUES ($1, $2, $3, $4, $5, NOW())
+                ON CONFLICT (wallet_address)
+                DO UPDATE SET
+                    tokens_bought_count = $2,
+                    wins = $3,
+                    win_rate = $4,
+                    is_early_whale = $5,
+                    last_updated = NOW()
+            """,
+                whale_data["address"],
+                whale_data.get("tokens_bought_count", 0),
+                whale_data.get("wins", 0),
+                whale_data.get("win_rate", 0.0),
+                whale_data.get("is_early_whale", False)
+            )
+
+    async def insert_whale_token_purchase(self, whale_address: str, token_data: Dict):
+        """
+        Record a whale wallet purchasing a specific token
+
+        Args:
+            whale_address: Wallet address
+            token_data: {
+                "token_address": "...",
+                "token_symbol": "...",
+                "early_buyer": True,
+                "outcome": "100x+"
+            }
+        """
+        async with self.pool.acquire() as conn:
+            await conn.execute("""
+                INSERT INTO whale_token_purchases (
+                    whale_address, token_address, token_symbol, early_buyer, outcome, detected_at
+                )
+                VALUES ($1, $2, $3, $4, $5, NOW())
+                ON CONFLICT (whale_address, token_address)
+                DO UPDATE SET
+                    early_buyer = $4,
+                    outcome = $5,
+                    detected_at = NOW()
+            """,
+                whale_address,
+                token_data["token_address"],
+                token_data.get("token_symbol"),
+                token_data.get("early_buyer", False),
+                token_data.get("outcome")
+            )
+
+    async def is_successful_whale(self, wallet_address: str) -> Optional[Dict]:
+        """
+        Check if a wallet is a tracked successful whale
+
+        Args:
+            wallet_address: Wallet to check
+
+        Returns:
+            Whale data if successful whale (50%+ win rate), None otherwise
+        """
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow("""
+                SELECT * FROM whale_wallets
+                WHERE wallet_address = $1
+                AND win_rate >= 0.5
+            """, wallet_address)
+
+            if row:
+                return dict(row)
+            return None
+
+    async def get_whale_conviction_boost(self, wallet_address: str) -> int:
+        """
+        Get conviction score boost for a successful whale wallet
+
+        Returns:
+            Conviction points to add (0-20):
+            - 85%+ win rate, early whale: +20 points
+            - 75%+ win rate, early whale: +15 points
+            - 65%+ win rate, early whale: +12 points
+            - 50%+ win rate: +8 points
+        """
+        whale_data = await self.is_successful_whale(wallet_address)
+
+        if not whale_data:
+            return 0
+
+        win_rate = whale_data.get("win_rate", 0)
+        is_early = whale_data.get("is_early_whale", False)
+
+        # Early whales get higher boost (they bought before the crowd)
+        if is_early:
+            if win_rate >= 0.85:
+                return 20  # 85%+ early whale = MEGA signal
+            elif win_rate >= 0.75:
+                return 15  # 75%+ early whale = strong signal
+            elif win_rate >= 0.65:
+                return 12  # 65%+ early whale = good signal
+            elif win_rate >= 0.50:
+                return 10  # 50%+ early whale = decent signal
+        else:
+            # Late whales get smaller boost
+            if win_rate >= 0.75:
+                return 8
+            elif win_rate >= 0.60:
+                return 5
+
+        return 0
+
+    async def get_all_successful_whales(self, min_win_rate: float = 0.5) -> List[Dict]:
+        """
+        Get all successful whale wallets
+
+        Args:
+            min_win_rate: Minimum win rate (default 0.5 = 50%)
+
+        Returns:
+            List of whale wallet data
+        """
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch("""
+                SELECT * FROM whale_wallets
+                WHERE win_rate >= $1
+                ORDER BY win_rate DESC, tokens_bought_count DESC
+            """, min_win_rate)
+
+            return [dict(row) for row in rows]
+

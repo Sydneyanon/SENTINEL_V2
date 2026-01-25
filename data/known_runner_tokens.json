@@ -1,0 +1,138 @@
+{
+  "description": "Curated list of known successful Solana meme tokens for ML training",
+  "last_updated": "2026-01-25",
+  "total_tokens": 150,
+  "categories": {
+    "mega_runners_100x": 50,
+    "medium_runners_10_50x": 50,
+    "small_wins_2_5x": 30,
+    "failed_rugs": 20
+  },
+  "tokens": [
+    {
+      "category": "mega_runners_100x",
+      "tokens": [
+        {
+          "address": "ED5nyyWEzpPPiWimP8vYm7sD7TD3LAt3Q3gRTWHzPJBY",
+          "symbol": "MOODENG",
+          "name": "Moo Deng",
+          "gain_multiple": 1136,
+          "final_mcap": 68205920,
+          "notes": "Hippo meme, viral TikTok trend"
+        },
+        {
+          "address": "CzLSujWBLFsSjncfkh59rUFqvafWcY5tzedWJSuypump",
+          "symbol": "GOAT",
+          "name": "Goatseus Maximus",
+          "gain_multiple": 535,
+          "final_mcap": 32073010,
+          "notes": "AI agent narrative, Truth Terminal"
+        },
+        {
+          "address": "GJAFwWjJ3vnTsrQVabjBVK2TYB1YtRCQXRDfDgUnpump",
+          "symbol": "ACT",
+          "name": "Act I : The AI Prophecy",
+          "gain_multiple": 367,
+          "final_mcap": 21995799,
+          "notes": "AI narrative continuation"
+        },
+        {
+          "address": "8x5VqbHA8D7NkD52uNuS5nnt3PwA8pLD34ymskeSo2Wn",
+          "symbol": "ZEREBRO",
+          "name": "zerebro",
+          "gain_multiple": 200,
+          "final_mcap": 11973173,
+          "notes": "AI artist token"
+        },
+        {
+          "address": "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263",
+          "symbol": "Bonk",
+          "name": "Bonk",
+          "gain_multiple": 10000,
+          "final_mcap": 1500000000,
+          "notes": "OG Solana dog coin, Coinbase listing"
+        },
+        {
+          "address": "EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm",
+          "symbol": "WIF",
+          "name": "dogwifhat",
+          "gain_multiple": 5000,
+          "final_mcap": 2000000000,
+          "notes": "Dog in hat meme, massive viral success"
+        },
+        {
+          "address": "7GCihgDB8fe6KNjn2MYtkzZcRjQy3t9GHdC8uHYmW2hr",
+          "symbol": "POPCAT",
+          "name": "Popcat",
+          "gain_multiple": 800,
+          "final_mcap": 850000000,
+          "notes": "Cat meme, TikTok viral"
+        }
+      ]
+    },
+    {
+      "category": "medium_runners_10_50x",
+      "tokens": [
+        {
+          "note": "Add 50 tokens here that achieved 10-50x gains",
+          "sources": [
+            "DexScreener top gainers 2024",
+            "Pump.fun graduates that held value",
+            "Tokens that reached $10M-$100M MCAP"
+          ],
+          "collection_method": "Pull from DexScreener API: tokens with peak MCAP $10M-$100M in last 6 months"
+        }
+      ]
+    },
+    {
+      "category": "small_wins_2_5x",
+      "tokens": [
+        {
+          "note": "Add 30 tokens that achieved 2-5x gains",
+          "sources": [
+            "Recent Pump.fun graduates",
+            "Tokens that reached $1M-$10M MCAP"
+          ],
+          "collection_method": "Pull from DexScreener API: tokens with peak MCAP $1M-$10M in last 3 months"
+        }
+      ]
+    },
+    {
+      "category": "failed_rugs",
+      "tokens": [
+        {
+          "note": "Add 20 tokens that rugged or failed",
+          "sources": [
+            "RugCheck.xyz identified rugs",
+            "Tokens that dropped >90% from peak"
+          ],
+          "collection_method": "Pull from DexScreener API: tokens that peaked then dropped >90%"
+        }
+      ]
+    }
+  ],
+  "collection_plan": {
+    "phase_1": {
+      "description": "Manual curated mega runners",
+      "count": 7,
+      "status": "Ready (addresses above)"
+    },
+    "phase_2": {
+      "description": "DexScreener API scan for medium/small winners",
+      "count": 80,
+      "method": "Automated collection via Moralis + DexScreener",
+      "filters": {
+        "timeframe": "last 6 months",
+        "min_mcap": 1000000,
+        "max_mcap": 100000000,
+        "min_gain": 2
+      }
+    },
+    "phase_3": {
+      "description": "Failed tokens for contrast",
+      "count": 20,
+      "method": "Tokens that peaked then dropped >90%",
+      "importance": "Critical for ML to learn what to avoid"
+    }
+  }
+}
