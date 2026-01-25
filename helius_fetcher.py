@@ -754,12 +754,19 @@ class HeliusDataFetcher:
                     token_name = base_token.get('name', '')
                     token_symbol = base_token.get('symbol', '')
 
+                    # Extract buy/sell transaction data (for conviction scoring)
+                    txns_24h = pair.get('txns', {}).get('h24', {})
+                    buys_24h = txns_24h.get('buys', 0)
+                    sells_24h = txns_24h.get('sells', 0)
+
                     result = {
                         'price_usd': float(pair.get('priceUsd', 0)),
                         'market_cap': float(pair.get('fdv', 0)),
                         'liquidity': float(pair.get('liquidity', {}).get('usd', 0)),
                         'volume_24h': float(pair.get('volume', {}).get('h24', 0)),
                         'price_change_5m': float(pair.get('priceChange', {}).get('m5', 0)),
+                        'buys_24h': buys_24h,
+                        'sells_24h': sells_24h,
                     }
 
                     # Include name/symbol if available and not empty

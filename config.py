@@ -210,7 +210,7 @@ EARLY_KILL_SWITCH = {
 
 MIN_HOLDERS = 20            # Minimum holders for any signal
 MIN_UNIQUE_BUYERS = 15      # Minimum unique buyers for pre-grad signals
-MIN_LIQUIDITY = 20000       # OPT-044: Increased from $5K to $20K (-20-30% rug rate expected)
+MIN_LIQUIDITY = 8000        # Lowered to catch 40-60% bonding curve tokens (~$8K-$18K liquidity range)
 
 # =============================================================================
 # RUG DETECTION SETTINGS (Grok's Anti-Scam System)
