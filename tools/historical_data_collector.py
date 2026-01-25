@@ -44,6 +44,10 @@ class HistoricalDataCollector:
             "X-API-Key": self.moralis_api_key
         } if self.moralis_api_key else {}
 
+        # Helius RPC for whale extraction (better Solana support)
+        self.helius_api_key = config.HELIUS_API_KEY
+        self.helius_rpc_url = f"https://mainnet.helius-rpc.com/?api-key={self.helius_api_key}" if self.helius_api_key else None
+
         self.db = None
         self.collected_tokens = []
         self.whale_wallets = defaultdict(lambda: {"tokens_bought": [], "win_count": 0, "total_invested": 0})
@@ -311,27 +315,132 @@ class HistoricalDataCollector:
 
     async def extract_whale_wallets(self, token_address: str, token_symbol: str, token_price: float = 0) -> list:
         """
-        Extract whale wallets (>$50K positions)
+        Extract whale wallets (>$50K positions) using Helius RPC
 
-        Note: Moralis free tier doesn't support Solana SPL token holder/transfer queries.
-        The endpoints /token/{network}/{address}/top-holders and /transfers return 404.
+        Uses Helius getTokenLargestAccounts to find top holders.
+        Identifies wallets holding significant positions.
 
-        Future implementation options:
-        1. Use Helius RPC (already configured): getTokenLargestAccounts + getParsedAccountInfo
-        2. Upgrade to Moralis paid tier ($49/mo)
-        3. Use Birdeye API (has holder data)
-        4. Query Solana RPC directly via getProgramAccounts
+        Args:
+            token_address: Token mint address
+            token_symbol: Token symbol for logging
+            token_price: Current token price in USD
 
-        For now: Token metrics (price, volume, buys/sells) are sufficient for ML training.
+        Returns:
+            List of whale wallet addresses
         """
-        if not self.moralis_api_key:
-            logger.debug(f"   Skipping whale extraction for {token_symbol} (no Moralis key)")
+        if not self.helius_rpc_url:
+            logger.debug(f"   Skipping whale extraction for {token_symbol} (no Helius RPC)")
+            logger.info(f"   🐋 Total whales found: 0 (requires Helius API key)")
             return []
 
-        # Moralis free tier limitation: Solana holder queries not available
-        logger.debug(f"   Whale extraction skipped for {token_symbol} (Moralis free tier limitation)")
-        logger.info(f"   🐋 Total whales found: 0 (requires Helius or Moralis paid tier)")
-        return []
+        whale_addresses = []
+
+        try:
+            async with aiohttp.ClientSession(trust_env=True) as session:
+                # Use Helius RPC to get largest token accounts
+                payload = {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "getTokenLargestAccounts",
+                    "params": [token_address]
+                }
+
+                async with session.post(self.helius_rpc_url, json=payload, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+
+                        if 'result' in data and 'value' in data['result']:
+                            accounts = data['result']['value']
+
+                            # Filter for whale-sized positions
+                            for account in accounts[:20]:  # Top 20 holders
+                                address = account.get('address')
+                                amount_raw = account.get('amount', '0')
+                                decimals = account.get('decimals', 6)
+
+                                try:
+                                    # Convert to actual token amount
+                                    balance = float(amount_raw) / (10 ** decimals)
+
+                                    # Calculate USD value if price available
+                                    if token_price > 0:
+                                        usd_value = balance * token_price
+
+                                        # Whale threshold: $50K+
+                                        if usd_value >= 50000:
+                                            # Get the owner address (need to query token account)
+                                            owner = await self._get_token_account_owner(session, address)
+
+                                            if owner and owner not in whale_addresses:
+                                                whale_addresses.append(owner)
+
+                                                # Track this whale
+                                                self.whale_wallets[owner]['tokens_bought'].append({
+                                                    'token': token_symbol,
+                                                    'address': token_address,
+                                                    'usd_value': usd_value,
+                                                    'balance': balance
+                                                })
+                                    else:
+                                        # No price data - consider any top 10 holder a whale
+                                        if len(whale_addresses) < 10:
+                                            owner = await self._get_token_account_owner(session, address)
+                                            if owner and owner not in whale_addresses:
+                                                whale_addresses.append(owner)
+
+                                                self.whale_wallets[owner]['tokens_bought'].append({
+                                                    'token': token_symbol,
+                                                    'address': token_address,
+                                                    'balance': balance
+                                                })
+
+                                except (ValueError, TypeError) as e:
+                                    logger.debug(f"   Error parsing account {address}: {e}")
+                                    continue
+
+                            logger.info(f"   🐋 Total whales found: {len(whale_addresses)}")
+                        else:
+                            logger.debug(f"   No token accounts found for {token_symbol}")
+                            logger.info(f"   🐋 Total whales found: 0")
+                    else:
+                        logger.debug(f"   Helius RPC failed: HTTP {resp.status}")
+                        logger.info(f"   🐋 Total whales found: 0")
+
+                return whale_addresses
+
+        except Exception as e:
+            logger.debug(f"   Whale extraction error: {e}")
+            logger.info(f"   🐋 Total whales found: 0")
+            return []
+
+    async def _get_token_account_owner(self, session: aiohttp.ClientSession, token_account: str) -> str:
+        """Get the owner of a token account using Helius RPC"""
+        try:
+            payload = {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "getAccountInfo",
+                "params": [
+                    token_account,
+                    {"encoding": "jsonParsed"}
+                ]
+            }
+
+            async with session.post(self.helius_rpc_url, json=payload, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+
+                    if 'result' in data and data['result'] and 'value' in data['result']:
+                        parsed_data = data['result']['value'].get('data', {})
+                        if isinstance(parsed_data, dict):
+                            parsed = parsed_data.get('parsed', {})
+                            info = parsed.get('info', {})
+                            return info.get('owner', '')
+
+                return ''
+        except Exception as e:
+            logger.debug(f"   Error getting token account owner: {e}")
+            return ''
 
     async def collect_all(self, target_count: int = 150):
         """Collect historical data for target number of tokens"""
@@ -346,10 +455,10 @@ class HistoricalDataCollector:
             logger.error("❌ No tokens found!")
             return
 
-        # Step 2: Extract whales from each token (if Moralis key available)
-        if self.moralis_api_key:
+        # Step 2: Extract whales from each token (if Helius RPC available)
+        if self.helius_rpc_url:
             logger.info("\n" + "=" * 80)
-            logger.info("🐋 EXTRACTING WHALE WALLETS (CURRENT + EARLY HOLDERS)")
+            logger.info("🐋 EXTRACTING WHALE WALLETS (TOP HOLDERS)")
             logger.info("=" * 80)
 
             for idx, token in enumerate(tokens_data, 1):
