@@ -1,0 +1,57 @@
+{
+  "collected_at": "2026-01-25T01:14:38.465298",
+  "total_runners": 3,
+  "runners": [
+    {
+      "address": "GASfLqDbE8c9w8mjKknxaHeDMmdy9usGwM1GwzVJpump",
+      "symbol": "Mountain",
+      "name": "The Mountain",
+      "price_usd": 0.00149,
+      "fdv": 1488929.0,
+      "liquidity_usd": 145804.37,
+      "volume_24h": 8960709.21,
+      "volume_6h": 1882347.91,
+      "price_change_24h": 803.0,
+      "price_change_6h": 5.85,
+      "price_change_1h": 20.48,
+      "txns_24h_buys": 39049,
+      "txns_24h_sells": 29090,
+      "pair_created_at": 1769173790000,
+      "dex_url": "https://dexscreener.com/solana/htqnqfnej7ezasb5ekjpbkbhtq8enzjprmvvhbzh9hyi"
+    },
+    {
+      "address": "F2k82EcxLtzekq1bfoGVdgp6EXZ5dLT1jE7g3LvQpump",
+      "symbol": "PENGO",
+      "name": "PETRO PENGUINS",
+      "price_usd": 0.0026,
+      "fdv": 2600921.0,
+      "liquidity_usd": 166985.83,
+      "volume_24h": 61419.05,
+      "volume_6h": 27125.51,
+      "price_change_24h": 16.39,
+      "price_change_6h": 8.37,
+      "price_change_1h": 1.22,
+      "txns_24h_buys": 283,
+      "txns_24h_sells": 162,
+      "pair_created_at": 1760110954000,
+      "dex_url": "https://dexscreener.com/solana/ayj7dtozwuwvmtredl5qgxnp7zqvjsxg6psry5ztgfgw"
+    },
+    {
+      "address": "7MDApufGNAKDDTcM3hrUpUfZ8jcaXdaoSZy1sQdRpump",
+      "symbol": "Dale",
+      "name": "Dale",
+      "price_usd": 0.004426,
+      "fdv": 4426251.0,
+      "liquidity_usd": 232390.17,
+      "volume_24h": 9336724.55,
+      "volume_6h": 7497294.71,
+      "price_change_24h": 8500.0,
+      "price_change_6h": 1116.0,
+      "price_change_1h": -23.0,
+      "txns_24h_buys": 29784,
+      "txns_24h_sells": 25055,
+      "pair_created_at": 1769274714000,
+      "dex_url": "https://dexscreener.com/solana/2fduxpqlabb1zvkuekh4bgxxtva95mhdmenxbkunbyp6"
+    }
+  ]
+}

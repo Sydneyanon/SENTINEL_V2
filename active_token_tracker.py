@@ -232,43 +232,37 @@ class ActiveTokenTracker:
         """
         Fetch JUST metadata (name/symbol) from Helius
         Used as fallback when full bonding curve decode fails
+
+        OPT-041: Now uses cached helius_fetcher instead of direct API call
+        Saves 1-2 Helius credits per call via 60-minute metadata cache
         """
         try:
-            import aiohttp
-            import config
-            
-            url = f"https://api.helius.xyz/v0/token-metadata?api-key={config.HELIUS_API_KEY}"
-            
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    url,
-                    json={"mintAccounts": [token_address]},
-                    timeout=aiohttp.ClientTimeout(total=3)
-                ) as resp:
-                    if resp.status != 200:
-                        return None
-                    
-                    data = await resp.json()
-                    
-                    if not data or len(data) == 0:
-                        return None
-                    
-                    asset = data[0]
-                    metadata = asset.get('offChainMetadata', {}).get('metadata', {})
-                    on_chain = asset.get('onChainMetadata', {}).get('data', {})
-                    
-                    name = metadata.get('name', on_chain.get('name', 'Unknown'))
-                    symbol = metadata.get('symbol', on_chain.get('symbol', 'UNKNOWN'))
-                    
-                    # Clean up
-                    name = name.replace('\x00', '').strip()
-                    symbol = symbol.replace('\x00', '').strip()
-                    
-                    return {
-                        'token_name': name,
-                        'token_symbol': symbol
-                    }
-                    
+            # OPT-041: Use helius_fetcher with caching instead of direct API call
+            if not self.helius_fetcher:
+                logger.debug("   ⚠️ No helius_fetcher available")
+                return None
+
+            metadata = await self.helius_fetcher.get_token_metadata_batch(token_address)
+
+            if not metadata:
+                return None
+
+            # Extract name and symbol from metadata
+            off_chain = metadata.get('offChainMetadata', {}).get('metadata', {})
+            on_chain = metadata.get('onChainMetadata', {}).get('data', {})
+
+            name = off_chain.get('name', on_chain.get('name', 'Unknown'))
+            symbol = off_chain.get('symbol', on_chain.get('symbol', 'UNKNOWN'))
+
+            # Clean up
+            name = name.replace('\x00', '').strip()
+            symbol = symbol.replace('\x00', '').strip()
+
+            return {
+                'token_name': name,
+                'token_symbol': symbol
+            }
+
         except Exception as e:
             logger.debug(f"   ⚠️ Metadata fetch error: {e}")
             return None

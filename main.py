@@ -19,6 +19,20 @@ logger.add(
     level=LOG_LEVEL
 )
 
+# ============================================================================
+# TEMPORARY DIAGNOSTIC - Check what code is actually deployed on Railway
+# This will run once at startup and print diagnostic info to logs
+# REMOVE THIS BLOCK AFTER CHECKING RAILWAY LOGS
+# ============================================================================
+import subprocess
+logger.info("🔍 Running Railway code diagnostic...")
+try:
+    subprocess.run(["python", "diagnostic_code_check.py"], timeout=30)
+except Exception as e:
+    logger.error(f"Diagnostic failed: {e}")
+logger.info("✅ Diagnostic complete - check logs above")
+# ============================================================================
+
 # Import existing modules
 import config
 from database import Database
