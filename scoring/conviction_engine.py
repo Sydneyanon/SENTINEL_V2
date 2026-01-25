@@ -147,8 +147,18 @@ class ConvictionEngine:
             if mcap_penalty < 0:
                 logger.warning(f"   📉 MCAP Penalty: {mcap_penalty} points (too late to enter)")
 
+            # 8. Velocity Spike Bonus (0-10 points) - PRE-GRAD ONLY
+            # Detects FOMO acceleration: >2x buyer count in 60s after 50% bonding
+            velocity_spike_bonus = 0
+            if is_pre_grad and self.active_tracker:
+                velocity_spike = self.active_tracker.pump_monitor.get_velocity_spike(token_address)
+                if velocity_spike:
+                    velocity_spike_bonus = velocity_spike['bonus_points']
+                    logger.info(f"   🚀 VELOCITY SPIKE: +{velocity_spike_bonus} pts (FOMO at {velocity_spike['spike_at_pct']}% bonding)")
+            base_scores['velocity_spike'] = velocity_spike_bonus
+
             base_total = sum(base_scores.values())
-            logger.info(f"   💰 BASE SCORE: {base_total}/123")
+            logger.info(f"   💰 BASE SCORE: {base_total}/133")
             
             # ================================================================
             # PHASE 2: BUNDLE DETECTION (FREE) ⭐
@@ -350,54 +360,92 @@ class ConvictionEngine:
             mid_total += social_confirmation_score
 
             # ================================================================
-            # PHASE 3.8: SOCIAL VERIFICATION (DEXSCREENER) - FREE
+            # PHASE 3.8: SOCIAL VERIFICATION - FREE
             # ================================================================
             # Verify token has legitimate social presence (Twitter, Telegram, website)
             # This is different from buzz/sentiment - it's about legitimacy verification
-            # Data comes from DexScreener API (already fetched for graduated tokens)
+            # Data comes from PumpPortal (pre-grad) or DexScreener (post-grad)
+            #
+            # SCORING ASYMMETRY (pre-grad socials matter less):
+            # - Pre-grad: -20 (none) to +13 (full set) — most pre-grad skip socials
+            # - Post-grad: -15 (none) to +21 (full + active) — socials more meaningful once DEX listed
 
             social_verification_score = 0
             social_verification_data = {}
 
-            # Only check for graduated tokens (DexScreener has this data)
-            if token_data.get('has_twitter') is not None:  # DexScreener data available
+            # Check if social data is available (from PumpPortal or DexScreener)
+            if token_data.get('has_twitter') is not None:
                 has_website = token_data.get('has_website', False)
                 has_twitter = token_data.get('has_twitter', False)
                 has_telegram = token_data.get('has_telegram', False)
                 has_discord = token_data.get('has_discord', False)
                 social_count = token_data.get('social_count', 0)
 
-                # Scoring logic
-                if has_twitter and has_telegram:
-                    # Both Twitter + Telegram = legit project (most important combo)
-                    social_verification_score += 8
-                    social_verification_data['multi_platform'] = True
-                elif has_twitter or has_telegram:
-                    # At least one social = some legitimacy
-                    social_verification_score += 4
+                # Log which source provided social data (for debugging coverage)
+                social_source = token_data.get('social_source', 'unknown')
+                if social_source != 'unknown':
+                    logger.debug(f"   📊 Social data source: {social_source}")
 
-                if has_website:
-                    # Website = more effort/legitimacy
-                    social_verification_score += 5
+                # PRE-GRAD SCORING: -20 to +13 (more punitive for no socials)
+                if is_pre_grad:
+                    if social_count == 0:
+                        # No socials pre-grad = likely low-effort rug
+                        social_verification_score = -20
+                        social_verification_data['anonymous'] = True
+                        logger.warning(f"   ⚠️  PRE-GRAD: No socials: -20 pts (low-effort rug)")
+                    elif has_telegram and not has_twitter:
+                        # Only Telegram = easy to fake/spam
+                        social_verification_score = 2
+                        logger.info(f"   📱 PRE-GRAD: Only Telegram: +2 pts (weak signal)")
+                    elif has_twitter and has_telegram:
+                        # Twitter + Telegram = strong pre-grad signal
+                        social_verification_score = 10
+                        social_verification_data['multi_platform'] = True
+                        if has_website:
+                            # Twitter + TG + website = rare pre-grad, very strong
+                            social_verification_score = 13
+                            logger.info(f"   ✅ PRE-GRAD: Full social set: +13 pts (rare, strong)")
+                        else:
+                            logger.info(f"   ✅ PRE-GRAD: Twitter + Telegram: +10 pts")
+                    elif has_twitter:
+                        # Only Twitter = decent signal
+                        social_verification_score = 6
+                        logger.info(f"   🐦 PRE-GRAD: Twitter only: +6 pts")
 
-                if has_discord:
-                    # Discord community = additional legitimacy
-                    social_verification_score += 3
+                # POST-GRAD SCORING: -15 to +21 (socials more meaningful)
+                else:
+                    if social_count == 0:
+                        # No socials post-grad = anonymous but less damning
+                        social_verification_score = -15
+                        social_verification_data['anonymous'] = True
+                        logger.warning(f"   ⚠️  POST-GRAD: No socials: -15 pts (anonymous)")
+                    else:
+                        # Base scoring for social presence
+                        if has_twitter and has_telegram:
+                            # Both Twitter + Telegram = legit project
+                            social_verification_score = 10
+                            social_verification_data['multi_platform'] = True
+                        elif has_twitter or has_telegram:
+                            # At least one social = some legitimacy
+                            social_verification_score = 5
 
-                # PENALTY: No socials at all = likely anonymous scam
-                if social_count == 0:
-                    social_verification_score = -15
-                    social_verification_data['anonymous'] = True
-                    logger.warning(f"   ⚠️  No social presence: -15 pts (likely scam)")
+                        # Additional bonuses for post-grad
+                        if has_website:
+                            social_verification_score += 6  # Website matters more post-grad
+                        if has_discord:
+                            social_verification_score += 5  # Discord community = strong signal
 
-                if social_verification_score > 0:
-                    logger.info(f"   ✅ Social Verification: +{social_verification_score} pts")
-                    platforms = []
-                    if has_twitter: platforms.append('Twitter')
-                    if has_telegram: platforms.append('Telegram')
-                    if has_website: platforms.append('Website')
-                    if has_discord: platforms.append('Discord')
-                    logger.info(f"      Platforms: {', '.join(platforms)}")
+                        # Cap at +21 for post-grad
+                        social_verification_score = min(social_verification_score, 21)
+
+                        if social_verification_score > 0:
+                            logger.info(f"   ✅ POST-GRAD: Social verification: +{social_verification_score} pts")
+                            platforms = []
+                            if has_twitter: platforms.append('Twitter')
+                            if has_telegram: platforms.append('Telegram')
+                            if has_website: platforms.append('Website')
+                            if has_discord: platforms.append('Discord')
+                            logger.info(f"      Platforms: {', '.join(platforms)}")
 
                 social_verification_data.update({
                     'has_website': has_website,
@@ -405,12 +453,76 @@ class ConvictionEngine:
                     'has_telegram': has_telegram,
                     'has_discord': has_discord,
                     'social_count': social_count,
-                    'score': social_verification_score
+                    'score': social_verification_score,
+                    'stage': 'pre_grad' if is_pre_grad else 'post_grad'
                 })
             else:
-                logger.debug(f"   ℹ️  Social verification skipped (DexScreener data not available)")
+                logger.debug(f"   ℹ️  Social verification skipped (social data not available)")
 
             mid_total += social_verification_score
+
+            # ================================================================
+            # PHASE 3.9: BOOST DETECTION (POST-GRAD ONLY) - FREE
+            # ================================================================
+            # Detect coordinated pump/dump via DexScreener boost or volume spikes
+            # If boosted OR sudden 5-10x volume spike in first 5min → -25 pts
+
+            boost_penalty = 0
+            boost_detection_data = {}
+
+            if not is_pre_grad:  # Only check post-grad tokens
+                is_boosted = token_data.get('is_boosted', False)
+                volume_spike_ratio = token_data.get('volume_spike_ratio', 0)
+
+                if is_boosted:
+                    boost_penalty = -25
+                    boost_detection_data['boosted'] = True
+                    logger.warning(f"   🚨 BOOST DETECTED: DexScreener paid promotion - {boost_penalty} pts (coordinated dump risk)")
+                elif volume_spike_ratio >= 5:
+                    boost_penalty = -25
+                    boost_detection_data['volume_spike'] = True
+                    boost_detection_data['spike_ratio'] = round(volume_spike_ratio, 1)
+                    logger.warning(f"   🚨 VOLUME SPIKE: {volume_spike_ratio:.1f}x sudden volume - {boost_penalty} pts (coordinated dump risk)")
+
+            mid_total += boost_penalty
+
+            # ================================================================
+            # PHASE 3.10: RESERVE RATIO ANALYSIS (POST-GRAD ONLY) - FREE
+            # ================================================================
+            # Analyze SOL/token ratio in liquidity pool
+            # High reserve ratio = balanced liquidity, low = easy dump risk
+            # Scoring: >0.8 = +10 pts, <0.4 = -15 pts
+
+            reserve_ratio_score = 0
+            reserve_ratio_data = {}
+
+            if not is_pre_grad:  # Only check post-grad tokens with DEX liquidity
+                liquidity_base = token_data.get('liquidity_base', 0)  # Token reserves
+                liquidity_quote = token_data.get('liquidity_quote', 0)  # SOL reserves
+
+                if liquidity_base > 0 and liquidity_quote > 0:
+                    # Calculate reserve ratio (normalized to 0-1 range)
+                    # Higher ratio = more SOL relative to tokens = healthier
+                    total_liquidity = liquidity_base + liquidity_quote
+                    reserve_ratio = liquidity_quote / total_liquidity
+
+                    reserve_ratio_data['reserve_ratio'] = round(reserve_ratio, 3)
+                    reserve_ratio_data['sol_reserves'] = liquidity_quote
+                    reserve_ratio_data['token_reserves'] = liquidity_base
+
+                    if reserve_ratio > 0.8:
+                        # High SOL reserves = balanced, healthy liquidity
+                        reserve_ratio_score = 10
+                        logger.info(f"   ✅ Reserve Ratio: {reserve_ratio:.2f} - Balanced liquidity: +{reserve_ratio_score} pts")
+                    elif reserve_ratio < 0.4:
+                        # Low SOL reserves = easy to dump, high slippage risk
+                        reserve_ratio_score = -15
+                        logger.warning(f"   ⚠️  Reserve Ratio: {reserve_ratio:.2f} - Low liquidity risk: {reserve_ratio_score} pts")
+                    else:
+                        # Medium ratio = neutral
+                        logger.debug(f"   ℹ️  Reserve Ratio: {reserve_ratio:.2f} - Neutral")
+
+            mid_total += reserve_ratio_score
 
             # ================================================================
             # OPT-023/OPT-055: EMERGENCY STOP - Red Flag Detection (FREE)
@@ -703,16 +815,51 @@ class ConvictionEngine:
             return 0
     
     def _score_price_momentum(self, token_data: Dict) -> int:
-        """Score based on price momentum (0-10 points)"""
-        # Get price change from token_data
-        price_change = token_data.get('price_change_5m', 0)
-        
-        if price_change >= 50:  # +50% in 5 min
-            return config.MOMENTUM_WEIGHTS['very_strong']
-        elif price_change >= 20:  # +20% in 5 min
-            return config.MOMENTUM_WEIGHTS['strong']
+        """
+        Score based on price momentum (0-10 points base + multi-timeframe bonus)
+
+        - Pre-grad: Uses 5m price change (0-10 pts)
+        - Post-grad: Uses 5m price change + multi-timeframe bonus (1h/6h/24h, +5 pts each)
+        """
+        bonding_pct = token_data.get('bonding_curve_pct', 0)
+        is_pre_grad = bonding_pct < 100
+
+        # Base score from 5m price change
+        price_change_5m = token_data.get('price_change_5m', 0)
+
+        if price_change_5m >= 50:  # +50% in 5 min
+            base_score = config.MOMENTUM_WEIGHTS['very_strong']
+        elif price_change_5m >= 20:  # +20% in 5 min
+            base_score = config.MOMENTUM_WEIGHTS['strong']
         else:
-            return 0
+            base_score = 0
+
+        # POST-GRAD ONLY: Multi-timeframe momentum bonus
+        if not is_pre_grad:
+            price_change_1h = token_data.get('price_change_1h', 0)
+            price_change_6h = token_data.get('price_change_6h', 0)
+            price_change_24h = token_data.get('price_change_24h', 0)
+
+            timeframe_bonus = 0
+            positive_timeframes = []
+
+            # +5 pts per positive timeframe (sustained momentum)
+            if price_change_1h > 0:
+                timeframe_bonus += 5
+                positive_timeframes.append(f"1h: +{price_change_1h:.1f}%")
+            if price_change_6h > 0:
+                timeframe_bonus += 5
+                positive_timeframes.append(f"6h: +{price_change_6h:.1f}%")
+            if price_change_24h > 0:
+                timeframe_bonus += 5
+                positive_timeframes.append(f"24h: +{price_change_24h:.1f}%")
+
+            if timeframe_bonus > 0:
+                logger.info(f"   📈 Multi-timeframe momentum: +{timeframe_bonus} pts ({', '.join(positive_timeframes)})")
+
+            return base_score + timeframe_bonus
+
+        return base_score
     
     def _score_unique_buyers(self, unique_buyers: int) -> int:
         """Score based on unique buyer count (0-15 points)"""

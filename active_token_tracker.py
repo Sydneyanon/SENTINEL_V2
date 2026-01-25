@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from loguru import logger
 import asyncio
 from pumpportal_api import PumpPortalAPI
+import config
 
 
 @dataclass
@@ -37,7 +38,8 @@ class ActiveTokenTracker:
         self.telegram_publisher = telegram_publisher
         self.db = db
         self.helius_fetcher = helius_fetcher
-        self.pumpportal_api = PumpPortalAPI()  # For fetching token metadata
+        # Initialize PumpPortalAPI with Helius key for metadata fallback
+        self.pumpportal_api = PumpPortalAPI(helius_api_key=config.HELIUS_API_KEY)
 
         # Active tokens being tracked
         self.tracked_tokens: Dict[str, TokenState] = {}
@@ -850,10 +852,14 @@ class ActiveTokenTracker:
             logger.info(f"🧹 Cleaned up {len(tokens_to_remove)} tokens, {self.get_active_count()} remain")
     
     def get_stats(self) -> Dict:
-        """Get tracker statistics"""
+        """Get tracker statistics including social coverage metrics"""
+        # Get social coverage stats from PumpPortalAPI
+        social_coverage = self.pumpportal_api.get_social_coverage_stats()
+
         return {
             'active_tokens': self.get_active_count(),
             'tokens_tracked_total': self.tokens_tracked_total,
             'signals_sent': self.signals_sent_total,
             'reanalyses_total': self.reanalyses_total,
+            'social_coverage': social_coverage,
         }
