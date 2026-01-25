@@ -137,7 +137,7 @@ class HistoricalDataCollector:
         collected_addresses = set()
         tokens_data = []
 
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession(trust_env=True) as session:
             # Try each strategy
             for idx, url in enumerate(search_strategies, 1):
                 if len(collected_addresses) >= limit:
@@ -326,7 +326,7 @@ class HistoricalDataCollector:
         whale_addresses = []
 
         try:
-            async with aiohttp.ClientSession() as session:
+            async with aiohttp.ClientSession(trust_env=True) as session:
                 # Strategy 1: Get current top holders
                 url = f"{self.moralis_base_url}/token/mainnet/{token_address}/top-holders"
 
