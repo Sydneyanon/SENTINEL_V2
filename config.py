@@ -424,6 +424,10 @@ TRACK_METRICS = {
 
 # Cleanup settings
 MAX_TRACKED_TOKENS = 1000   # Maximum tokens to track in memory
+
+# Maximum market cap for signal calls ($20K for testing)
+# Tokens above this MCAP won't trigger new signals (already mooned)
+MAX_MARKET_CAP_FILTER = int(os.getenv('MAX_MARKET_CAP_FILTER', '20000'))  # $20K default
 CLEANUP_THRESHOLD = 500     # How many to remove when limit hit
 
 # Buyer tracking duration
