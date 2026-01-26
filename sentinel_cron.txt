@@ -1,0 +1,51 @@
+# SENTINEL ML Pipeline - Automated Data Collection & Retraining
+# ============================================================================
+# All times are UTC. Adjust CRON_TZ if you want different timezone.
+
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+PYTHONPATH=/home/user/SENTINEL_V2
+CRON_TZ=UTC
+
+# ============================================================================
+# DAILY DATA COLLECTION PIPELINE
+# ============================================================================
+
+# Step 1: Collect yesterday's top tokens from DexScreener (Midnight UTC)
+# - Pulls 50-100 tokens that did 2x+ in last 24 hours
+# - Saves to data/historical_training_data.json
+# - Extracts early whale wallets
+0 0 * * * cd /home/user/SENTINEL_V2 && /usr/local/bin/python3 tools/daily_token_collector.py >> logs/daily_collection.log 2>&1
+
+# Step 2: Export production signals to ML dataset (1 AM UTC)
+# - Pulls completed signals from PostgreSQL (last 7 days)
+# - Enriches with DexScreener metrics
+# - Appends to training dataset
+0 1 * * * cd /home/user/SENTINEL_V2 && /usr/local/bin/python3 tools/export_signals_to_ml.py >> logs/signal_export.log 2>&1
+
+# Step 3: Automated ML retraining (2 AM UTC)
+# - Checks if enough new data (50+ tokens since last train)
+# - Retrains XGBoost model if threshold met
+# - Deploys new model automatically
+0 2 * * * cd /home/user/SENTINEL_V2 && /usr/local/bin/python3 tools/automated_ml_retrain.py >> logs/ml_retrain.log 2>&1
+
+# ============================================================================
+# WEEKLY HISTORICAL DATA COLLECTION
+# ============================================================================
+
+# Collect 150 pump.fun graduates (Sundays at 3 AM UTC)
+# - Scrapes tokens that graduated from bonding curve
+# - Extracts early whale wallets
+# - Costs ~3K Moralis compute units
+0 3 * * 0 cd /home/user/SENTINEL_V2 && /usr/local/bin/python3 tools/historical_data_collector.py >> logs/historical_collection.log 2>&1
+
+# ============================================================================
+# MAINTENANCE
+# ============================================================================
+
+# Rotate logs weekly (Mondays at 4 AM UTC)
+0 4 * * 1 cd /home/user/SENTINEL_V2 && find logs/ -name "*.log" -mtime +30 -delete
+
+# Backup training data daily (5 AM UTC)
+0 5 * * * cd /home/user/SENTINEL_V2 && cp data/historical_training_data.json data/backups/training_data_$(date +\%Y\%m\%d).json 2>/dev/null
+
