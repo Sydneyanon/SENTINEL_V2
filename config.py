@@ -380,7 +380,7 @@ WALLET_SCORE_THRESHOLDS = {
 # PERFORMANCE TRACKING & ROI ANALYSIS
 # =============================================================================
 
-# Milestone multipliers for performance alerts
+# Milestone multipliers for database tracking (all milestones recorded)
 # Granular tracking:
 # - 1-10x: every 1x
 # - 10-100x: every 1x
@@ -396,6 +396,15 @@ MILESTONES = (
     # 1000x+ (every 1000x)
     [2000, 3000, 4000, 5000, 10000]
 )
+
+# Milestones that trigger a Telegram post (subset of MILESTONES)
+# All milestones still recorded in database for analytics
+MILESTONE_POST_THRESHOLDS = [
+    2, 3, 4, 5,                             # Early gains
+    10, 20, 30, 40, 50,                     # Mid gains
+    100, 200, 300, 400, 500,                # Major gains
+    1000,                                    # Legendary
+]
 
 # How long to track token performance (hours)
 TRACKING_DURATION = 24

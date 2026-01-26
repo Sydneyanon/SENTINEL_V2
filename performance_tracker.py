@@ -9,6 +9,7 @@ import websockets
 from typing import Dict, List
 from datetime import datetime, timedelta
 from loguru import logger
+import config
 from config import MILESTONES
 
 class PerformanceTracker:
@@ -202,12 +203,15 @@ class PerformanceTracker:
                 if multiple >= milestone and milestone > max_milestone_reached:
                     # New milestone reached!
                     logger.info(f"🎯 {signal['token_symbol']} hit {milestone}x milestone!")
-                    
-                    # Save to database
+
+                    # Save to database (all milestones)
                     await self.db.insert_milestone(token_address, milestone, current_price)
-                    
-                    # Post update to Telegram
-                    await self._post_milestone_update(signal, milestone, current_price, multiple, signal_type)
+
+                    # Post to Telegram only for key thresholds
+                    if milestone in config.MILESTONE_POST_THRESHOLDS:
+                        await self._post_milestone_update(signal, milestone, current_price, multiple, signal_type)
+                    else:
+                        logger.debug(f"   📊 {milestone}x recorded (no TG post)")
                     
         except Exception as e:
             logger.error(f"❌ Error checking performance for {signal.get('token_symbol')}: {e}")
