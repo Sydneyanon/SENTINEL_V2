@@ -154,6 +154,8 @@ class ConvictionEngine:
                         logger.info(f"   🎯 Narratives: {base_scores['narrative']} points [Static] (matched: {narrative_data.get('primary_narrative', 'N/A')})")
                     else:
                         logger.info(f"   🎯 Narratives: {base_scores['narrative']} points")
+                else:
+                    logger.info(f"   🎯 Narratives: 0 points (no match)")
             else:
                 base_scores['narrative'] = 0
             
@@ -628,12 +630,6 @@ class ConvictionEngine:
                     else:  # 'good'
                         # Very safe: no penalty (score 0-2)
                         logger.info(f"   ✅ RugCheck: SAFE (score: {score_norm}/10)")
-
-                    # GROK: Additional penalty if score > 3/10 (catch medium+ risk tokens)
-                    if score_norm is not None and score_norm > 3:
-                        extra_penalty = -10
-                        rugcheck_penalty += extra_penalty
-                        logger.warning(f"   🚨 GROK PENALTY: score > 3/10 → {extra_penalty} pts (total: {rugcheck_penalty})")
 
                     # Log specific risk flags
                     if rugcheck_result.get('mutable_metadata'):
