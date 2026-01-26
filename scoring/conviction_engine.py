@@ -427,7 +427,11 @@ class ConvictionEngine:
             social_verification_data = {}
 
             # Check if social data is available (from PumpPortal or DexScreener)
-            if token_data.get('has_twitter') is not None:
+            # If data not available yet for pre-grad, assume no socials (penalize unknown)
+            if token_data.get('has_twitter') is None and is_pre_grad:
+                social_verification_score = -20
+                logger.warning(f"   ⚠️  PRE-GRAD: Social data not loaded yet - assuming no socials: -20 pts")
+            elif token_data.get('has_twitter') is not None:
                 has_website = token_data.get('has_website', False)
                 has_twitter = token_data.get('has_twitter', False)
                 has_telegram = token_data.get('has_telegram', False)
@@ -639,8 +643,12 @@ class ConvictionEngine:
                             logger.warning(f"      🔴 {risk.get('name', 'Unknown risk')}")
 
                 else:
-                    # RugCheck failed - don't block, just log
-                    logger.debug(f"   ⚠️  RugCheck API unavailable: {rugcheck_result.get('error', 'Unknown error')}")
+                    # RugCheck failed - penalize pre-grad (don't trust unknown risk)
+                    if is_pre_grad:
+                        rugcheck_penalty = -15
+                        logger.warning(f"   ⚠️  RugCheck API unavailable - assuming risk for pre-grad: {rugcheck_penalty} pts")
+                    else:
+                        logger.debug(f"   ⚠️  RugCheck API unavailable: {rugcheck_result.get('error', 'Unknown error')}")
 
             # Apply RugCheck penalty to mid_total
             mid_total += rugcheck_penalty
