@@ -23,14 +23,38 @@ import numpy as np
 
 
 # RSS sources (crypto/Solana-focused, high-signal)
+# Expanded from 7 to 17 sources for better coverage
 RSS_SOURCES = [
+    # Major crypto news
     "https://cointelegraph.com/rss",
     "https://www.coindesk.com/arc/outboundfeeds/rss/",
     "https://www.theblock.co/feed",
-    "https://www.coingecko.com/en/rss",
     "https://decrypt.co/feed",
-    "https://solana.com/blog/rss.xml",  # Solana-specific
-    "https://www.thedefiant.io/feed",  # DeFi focused
+    "https://www.coingecko.com/en/rss",
+
+    # DeFi/Protocol focused
+    "https://www.thedefiant.io/feed",  # DeFi trends
+    "https://thedefiant.io/api/feed",  # Alternative DeFi feed
+
+    # Solana ecosystem
+    "https://solana.com/blog/rss.xml",  # Official Solana blog
+    "https://solana.news/feed/",  # Solana-specific news
+
+    # Research & Analytics
+    "https://messari.io/rss",  # Deep crypto research
+    "https://research.binance.com/en/rss",  # Binance research
+
+    # Web3/Blockchain Tech
+    "https://www.alchemy.com/blog/rss.xml",  # Web3 infrastructure
+    "https://blog.chain.link/feed/",  # Oracles/DeFi tech
+
+    # Community/Culture
+    "https://www.bankless.com/feed",  # Bankless media
+    "https://newsletter.banklesshq.com/feed",  # Bankless newsletter
+
+    # NFT/Gaming (trending narratives)
+    "https://nftnow.com/feed/",  # NFT news
+    "https://decrypt.co/feed/nft",  # Decrypt NFT section
 ]
 
 
@@ -56,6 +80,8 @@ class RealtimeNarrativeDetector:
         self.embedder = None  # SentenceTransformer model
         self.last_update = None
         self.is_running = False
+        self.narrative_history = []  # Track narrative evolution over time
+        self.max_history = 24  # Keep last 24 updates (6 hours @ 15min intervals)
 
         logger.info(f"📰 RealtimeNarrativeDetector initialized (update every {update_interval_seconds}s)")
 
@@ -218,6 +244,17 @@ class RealtimeNarrativeDetector:
             self.current_topics = result
             self.last_update = datetime.utcnow()
 
+            # Store in history for momentum tracking
+            self.narrative_history.append({
+                'timestamp': datetime.utcnow(),
+                'topics': result['topics'],
+                'article_count': result['article_count']
+            })
+
+            # Trim history to max size
+            if len(self.narrative_history) > self.max_history:
+                self.narrative_history = self.narrative_history[-self.max_history:]
+
             return result
 
         except Exception as e:
@@ -225,6 +262,67 @@ class RealtimeNarrativeDetector:
             import traceback
             logger.error(traceback.format_exc())
             return None
+
+    def get_narrative_momentum(self, topic_words: List[str]) -> Tuple[float, str]:
+        """
+        Calculate momentum score for a narrative based on history
+
+        Args:
+            topic_words: List of words defining the narrative
+
+        Returns:
+            Tuple of (momentum_multiplier, reason)
+            - momentum_multiplier: 1.0-1.5x boost for trending narratives
+            - reason: Explanation
+        """
+        if len(self.narrative_history) < 3:
+            return 1.0, "Insufficient history"
+
+        try:
+            # Count appearances of similar topics in recent history
+            topic_text = ' '.join(topic_words).lower()
+            recent_appearances = 0
+            old_appearances = 0
+
+            # Check last 3 updates (recent)
+            for update in self.narrative_history[-3:]:
+                for topic in update['topics']:
+                    hist_topic = ' '.join(topic['words']).lower()
+                    # Simple overlap check (can be improved with embeddings)
+                    overlap = len(set(topic_text.split()) & set(hist_topic.split()))
+                    if overlap >= 2:  # At least 2 words in common
+                        recent_appearances += 1
+                        break
+
+            # Check older updates (3-6 updates back)
+            if len(self.narrative_history) >= 6:
+                for update in self.narrative_history[-6:-3]:
+                    for topic in update['topics']:
+                        hist_topic = ' '.join(topic['words']).lower()
+                        overlap = len(set(topic_text.split()) & set(hist_topic.split()))
+                        if overlap >= 2:
+                            old_appearances += 1
+                            break
+
+            # Calculate momentum
+            if recent_appearances >= 3:
+                if old_appearances == 0:
+                    # New and gaining traction
+                    return 1.5, "Emerging hot narrative (new trend)"
+                elif recent_appearances > old_appearances:
+                    # Growing
+                    return 1.3, "Growing narrative (momentum up)"
+                else:
+                    # Sustained
+                    return 1.2, "Sustained narrative (consistent)"
+            elif recent_appearances >= 2:
+                return 1.1, "Recent narrative (warming up)"
+            else:
+                return 1.0, "New narrative (first appearance)"
+
+        except Exception as e:
+            logger.error(f"Error calculating momentum: {e}")
+            return 1.0, "Error calculating momentum"
 
     def get_narrative_boost(
         self,
@@ -276,28 +374,37 @@ class RealtimeNarrativeDetector:
                     max_sim = sim
                     best_topic = topic
 
-            # Award points based on similarity
-            points = 0
+            # Award base points based on similarity
+            base_points = 0
             reason = ""
 
             if max_sim > 0.7:
                 # Very strong match
-                points = 25
+                base_points = 25
                 reason = f"Strong match to '{best_topic['name']}' narrative"
             elif max_sim > 0.5:
                 # Strong match
-                points = 20
+                base_points = 20
                 reason = f"Matches '{best_topic['name']}' narrative"
             elif max_sim > 0.4:
                 # Medium match
-                points = 15
+                base_points = 15
                 reason = f"Weak match to '{best_topic['name']}' narrative"
             elif max_sim > 0.3:
                 # Weak match
-                points = 10
+                base_points = 10
                 reason = f"Partial match to '{best_topic['name']}'"
             else:
                 reason = f"No strong narrative match (max sim: {max_sim:.2f})"
+
+            # Apply momentum multiplier if we have a match
+            points = base_points
+            if base_points > 0 and best_topic:
+                momentum_mult, momentum_reason = self.get_narrative_momentum(best_topic['words'])
+                if momentum_mult > 1.0:
+                    points = int(base_points * momentum_mult)
+                    reason = f"{reason} + {momentum_reason}"
+                    logger.info(f"   📈 Momentum boost: {base_points} → {points} pts ({momentum_mult:.1f}x)")
 
             if points > 0:
                 logger.info(f"   🎯 Narrative boost: ${token_symbol} +{points} pts ({reason})")
@@ -320,12 +427,51 @@ class RealtimeNarrativeDetector:
             try:
                 logger.info("\n📰 Updating narratives from RSS feeds...")
                 await self.update_narratives()
+
+                # Log trending narratives with momentum
+                trending = self.get_trending_narratives()
+                if trending:
+                    logger.info(f"\n🔥 TOP TRENDING NARRATIVES (with momentum):")
+                    for i, narrative in enumerate(trending[:3], 1):
+                        logger.info(
+                            f"   {i}. {narrative['name']} - "
+                            f"Score: {narrative['trending_score']:.1f} "
+                            f"({narrative['doc_count']} docs × {narrative['momentum_score']:.1f}x momentum) "
+                            f"- {narrative['momentum_reason']}"
+                        )
+
                 logger.info(f"✅ Narrative update complete. Next update in {self.update_interval}s\n")
 
             except Exception as e:
                 logger.error(f"❌ Narrative loop error: {e}")
 
             await asyncio.sleep(self.update_interval)
+
+    def get_trending_narratives(self) -> List[Dict]:
+        """
+        Get narratives ranked by momentum/trending score
+
+        Returns:
+            List of narratives with momentum scores
+        """
+        if not self.current_topics or not self.current_topics.get('topics'):
+            return []
+
+        trending = []
+        for topic in self.current_topics['topics']:
+            momentum_mult, momentum_reason = self.get_narrative_momentum(topic['words'])
+            trending.append({
+                'name': topic['name'],
+                'words': topic['words'],
+                'doc_count': topic['doc_count'],
+                'momentum_score': momentum_mult,
+                'momentum_reason': momentum_reason,
+                'trending_score': topic['doc_count'] * momentum_mult  # Combined score
+            })
+
+        # Sort by trending score
+        trending.sort(key=lambda x: x['trending_score'], reverse=True)
+        return trending
 
     def stop(self):
         """Stop the narrative loop"""
