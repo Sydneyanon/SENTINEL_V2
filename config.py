@@ -67,16 +67,14 @@ DISABLE_POLLING_BELOW_THRESHOLD = True  # Only poll tokens >= 50 conviction
 # =============================================================================
 
 # Signal thresholds based on graduation status
-# REVERTED OPT-024: 75 was TOO HIGH - bot posted 1 signal in 12 hours (2100+ KOL buys tracked!)
-# Analysis: Only 2 signals in 24h with conviction scores hitting exactly 75 and 45
-# OPT-001 (2026-01-24 23:45 UTC): Raising 55 → 60 based on database analysis:
-#   - Current WR: 32.8% (19/58) - FAR below 75% target
-#   - Signals <50 conviction: 30.8% WR (16/52)
-#   - Signals 50-59: 50.0% WR (3/6) - BETTER quality at higher thresholds
-#   - Testing 60 to improve win rate while maintaining signal volume
-# Kept strict data quality filters (OPT-023, OPT-036) to prevent rugs
-MIN_CONVICTION_SCORE = 50  # Lowered to collect more data + test buy/sell ratio scoring
-POST_GRAD_THRESHOLD = 50   # Post-graduation threshold - Slightly higher for graduated tokens
+# UPDATE 2026-01-26: Lowered thresholds after removing Twitter/LunarCrush (35 pts lost)
+# - Removed Twitter (0-15 pts) and LunarCrush (0-20 pts) due to budget constraints
+# - Total max score reduced from ~145 to ~110 points
+# - Lowered thresholds proportionally (~30%) to maintain signal volume
+# - Data analysis shows: Need more signals to train ML effectively
+# - Goal: Collect 50-100 tokens/day for ML training
+MIN_CONVICTION_SCORE = 35  # Lowered from 50 (lost 35 pts from social APIs)
+POST_GRAD_THRESHOLD = 40   # Lowered from 50, slightly higher for graduated tokens
 
 # Base score threshold for distribution checks
 # Only check distribution if base score >= this value
@@ -417,8 +415,8 @@ LOG_FILE = "prometheus.log"
 ENABLE_NARRATIVES = False   # Narrative detection (disabled - narratives are static)
 ENABLE_PERFORMANCE_TRACKING = True
 ENABLE_MILESTONE_ALERTS = True
-ENABLE_LUNARCRUSH = False   # LunarCrush disabled (use Twitter only)
-ENABLE_TWITTER = True       # Twitter buzz detection (free tier - ENABLED)
+ENABLE_LUNARCRUSH = False   # LunarCrush disabled (no budget for API)
+ENABLE_TWITTER = False      # Twitter disabled (no budget for API)
 ENABLE_TELEGRAM_SCRAPER = True  # Telegram social confirmation - ENABLED!
 ENABLE_BUILTIN_TELEGRAM_MONITOR = True  # Built-in Telegram monitor - ENABLED!
 

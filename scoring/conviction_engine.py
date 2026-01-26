@@ -7,8 +7,9 @@ from datetime import datetime, timedelta
 from loguru import logger
 import config
 from rug_detector import RugDetector
-from lunarcrush_fetcher import get_lunarcrush_fetcher
-from twitter_fetcher import get_twitter_fetcher
+# Removed - no budget for these APIs
+# from lunarcrush_fetcher import get_lunarcrush_fetcher
+# from twitter_fetcher import get_twitter_fetcher
 from credit_tracker import get_credit_tracker  # OPT-055: Track credit usage
 from rugcheck_api import get_rugcheck_api  # RugCheck.xyz API integration
 from ralph.integrate_ml import get_ml_predictor  # ML predictions for conviction scoring
@@ -25,11 +26,13 @@ class ConvictionEngine:
     - Unique Buyers: 0-15 points
     - Volume Velocity: 0-10 points
     - Price Momentum: 0-10 points
-    - LunarCrush Social: 0-20 points (if enabled)
-    - Twitter Buzz: 0-15 points (if enabled)
+    - Telegram Calls: 0-20 points
     - Bundle Penalty: -5 to -40 points (with overrides)
     - Holder Concentration: -15 to -40 points (with KOL bonus)
-    Total: 0-145+ points (can exceed with bonuses)
+    - ML Prediction: -30 to +20 points
+    Total: 0-130+ points (can exceed with bonuses)
+
+    NOTE: LunarCrush and Twitter scoring removed (no budget)
     """
     
     def __init__(
@@ -51,11 +54,9 @@ class ConvictionEngine:
         # Initialize rug detector
         self.rug_detector = RugDetector(smart_wallet_tracker=smart_wallet_tracker)
 
-        # Initialize LunarCrush fetcher
-        self.lunarcrush = get_lunarcrush_fetcher()
-
-        # Initialize Twitter fetcher
-        self.twitter = get_twitter_fetcher()
+        # LunarCrush and Twitter removed (no budget)
+        # self.lunarcrush = get_lunarcrush_fetcher()
+        # self.twitter = get_twitter_fetcher()
 
         # OPT-055: Initialize credit tracker
         self.credit_tracker = get_credit_tracker()
@@ -105,7 +106,6 @@ class ConvictionEngine:
             print("   ├─ 👥 Unique Buyers (0-15 pts)")
             print("   ├─ 🚀 Price Momentum (0-10 pts)")
             print("   ├─ 📊 Volume Velocity (0-10 pts)")
-            print("   ├─ 🐦 Twitter Buzz (0-15 pts)")
             print("   ├─ 📱 Telegram Calls (0-20 pts)")
             print("   └─ 🚨 Rug Detection Penalties (-40 to 0)")
             print()
@@ -253,48 +253,18 @@ class ConvictionEngine:
                 }
 
             # ================================================================
-            # PHASE 3.5: SOCIAL SENTIMENT (LUNARCRUSH) - FREE
+            # PHASE 3.5: SOCIAL SENTIMENT - REMOVED (No budget)
             # ================================================================
+            # LunarCrush and Twitter scoring removed to save API costs
+            # All social scoring now comes from Telegram calls only
 
             social_score = 0
-            social_data = {}
-
-            if config.ENABLE_LUNARCRUSH:
-                social_data = await self._score_social_sentiment(token_symbol)
-                social_score = social_data.get('score', 0)
-
-                if social_score > 0:
-                    logger.info(f"   🌙 LunarCrush: +{social_score} points")
-                    if social_data.get('is_trending'):
-                        logger.info(f"      📈 TRENDING in top {social_data['trending_rank']}")
-                    if social_data.get('sentiment', 0) > 3.5:
-                        logger.info(f"      😊 Bullish sentiment: {social_data['sentiment']}/5")
-
-            mid_total += social_score
-
-            # ================================================================
-            # PHASE 3.6: TWITTER BUZZ (FREE TIER) - FREE
-            # ================================================================
-            # SELECTIVE: Check when token is at 40%+ bonding AND 25+ conviction
-            # LOWERED: Was 60%/70, now 40%/25 to catch early KOL plays
-            # Free tier: 100 tweet reads/month with max_results=5 = ~5 calls/week
-
             twitter_score = 0
+            social_data = {}
             twitter_data = {}
 
-            if config.ENABLE_TWITTER and bonding_pct >= 40 and mid_total >= 25:
-                logger.info(f"   🐦 Checking Twitter (bonding: {bonding_pct}%, score: {mid_total})...")
-                twitter_data = await self._score_twitter_buzz(token_symbol, token_address)
-                twitter_score = twitter_data.get('score', 0)
-
-                if twitter_score > 0:
-                    logger.info(f"   🐦 Twitter: +{twitter_score} points")
-                    if twitter_data.get('has_buzz'):
-                        logger.info(f"      🔥 BUZZ: {twitter_data['mention_count']} mentions, {twitter_data['total_engagement']} engagement")
-                else:
-                    logger.info(f"   🐦 Twitter: No buzz detected")
-
-            mid_total += twitter_score
+            logger.info(f"   🌙 LunarCrush: DISABLED (no budget)")
+            logger.info(f"   🐦 Twitter: DISABLED (no budget)")
 
             # ================================================================
             # PHASE 3.7: SOCIAL CONFIRMATION (TELEGRAM CALLS) - FREE
@@ -375,9 +345,9 @@ class ConvictionEngine:
                     logger.error(f"   ❌ Error checking Telegram calls: {e}")
                     social_confirmation_score = 0
 
-            # Cap total social score (Twitter + Telegram) at 25 pts
+            # Cap total social score (Telegram only now) at 25 pts
             # This prevents over-scoring noisy hype
-            total_social = twitter_score + social_confirmation_score
+            total_social = social_confirmation_score  # Twitter removed
             if total_social > 25:
                 excess = total_social - 25
                 social_confirmation_score -= excess
