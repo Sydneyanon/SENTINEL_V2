@@ -392,7 +392,8 @@ async def lifespan(app: FastAPI):
     # Initialize conviction engine
     logger.info("🧠 Initializing conviction engine...")
     conviction_engine = ConvictionEngine(
-        smart_wallet_tracker=smart_wallet_tracker
+        smart_wallet_tracker=smart_wallet_tracker,
+        database=db  # Pass database for persistent telegram call tracking
         # narrative_detector is not needed - ConvictionEngine loads from config
     )
     logger.info("✅ Conviction engine initialized")
@@ -597,6 +598,17 @@ async def smart_wallet_webhook(request: Request):
     """
     try:
         data = await request.json()
+
+        # 🎬 SCENE 1: WEBHOOK ARRIVAL
+        print("\n" + "="*80)
+        print("🎬 SCENE 1: KOL ACTIVITY DETECTED - HELIUS WEBHOOK ARRIVAL")
+        print("="*80)
+        print("📡 A transaction just hit the Solana blockchain...")
+        print("🔍 Helius detected activity from one of our 36 elite KOL wallets")
+        print("⚡ Webhook delivered to PROMETHEUS in real-time")
+        print("📊 Analyzing transaction data to identify token purchases...")
+        print("="*80 + "\n")
+
         logger.info("📥 Received smart wallet webhook")
 
         # Process through smart wallet tracker (saves to DB)
@@ -606,10 +618,37 @@ async def smart_wallet_webhook(request: Request):
         token_addresses = extract_token_addresses_from_webhook(data)
 
         if token_addresses:
+            # 🎬 SCENE 2: TOKEN EXTRACTION
+            print("\n" + "="*80)
+            print("🎬 SCENE 2: TOKEN EXTRACTION - IDENTIFYING THE MEMECOIN")
+            print("="*80)
+            print(f"💰 KOL purchased {len(token_addresses)} token(s)")
+            print("🔬 Filtering out stablecoins, wrapped SOL, and established tokens...")
+            print(f"✅ Found {len(token_addresses)} memecoin purchase(s) to analyze")
+            for addr in token_addresses:
+                print(f"   📍 Token: {addr[:8]}...{addr[-6:]}")
+            print("🎯 Initiating real-time tracking system...")
+            print("="*80 + "\n")
+
             logger.info(f"🎯 KOL bought {len(token_addresses)} token(s) - starting tracking...")
 
             # Start tracking each token
-            for token_address in token_addresses:
+            for i, token_address in enumerate(token_addresses, 1):
+                # 🎬 SCENE 3: TRACKING INITIATION
+                print("\n" + "="*80)
+                print(f"🎬 SCENE 3: TRACKING INITIATION ({i}/{len(token_addresses)})")
+                print("="*80)
+                print(f"🎯 Target: {token_address[:8]}...{token_address[-6:]}")
+                print("📊 Launching ActiveTokenTracker...")
+                print("   ├─ Fetching token metadata from pump.fun...")
+                print("   ├─ Decoding bonding curve progress...")
+                print("   ├─ Checking if already graduated to Raydium...")
+                print("   ├─ Collecting initial price & liquidity data...")
+                print("   ├─ Identifying unique buyers from blockchain...")
+                print("   └─ Preparing real-time conviction scoring...")
+                print("⏱️  Polling interval: Every 5-30 seconds based on activity")
+                print("="*80 + "\n")
+
                 await active_tracker.start_tracking(token_address)
 
                 # Track unique buyers from this webhook
@@ -664,6 +703,53 @@ async def telegram_call_webhook(token: str, group: str = "unknown"):
         group_count = len(telegram_calls_cache[token]['groups'])
 
         logger.info(f"   📊 Total mentions: {mention_count} from {group_count} group(s)")
+
+        # ================================================================
+        # PERSISTENT CALL TRACKING - Store in database
+        # ================================================================
+        try:
+            await db.insert_telegram_call(
+                token_address=token,
+                group_name=group,
+                message_text=None,  # Could be passed if scraper provides it
+                timestamp=now
+            )
+            logger.debug(f"   💾 Stored call in database: {group} → {token[:8]}")
+        except Exception as db_err:
+            logger.error(f"   ⚠️  Failed to store call in database: {db_err}")
+
+        # ================================================================
+        # GROUP CORRELATION TRACKING
+        # ================================================================
+        # Track which groups call together for correlation analysis
+        if group_count >= 2:
+            try:
+                # Get all groups that called this token
+                all_groups = list(telegram_calls_cache[token]['groups'])
+                current_group_idx = all_groups.index(group)
+
+                # Compare with all other groups that called this token
+                for other_group in all_groups[:current_group_idx]:
+                    # Find the time difference between calls
+                    other_mentions = [
+                        m for m in telegram_calls_cache[token]['mentions']
+                        if m['group'] == other_group
+                    ]
+                    if other_mentions:
+                        time_diff = abs((now - other_mentions[-1]['timestamp']).total_seconds())
+
+                        # Store correlation (only if within 30 min)
+                        if time_diff <= 1800:  # 30 minutes
+                            await db.insert_group_correlation(
+                                group_a=group,
+                                group_b=other_group,
+                                token_address=token,
+                                time_diff_seconds=int(time_diff)
+                            )
+                            logger.debug(f"   🔗 Correlation: {group} + {other_group} ({time_diff:.0f}s apart)")
+
+            except Exception as corr_err:
+                logger.error(f"   ⚠️  Failed to track group correlation: {corr_err}")
 
         # Cleanup old entries (>4 hours)
         cutoff = now - timedelta(hours=4)

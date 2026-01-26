@@ -129,6 +129,11 @@ class Database:
 
             # OPT-000 PREREQUISITE: Add outcome tracking for data-driven optimizations
             try:
+                # Track signal source (kol_buy, telegram_call, whale_buy, etc.)
+                await conn.execute('''
+                    ALTER TABLE signals
+                    ADD COLUMN IF NOT EXISTS signal_source TEXT
+                ''')
                 await conn.execute('''
                     ALTER TABLE signals
                     ADD COLUMN IF NOT EXISTS outcome TEXT
@@ -241,6 +246,56 @@ class Database:
                 ON whale_token_purchases(whale_address)
             ''')
 
+            # Telegram calls table (persistent call tracking)
+            await conn.execute('''
+                CREATE TABLE IF NOT EXISTS telegram_calls (
+                    id SERIAL PRIMARY KEY,
+                    token_address TEXT NOT NULL,
+                    group_name TEXT NOT NULL,
+                    message_text TEXT,
+                    timestamp TIMESTAMP NOT NULL,
+                    detected_at TIMESTAMP DEFAULT NOW()
+                )
+            ''')
+
+            # Indexes for fast telegram call lookups
+            await conn.execute('''
+                CREATE INDEX IF NOT EXISTS idx_telegram_calls_token
+                ON telegram_calls(token_address)
+            ''')
+            await conn.execute('''
+                CREATE INDEX IF NOT EXISTS idx_telegram_calls_timestamp
+                ON telegram_calls(timestamp DESC)
+            ''')
+            await conn.execute('''
+                CREATE INDEX IF NOT EXISTS idx_telegram_calls_group
+                ON telegram_calls(group_name)
+            ''')
+
+            # Group correlations table (tracks which groups call together)
+            await conn.execute('''
+                CREATE TABLE IF NOT EXISTS group_correlations (
+                    id SERIAL PRIMARY KEY,
+                    group_a TEXT NOT NULL,
+                    group_b TEXT NOT NULL,
+                    token_address TEXT NOT NULL,
+                    time_diff_seconds INTEGER NOT NULL,
+                    correlation_date DATE NOT NULL,
+                    created_at TIMESTAMP DEFAULT NOW(),
+                    UNIQUE(group_a, group_b, token_address, correlation_date)
+                )
+            ''')
+
+            # Index for group correlation analysis
+            await conn.execute('''
+                CREATE INDEX IF NOT EXISTS idx_group_correlations_groups
+                ON group_correlations(group_a, group_b)
+            ''')
+            await conn.execute('''
+                CREATE INDEX IF NOT EXISTS idx_group_correlations_date
+                ON group_correlations(correlation_date DESC)
+            ''')
+
             logger.info("✅ Database tables created/verified")
     
     async def insert_signal(self, signal_data: Dict):
@@ -248,13 +303,14 @@ class Database:
         async with self.pool.acquire() as conn:
             await conn.execute('''
                 INSERT INTO signals
-                (token_address, token_name, token_symbol, signal_type, bonding_curve_pct,
+                (token_address, token_name, token_symbol, signal_type, signal_source, bonding_curve_pct,
                  conviction_score, entry_price, liquidity, volume_24h, market_cap,
                  buys_24h, sells_24h, buy_percentage, buy_sell_score)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
                 ON CONFLICT (token_address) DO UPDATE SET
                     conviction_score = EXCLUDED.conviction_score,
                     bonding_curve_pct = EXCLUDED.bonding_curve_pct,
+                    signal_source = EXCLUDED.signal_source,
                     buys_24h = EXCLUDED.buys_24h,
                     sells_24h = EXCLUDED.sells_24h,
                     buy_percentage = EXCLUDED.buy_percentage,
@@ -262,7 +318,8 @@ class Database:
                     updated_at = NOW()
             ''', signal_data['token_address'], signal_data.get('token_name'),
                 signal_data.get('token_symbol'), signal_data['signal_type'],
-                signal_data.get('bonding_curve_pct'), signal_data['conviction_score'],
+                signal_data.get('signal_source', 'unknown'), signal_data.get('bonding_curve_pct'),
+                signal_data['conviction_score'],
                 signal_data.get('entry_price'), signal_data.get('liquidity'),
                 signal_data.get('volume_24h'), signal_data.get('market_cap'),
                 signal_data.get('buys_24h'), signal_data.get('sells_24h'),
@@ -720,6 +777,235 @@ class Database:
                 WHERE win_rate >= $1
                 ORDER BY win_rate DESC, tokens_bought_count DESC
             """, min_win_rate)
+
+            return [dict(row) for row in rows]
+
+    # =========================================================================
+    # TELEGRAM CALLS METHODS (persistent call tracking)
+    # =========================================================================
+
+    async def insert_telegram_call(
+        self,
+        token_address: str,
+        group_name: str,
+        message_text: Optional[str],
+        timestamp: datetime
+    ):
+        """
+        Record a telegram call for persistent tracking
+
+        Args:
+            token_address: Token contract address
+            group_name: Name of the Telegram group
+            message_text: Optional message content
+            timestamp: When the call was made
+        """
+        async with self.pool.acquire() as conn:
+            await conn.execute("""
+                INSERT INTO telegram_calls (token_address, group_name, message_text, timestamp)
+                VALUES ($1, $2, $3, $4)
+            """, token_address, group_name, message_text, timestamp)
+
+    async def get_telegram_calls(
+        self,
+        token_address: str,
+        hours: int = 24
+    ) -> List[Dict]:
+        """
+        Get telegram calls for a token in the last N hours
+
+        Args:
+            token_address: Token contract address
+            hours: Number of hours to look back
+
+        Returns:
+            List of call records
+        """
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch("""
+                SELECT * FROM telegram_calls
+                WHERE token_address = $1
+                AND timestamp >= NOW() - INTERVAL '{} hours'
+                ORDER BY timestamp DESC
+            """.format(hours), token_address)
+            return [dict(row) for row in rows]
+
+    async def get_telegram_call_stats(
+        self,
+        token_address: str,
+        minutes: int = 30
+    ) -> Dict:
+        """
+        Get call statistics for multi-call bonus calculation
+
+        Args:
+            token_address: Token contract address
+            minutes: Time window in minutes
+
+        Returns:
+            Dict with call_count, group_count, first_call_time, latest_call_time
+        """
+        async with self.pool.acquire() as conn:
+            result = await conn.fetchrow("""
+                SELECT
+                    COUNT(*) as call_count,
+                    COUNT(DISTINCT group_name) as group_count,
+                    MIN(timestamp) as first_call_time,
+                    MAX(timestamp) as latest_call_time
+                FROM telegram_calls
+                WHERE token_address = $1
+                AND timestamp >= NOW() - INTERVAL '{} minutes'
+            """.format(minutes), token_address)
+
+            if result:
+                return dict(result)
+            return {
+                'call_count': 0,
+                'group_count': 0,
+                'first_call_time': None,
+                'latest_call_time': None
+            }
+
+    async def get_group_call_history(
+        self,
+        group_name: str,
+        days: int = 7
+    ) -> List[Dict]:
+        """
+        Get all calls from a specific group
+
+        Args:
+            group_name: Telegram group name
+            days: Number of days to look back
+
+        Returns:
+            List of calls from this group
+        """
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch("""
+                SELECT * FROM telegram_calls
+                WHERE group_name = $1
+                AND timestamp >= NOW() - INTERVAL '{} days'
+                ORDER BY timestamp DESC
+            """.format(days), group_name)
+            return [dict(row) for row in rows]
+
+    # =========================================================================
+    # GROUP CORRELATION METHODS (track which groups call together)
+    # =========================================================================
+
+    async def insert_group_correlation(
+        self,
+        group_a: str,
+        group_b: str,
+        token_address: str,
+        time_diff_seconds: int
+    ):
+        """
+        Record a correlation between two groups calling the same token
+
+        Args:
+            group_a: First group (alphabetically)
+            group_b: Second group (alphabetically)
+            token_address: Token they both called
+            time_diff_seconds: Time difference between calls
+        """
+        # Ensure consistent ordering (group_a < group_b alphabetically)
+        if group_a > group_b:
+            group_a, group_b = group_b, group_a
+
+        async with self.pool.acquire() as conn:
+            await conn.execute("""
+                INSERT INTO group_correlations
+                (group_a, group_b, token_address, time_diff_seconds, correlation_date)
+                VALUES ($1, $2, $3, $4, CURRENT_DATE)
+                ON CONFLICT (group_a, group_b, token_address, correlation_date)
+                DO UPDATE SET
+                    time_diff_seconds = LEAST(group_correlations.time_diff_seconds, $4)
+            """, group_a, group_b, token_address, time_diff_seconds)
+
+    async def get_group_correlation_score(
+        self,
+        group_a: str,
+        group_b: str,
+        days: int = 30
+    ) -> Dict:
+        """
+        Calculate correlation score between two groups
+
+        Args:
+            group_a: First group
+            group_b: Second group
+            days: Number of days to analyze
+
+        Returns:
+            Dict with correlation_count, avg_time_diff, correlation_strength
+        """
+        # Ensure consistent ordering
+        if group_a > group_b:
+            group_a, group_b = group_b, group_a
+
+        async with self.pool.acquire() as conn:
+            result = await conn.fetchrow("""
+                SELECT
+                    COUNT(*) as correlation_count,
+                    AVG(time_diff_seconds) as avg_time_diff,
+                    COUNT(DISTINCT token_address) as unique_tokens
+                FROM group_correlations
+                WHERE group_a = $1 AND group_b = $2
+                AND correlation_date >= CURRENT_DATE - INTERVAL '{} days'
+            """.format(days), group_a, group_b)
+
+            if result and result['correlation_count'] > 0:
+                # Calculate strength: more correlations + shorter time diff = stronger
+                correlation_count = result['correlation_count']
+                avg_time_diff = result['avg_time_diff'] or 0
+
+                # Strength score (0-100)
+                # More correlations = higher base score
+                # Faster time diff = multiplier bonus
+                base_score = min(correlation_count * 5, 70)  # Max 70 from count
+                time_bonus = max(0, 30 - (avg_time_diff / 60))  # Max 30 from speed
+
+                return {
+                    'correlation_count': correlation_count,
+                    'avg_time_diff': avg_time_diff,
+                    'unique_tokens': result['unique_tokens'],
+                    'correlation_strength': min(100, base_score + time_bonus)
+                }
+
+            return {
+                'correlation_count': 0,
+                'avg_time_diff': 0,
+                'unique_tokens': 0,
+                'correlation_strength': 0
+            }
+
+    async def get_top_group_pairs(self, days: int = 30, limit: int = 10) -> List[Dict]:
+        """
+        Get the top correlated group pairs
+
+        Args:
+            days: Number of days to analyze
+            limit: Max number of pairs to return
+
+        Returns:
+            List of top group pairs with correlation stats
+        """
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch("""
+                SELECT
+                    group_a,
+                    group_b,
+                    COUNT(*) as correlation_count,
+                    AVG(time_diff_seconds) as avg_time_diff,
+                    COUNT(DISTINCT token_address) as unique_tokens
+                FROM group_correlations
+                WHERE correlation_date >= CURRENT_DATE - INTERVAL '{} days'
+                GROUP BY group_a, group_b
+                ORDER BY correlation_count DESC, avg_time_diff ASC
+                LIMIT $1
+            """.format(days), limit)
 
             return [dict(row) for row in rows]
 
