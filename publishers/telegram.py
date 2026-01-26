@@ -241,6 +241,94 @@ class TelegramPublisher:
         
         return message
     
+    def _format_signal_compact(self, signal_data: Dict[str, Any]) -> str:
+        """Format signal as compact caption for video banner (max 1024 chars)"""
+        token_data = signal_data.get('token_data', {})
+        symbol = token_data.get('token_symbol', signal_data.get('symbol', 'UNKNOWN'))
+        token_address = token_data.get('token_address', signal_data.get('token_address', 'N/A'))
+        conviction = signal_data.get('score', signal_data.get('conviction_score', 0))
+        breakdown = signal_data.get('breakdown', {})
+
+        price = token_data.get('price_usd', signal_data.get('price', 0))
+        mcap = token_data.get('market_cap', signal_data.get('market_cap', 0))
+        liquidity = token_data.get('liquidity', signal_data.get('liquidity', 0))
+        bonding = token_data.get('bonding_curve_pct', 0)
+        is_post_grad = bonding >= 100
+
+        if is_post_grad:
+            holders = token_data.get('holder_count', signal_data.get('holders', 0))
+            holder_label = "holders"
+        else:
+            holders = token_data.get('unique_buyers', 0)
+            holder_label = "buyers"
+
+        fire_count = min(conviction // 20, 5)
+        fire_emojis = "\U0001f525" * fire_count
+
+        # Format mcap/liquidity as compact K/M
+        def fmt_k(v):
+            if v >= 1_000_000:
+                return f"${v/1_000_000:.1f}M"
+            elif v >= 1_000:
+                return f"${v/1_000:.1f}K"
+            return f"${v:.0f}"
+
+        msg = f"\U0001f525 <b>PROMETHEUS SIGNAL</b> {fire_emojis}\n\n"
+        msg += f"<b>${symbol}</b> | <b>Conviction: {conviction}/100</b>\n\n"
+        msg += f"\U0001f4b0 ${price:.8f} | \U0001f48e MCap {fmt_k(mcap)}\n"
+        msg += f"\U0001f4a7 Liq {fmt_k(liquidity)} | \U0001f465 {holders} {holder_label}\n"
+        msg += f"\U0001f4ca {bonding:.1f}% bonded"
+
+        age_minutes = 0
+        created_ts = token_data.get('created_timestamp')
+        if created_ts:
+            age_minutes = (datetime.utcnow().timestamp() - created_ts) / 60
+        if age_minutes > 0:
+            msg += f" | \u23f1\ufe0f {age_minutes:.0f}m old"
+        msg += "\n"
+
+        # Compact breakdown - only non-zero scores on one line
+        if breakdown:
+            parts = []
+            score_map = [
+                ('smart_wallet', '\U0001f451 Elite'), ('narrative', '\U0001f4c8 Narr'),
+                ('unique_buyers', '\U0001f465 Buy'), ('volume', '\U0001f4ca Vol'),
+                ('momentum', '\U0001f680 Mom'), ('telegram_calls', '\U0001f4f1 TG'),
+            ]
+            for key, label in score_map:
+                v = breakdown.get(key, 0)
+                if v > 0:
+                    parts.append(f"{label} +{v}")
+            if parts:
+                msg += f"\n<b>\U0001f4ca Scores:</b> {' | '.join(parts)}\n"
+
+        # Compact wallets - top 2
+        wallet_data = signal_data.get('smart_wallet_data', {})
+        wallets = wallet_data.get('wallets', [])
+        if wallets:
+            msg += f"\n<b>\U0001f451 Elite Traders:</b>\n"
+            for w in wallets[:2]:
+                name = w.get('name', 'KOL')
+                if not name or name == 'None':
+                    name = 'KOL'
+                tier = w.get('tier', '')
+                tier_map = {'god': 'GOD', 'elite': 'ELITE', 'top_kol': 'TOP KOL', 'whale': 'WHALE'}
+                tier_str = tier_map.get(tier, 'KOL')
+                wr = w.get('win_rate', 0)
+                line = f"<b>{name}</b> [{tier_str}]"
+                if wr > 0:
+                    line += f" {wr*100:.0f}% WR"
+                msg += f"{line}\n"
+
+        # Links
+        msg += f'\n<a href="https://dexscreener.com/solana/{token_address}">DexS</a>'
+        msg += f' | <a href="https://birdeye.so/token/{token_address}">Bird</a>'
+        msg += f' | <a href="https://pump.fun/{token_address}">Pump</a>\n'
+        msg += f"\n<code>{token_address}</code>\n"
+        msg += f"\n\u26a0\ufe0f DYOR | \U0001f525 The fire spreads."
+
+        return msg
+
     async def post_signal(self, signal_data: Dict[str, Any]) -> Optional[int]:
         """
         Post signal to Telegram channel with animated banner
@@ -298,26 +386,21 @@ class TelegramPublisher:
             try:
                 message = self._format_signal(signal_data)
 
-                # If we have a banner, send video first then reply with signal
+                # If we have a banner, send as single video message with compact caption
                 if self.banner_file_id:
                     try:
-                        banner_result = await self.bot.send_video(
+                        compact_caption = self._format_signal_compact(signal_data)
+                        result = await self.bot.send_video(
                             chat_id=self.channel_id,
                             video=self.banner_file_id,
+                            caption=compact_caption,
+                            parse_mode=ParseMode.HTML,
                             supports_streaming=True,
                             disable_notification=False
                         )
-                        # Reply to banner with full signal text
-                        result = await self.bot.send_message(
-                            chat_id=self.channel_id,
-                            text=message,
-                            parse_mode=ParseMode.HTML,
-                            disable_web_page_preview=False,
-                            reply_to_message_id=banner_result.message_id
-                        )
                     except TelegramError as e:
                         logger.warning(f"⚠️ Banner failed ({e}), sending text-only")
-                        # Fallback to text-only
+                        # Fallback to full text-only message
                         result = await self.bot.send_message(
                             chat_id=self.channel_id,
                             text=message,
@@ -325,7 +408,7 @@ class TelegramPublisher:
                             disable_web_page_preview=False
                         )
                 else:
-                    # Fallback to regular message if no banner
+                    # No banner - send full text message
                     result = await self.bot.send_message(
                         chat_id=self.channel_id,
                         text=message,
