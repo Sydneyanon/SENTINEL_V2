@@ -71,6 +71,7 @@ class TelegramMonitor:
         if not self.api_id or not self.api_hash:
             logger.warning("⚠️ TELEGRAM_API_ID and TELEGRAM_API_HASH not set - Telegram monitoring disabled")
             logger.info("   Get credentials at: https://my.telegram.org")
+            logger.info("   Run diagnostic: python check_session.py")
 
     async def initialize(self, monitored_groups: Dict[int, str]):
         """
@@ -89,6 +90,7 @@ class TelegramMonitor:
             logger.warning("⚠️ Telegram monitor not initialized (missing credentials)")
             logger.warning("   Set TELEGRAM_API_ID and TELEGRAM_API_HASH in Railway")
             logger.warning("   Get credentials at: https://my.telegram.org")
+            logger.warning("   Run diagnostic: python check_session.py")
             return False
 
         try:
@@ -124,6 +126,11 @@ class TelegramMonitor:
 
         except Exception as e:
             logger.error(f"❌ Failed to initialize Telegram monitor: {e}")
+            logger.error("   Common causes:")
+            logger.error("   1. Session file missing or invalid")
+            logger.error("   2. Wrong API credentials")
+            logger.error("   3. Network connectivity issues")
+            logger.error("   Run diagnostic: python check_session.py")
             import traceback
             logger.error(traceback.format_exc())
             return False
