@@ -298,15 +298,22 @@ class TelegramPublisher:
             try:
                 message = self._format_signal(signal_data)
 
-                # If we have a banner, send as animation with caption
+                # If we have a banner, send video first then reply with signal
                 if self.banner_file_id:
                     try:
-                        result = await self.bot.send_animation(
+                        banner_result = await self.bot.send_video(
                             chat_id=self.channel_id,
-                            animation=self.banner_file_id,
-                            caption=message,
-                            parse_mode=ParseMode.HTML,
+                            video=self.banner_file_id,
+                            supports_streaming=True,
                             disable_notification=False
+                        )
+                        # Reply to banner with full signal text
+                        result = await self.bot.send_message(
+                            chat_id=self.channel_id,
+                            text=message,
+                            parse_mode=ParseMode.HTML,
+                            disable_web_page_preview=False,
+                            reply_to_message_id=banner_result.message_id
                         )
                     except TelegramError as e:
                         logger.warning(f"⚠️ Banner failed ({e}), sending text-only")
