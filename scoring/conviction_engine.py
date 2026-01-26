@@ -37,12 +37,14 @@ class ConvictionEngine:
         smart_wallet_tracker,
         narrative_detector=None,
         helius_fetcher=None,
-        active_tracker=None
+        active_tracker=None,
+        pump_monitor=None
     ):
         self.smart_wallet_tracker = smart_wallet_tracker
         self.narrative_detector = narrative_detector
         self.helius_fetcher = helius_fetcher
         self.active_tracker = active_tracker
+        self.pump_monitor = pump_monitor
 
         # Initialize rug detector
         self.rug_detector = RugDetector(smart_wallet_tracker=smart_wallet_tracker)
@@ -150,8 +152,8 @@ class ConvictionEngine:
             # 8. Velocity Spike Bonus (0-10 points) - PRE-GRAD ONLY
             # Detects FOMO acceleration: >2x buyer count in 60s after 50% bonding
             velocity_spike_bonus = 0
-            if is_pre_grad and self.active_tracker:
-                velocity_spike = self.active_tracker.pump_monitor.get_velocity_spike(token_address)
+            if is_pre_grad and self.pump_monitor:
+                velocity_spike = self.pump_monitor.get_velocity_spike(token_address)
                 if velocity_spike:
                     velocity_spike_bonus = velocity_spike['bonus_points']
                     logger.info(f"   🚀 VELOCITY SPIKE: +{velocity_spike_bonus} pts (FOMO at {velocity_spike['spike_at_pct']}% bonding)")
