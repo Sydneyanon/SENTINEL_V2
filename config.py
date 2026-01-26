@@ -74,7 +74,7 @@ DISABLE_POLLING_BELOW_THRESHOLD = True  # Only poll tokens >= 50 conviction
 # - Enhanced volume/momentum/velocity scoring (more graduated, less binary)
 # - Enabled narratives for better early detection (+0-25 pts)
 # - Stricter rug penalties to reduce rug calls
-MIN_CONVICTION_SCORE = 45  # Raised from 35 - catch mid-cycle pumps, not just early
+MIN_CONVICTION_SCORE = 50  # Raised from 45 - cut low-conviction noise (45-49 signals were mostly losses)
 POST_GRAD_THRESHOLD = 75   # Raised from 40 - much stricter for graduated tokens
 
 # Base score threshold for distribution checks

@@ -389,8 +389,9 @@ class PerformanceTracker:
             # Sort by gain
             signal_performance.sort(key=lambda x: x['gain_pct'], reverse=True)
             
-            # Calculate win rate (anything >0% is a win)
-            winners = [s for s in signal_performance if s['gain_pct'] > 0]
+            # Calculate win rate (2x+ is a real win)
+            winners = [s for s in signal_performance if s['multiple'] >= 2.0]
+            flat = [s for s in signal_performance if 1.0 <= s['multiple'] < 2.0]
             win_rate = (len(winners) / len(signal_performance) * 100) if signal_performance else 0
             
             # Calculate average gain
@@ -406,8 +407,9 @@ class PerformanceTracker:
 
 📈 <b>Overview:</b>
 🔔 Total Signals: {total_signals}
-✅ Winners: {len(winners)}
-❌ Losers: {len(signal_performance) - len(winners)}
+✅ Winners (2x+): {len(winners)}
+🟡 Flat: {len(flat)}
+❌ Losers: {len(signal_performance) - len(winners) - len(flat)}
 📊 Win Rate: <b>{win_rate:.1f}%</b>
 💰 Avg Gain: <b>{avg_gain:+.1f}%</b>
 
@@ -459,17 +461,18 @@ class PerformanceTracker:
             
             signal_performance = []
             for signal in signals:
-                current_price = signal.get('current_price')
                 entry_price = signal.get('entry_price')
-                
-                if current_price and entry_price and entry_price > 0:
-                    gain_pct = ((current_price / entry_price) - 1) * 100
-                    signal_performance.append(gain_pct)
-            
-            winners = len([g for g in signal_performance if g > 0])
+                peak_price = signal.get('max_price_reached') or signal.get('current_price')
+
+                if peak_price and entry_price and entry_price > 0:
+                    multiple = peak_price / entry_price
+                    gain_pct = (multiple - 1) * 100
+                    signal_performance.append({'multiple': multiple, 'gain_pct': gain_pct})
+
+            winners = len([s for s in signal_performance if s['multiple'] >= 2.0])
             win_rate = (winners / len(signal_performance) * 100) if signal_performance else 0
-            avg_gain = sum(signal_performance) / len(signal_performance) if signal_performance else 0
-            
+            avg_gain = sum(s['gain_pct'] for s in signal_performance) / len(signal_performance) if signal_performance else 0
+
             return {
                 'total_signals': total,
                 'winners': winners,

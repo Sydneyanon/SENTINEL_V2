@@ -362,11 +362,13 @@ class Database:
             return dict(row) if row else None
     
     async def update_price(self, token_address: str, current_price: float):
-        """Update current price for a token"""
+        """Update current price and track peak price for a token"""
         async with self.pool.acquire() as conn:
             await conn.execute('''
-                UPDATE signals 
-                SET current_price = $1, updated_at = NOW()
+                UPDATE signals
+                SET current_price = $1,
+                    max_price_reached = GREATEST(COALESCE(max_price_reached, 0), $1),
+                    updated_at = NOW()
                 WHERE token_address = $2
             ''', current_price, token_address)
     
