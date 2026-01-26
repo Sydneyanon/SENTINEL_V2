@@ -32,7 +32,7 @@ from publishers.telegram import TelegramPublisher
 from active_token_tracker import ActiveTokenTracker
 from helius_fetcher import HeliusDataFetcher
 from wallet_enrichment import initialize_smart_wallets  # ← NEW: Auto-discover wallet metadata
-from startup_diagnostics import run_diagnostics  # ← Diagnostics for database & OPT-041
+from startup_diagnostics import run_diagnostics, check_telegram_session  # ← Diagnostics for database & OPT-041
 
 # NEW: Daily pipeline automation
 try:
@@ -517,27 +517,43 @@ async def lifespan(app: FastAPI):
     logger.info("")
     logger.info("The fire has been stolen. Let it spread. 🔥")
     logger.info("=" * 70)
-    
-    # Start Telegram monitor (if enabled)
+
+    # Check Telegram session status BEFORE attempting to start monitor
+    # This provides clear feedback about session availability
+    telegram_session_valid = False
+    if config.ENABLE_BUILTIN_TELEGRAM_MONITOR:
+        telegram_session_valid = await check_telegram_session()
+
+    # Start Telegram monitor (if enabled and session is valid)
     if config.ENABLE_BUILTIN_TELEGRAM_MONITOR:
         if config.TELEGRAM_GROUPS:
-            logger.info("📱 Initializing built-in Telegram monitor...")
-            try:
-                from telegram_monitor import TelegramMonitor
-                # OPT-052: Pass active_tracker so TG calls can trigger tracking immediately
-                telegram_monitor = TelegramMonitor(telegram_calls_cache, active_tracker=active_tracker)
+            if telegram_session_valid:
+                logger.info("\n📱 Initializing built-in Telegram monitor...")
+                try:
+                    from telegram_monitor import TelegramMonitor
+                    # OPT-052: Pass active_tracker so TG calls can trigger tracking immediately
+                    telegram_monitor = TelegramMonitor(telegram_calls_cache, active_tracker=active_tracker)
 
-                success = await telegram_monitor.initialize(config.TELEGRAM_GROUPS)
-                if success:
-                    # Start monitor in background
-                    asyncio.create_task(telegram_monitor.run())
-                    logger.info(f"✅ Telegram monitor started ({len(config.TELEGRAM_GROUPS)} groups)")
-                else:
-                    logger.warning("⚠️ Telegram monitor failed to initialize")
-            except Exception as e:
-                logger.error(f"❌ Failed to start Telegram monitor: {e}")
+                    success = await telegram_monitor.initialize(config.TELEGRAM_GROUPS)
+                    if success:
+                        # Start monitor in background
+                        asyncio.create_task(telegram_monitor.run())
+                        logger.info(f"✅ Telegram monitor started ({len(config.TELEGRAM_GROUPS)} groups)")
+                    else:
+                        logger.warning("\n⚠️ Telegram monitor failed to initialize")
+                        logger.warning("   Check the session diagnostics above for details")
+                        logger.warning("   Run: python check_session.py for detailed diagnosis")
+                except Exception as e:
+                    logger.error(f"\n❌ Failed to start Telegram monitor: {e}")
+                    logger.error("   Check logs above for session diagnostics")
+                    import traceback
+                    logger.error(traceback.format_exc())
+            else:
+                logger.warning("\n⚠️ Telegram monitor NOT started - session invalid or missing")
+                logger.warning("   See session diagnostics above for fix instructions")
+                logger.warning("   Run: python check_session.py for detailed diagnosis")
         else:
-            logger.warning("⚠️ ENABLE_BUILTIN_TELEGRAM_MONITOR=True but no TELEGRAM_GROUPS configured")
+            logger.warning("\n⚠️ ENABLE_BUILTIN_TELEGRAM_MONITOR=True but no TELEGRAM_GROUPS configured")
             logger.info("   Run: python telegram_monitor.py to generate group list")
 
     # Start automated historical data collector (weekly)
