@@ -67,16 +67,15 @@ DISABLE_POLLING_BELOW_THRESHOLD = True  # Only poll tokens >= 50 conviction
 # =============================================================================
 
 # Signal thresholds based on graduation status
-# REVERTED OPT-024: 75 was TOO HIGH - bot posted 1 signal in 12 hours (2100+ KOL buys tracked!)
-# Analysis: Only 2 signals in 24h with conviction scores hitting exactly 75 and 45
-# OPT-001 (2026-01-24 23:45 UTC): Raising 55 → 60 based on database analysis:
-#   - Current WR: 32.8% (19/58) - FAR below 75% target
-#   - Signals <50 conviction: 30.8% WR (16/52)
-#   - Signals 50-59: 50.0% WR (3/6) - BETTER quality at higher thresholds
-#   - Testing 60 to improve win rate while maintaining signal volume
-# Kept strict data quality filters (OPT-023, OPT-036) to prevent rugs
-MIN_CONVICTION_SCORE = 50  # Lowered to collect more data + test buy/sell ratio scoring
-POST_GRAD_THRESHOLD = 50   # Post-graduation threshold - Slightly higher for graduated tokens
+# UPDATE 2026-01-26 (GROK RECOMMENDATIONS):
+# - Removed Twitter (0-15 pts) and LunarCrush (0-20 pts) due to budget constraints
+# - Raised pre-grad threshold from 35 to 45 (catch mid-cycle pumps like SHRIMP)
+# - Raised post-grad threshold to 75 (safer phase, avoid tops)
+# - Enhanced volume/momentum/velocity scoring (more graduated, less binary)
+# - Enabled narratives for better early detection (+0-25 pts)
+# - Stricter rug penalties to reduce rug calls
+MIN_CONVICTION_SCORE = 45  # Raised from 35 - catch mid-cycle pumps, not just early
+POST_GRAD_THRESHOLD = 75   # Raised from 40 - much stricter for graduated tokens
 
 # Base score threshold for distribution checks
 # Only check distribution if base score >= this value
@@ -140,16 +139,18 @@ HOLDER_FETCH_GATES = {
     'always_fetch_post_grad': True  # Always check holders post-graduation
 }
 
-# Volume Velocity (0-10 points)
+# Volume Velocity (0-10 points) - GROK ENHANCED: More graduated
 VOLUME_WEIGHTS = {
     'spiking': 10,          # Volume 2x+ expected rate
-    'growing': 5            # Volume 1.25x+ expected rate
+    'growing': 7,           # Volume 1.25x+ expected rate (raised from 5)
+    'steady': 3             # Volume >1x expected rate (new tier)
 }
 
-# Price Momentum (0-10 points)
+# Price Momentum (0-10 points) - GROK ENHANCED: More graduated
 MOMENTUM_WEIGHTS = {
     'very_strong': 10,      # +50% in 5 minutes
-    'strong': 5             # +20% in 5 minutes
+    'strong': 7,            # +30% in 5 minutes (raised from 5)
+    'moderate': 3           # +10% in 5 minutes (new tier)
 }
 
 # Distribution Scoring (0-15 points)
@@ -170,24 +171,7 @@ HOLDER_WEIGHTS = {
     'low': 5                # 20-49 holders
 }
 
-# Social Sentiment Scoring (LunarCrush - 0-20 points)
-LUNARCRUSH_WEIGHTS = {
-    'trending_top20': 10,   # Trending in top 20
-    'trending_top50': 7,    # Trending in top 50
-    'trending_top100': 3,   # Trending in top 100
-    'sentiment_high': 5,    # Sentiment >= 4.0
-    'sentiment_medium': 3,  # Sentiment >= 3.5
-    'volume_spike': 5,      # Social volume +100%
-    'volume_growth': 3      # Social volume +50%
-}
-
-# Twitter Buzz Scoring (Free Tier - 0-15 points)
-TWITTER_WEIGHTS = {
-    'high_buzz': 15,        # 5+ mentions, 10+ avg engagement
-    'medium_buzz': 10,      # 3+ mentions
-    'low_buzz': 5,          # 1+ mentions
-    'viral_tweet': 12       # Single tweet with 100+ likes (minimum)
-}
+# Twitter and LunarCrush scoring removed (no budget) - see lines 418-419
 
 # Telegram Social Confirmation Scoring (FREE - 0-15 points)
 # Only applies to tokens already tracked by KOLs (social confirmation)
@@ -271,6 +255,12 @@ RUG_DETECTION = {
             'enabled': True,
             'per_kol': 10,           # +10 pts per KOL in top 10
             'penalty_reduction': 5    # Reduce penalty by 5 per KOL
+        },
+        'improvement_bonus': {
+            'enabled': True,         # GROK: Reward improving distribution
+            'bonus_points': 5,       # +5 pts if top 10 decreases
+            'min_polls': 2,          # Need at least 2 polls to compare
+            'min_improvement': 5     # Min 5% improvement to qualify
         }
     },
     
@@ -279,12 +269,12 @@ RUG_DETECTION = {
     'post_grad_forgive_bundles': True  # Forgive early bundles if distribution improved
 }
 
-# Anti-Rug Detection: Dev Sell Penalties (Future enhancement)
+# Anti-Rug Detection: Dev Sell Penalties (GROK ENHANCED)
 DEV_SELL_DETECTION = {
-    'enabled': False,  # Not implemented yet
-    'penalty_points': -25,
-    'dev_sell_threshold': 0.20,
-    'early_window_minutes': 30
+    'enabled': True,   # GROK: Enabled for stricter rug detection
+    'penalty_points': -20,  # GROK: -20 pts if dev sells >20%
+    'dev_sell_threshold': 0.20,  # 20% dev sell threshold
+    'early_window_minutes': 30  # Only apply in first 30 minutes
 }
 
 # Score Decay: Reduce conviction if metrics drop
@@ -292,6 +282,43 @@ SCORE_DECAY = {
     'enabled': True,
     'drop_threshold': 15,
     'block_signal': True
+}
+
+# =============================================================================
+# TIMING & EXIT RULES (GROK RECOMMENDATIONS)
+# =============================================================================
+
+TIMING_RULES = {
+    'early_trigger': {
+        'enabled': True,              # Enable early trigger at 30% bonding
+        'bonding_threshold': 30,      # Trigger at 30% bonding (from 40%)
+        'min_unique_buyers': 200,     # Only if 200+ unique buyers
+        'min_conviction_boost': 0     # No extra conviction needed (already at threshold)
+    },
+
+    'mcap_cap': {
+        'enabled': True,              # Cap signals at high MCAP (avoid tops)
+        'max_mcap_pre_grad': 25000,   # Skip if MCAP >$25K on pre-grad call
+        'max_mcap_post_grad': 50000,  # Skip if MCAP >$50K on post-grad call
+        'log_skipped': True           # Log skipped signals for analysis
+    },
+
+    'post_call_monitoring': {
+        'enabled': True,              # Monitor price after signal
+        'exit_alert_threshold': -15,  # Alert if price drops -15% in 5min
+        'monitoring_duration': 300,   # Monitor for 5 minutes (300 seconds)
+        'check_interval': 30,         # Check every 30 seconds
+        'send_telegram_alert': True   # Send exit alert to Telegram
+    }
+}
+
+# Signal Quality Logging (for analysis & backtesting)
+SIGNAL_LOGGING = {
+    'log_why_no_signal': True,        # Log detailed breakdown when threshold missed
+    'log_score_components': True,     # Log all scoring components
+    'min_gap_to_log': 5,              # Only log if within 5 pts of threshold
+    'save_to_database': True,         # Save missed signals to DB for analysis
+    'include_recommendations': True   # Include what would push it over threshold
 }
 
 # =============================================================================
@@ -414,11 +441,11 @@ LOG_FILE = "prometheus.log"
 # FEATURE FLAGS
 # =============================================================================
 
-ENABLE_NARRATIVES = False   # Narrative detection (disabled - narratives are static)
+ENABLE_NARRATIVES = True    # GROK: Enabled for early detection (+0-25 pts)
 ENABLE_PERFORMANCE_TRACKING = True
 ENABLE_MILESTONE_ALERTS = True
-ENABLE_LUNARCRUSH = False   # LunarCrush disabled (use Twitter only)
-ENABLE_TWITTER = True       # Twitter buzz detection (free tier - ENABLED)
+ENABLE_LUNARCRUSH = False   # LunarCrush disabled (no budget for API)
+ENABLE_TWITTER = False      # Twitter disabled (no budget for API)
 ENABLE_TELEGRAM_SCRAPER = True  # Telegram social confirmation - ENABLED!
 ENABLE_BUILTIN_TELEGRAM_MONITOR = True  # Built-in Telegram monitor - ENABLED!
 

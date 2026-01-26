@@ -1,197 +1,100 @@
-# PR Title
-ML Training Enhancement: Database Diagnostics, Threshold Tuning & Moralis Historical Collector
+# Pull Request: Implement Grok Recommendations - Enhanced Scoring, Timing Rules & Monitoring
 
-# PR Description
+## 🎯 Overview
 
-## Summary
+Implements all Grok recommendations to improve signal quality and reduce rug calls:
+- **Phase 1:** Enhanced scoring system with graduated volume/momentum/velocity
+- **Phase 2:** Timing/exit rules with early triggers, MCAP caps, and post-call monitoring
 
-Major enhancements to ML training pipeline with database diagnostics, threshold optimizations, buy/sell ratio fixes, and a comprehensive Moralis-powered historical data collector.
+## 📊 Expected Impact
 
-### Key Changes
+**Call Volume & Quality:**
+- Target: 5-10 calls/day (from too many low-quality)
+- Timing: 10-15K MCAP sweet spot (mid-cycle pumps)
+- Rug reduction: "most" → ~30% (Grok estimate)
 
-#### 1. 🔍 **Database Diagnostics & ML Readiness Check**
-- Created `startup_diagnostics.py` - automatic Railway-compatible diagnostics
-- Runs on bot startup, outputs to Railway logs
-- Checks:
-  - Total signals posted (Found: 100)
-  - Signals with outcomes (Found: 59)
-  - ML readiness status (READY!)
-  - OPT-041 credit optimization verification
-- **Result**: System confirmed ready for ML training with 100 signals, 59 labeled outcomes
-
-#### 2. 📊 **Threshold Adjustments**
-- **Conviction threshold**: 60 → 50 points
-  - Reason: Only 1/100 signals reaching old threshold
-  - Impact: 60-80% more signals for faster ML data collection
-- **Liquidity threshold**: $20K → $8K
-  - Reason: 40-60% bonding curve tokens = $8K-$18K liquidity
-  - Impact: Catches tokens at optimal entry point (before graduation)
-
-#### 3. ✅ **Buy/Sell Ratio - Fixed & Enhanced**
-
-**Problem**: All tokens showing 8/20 (neutral default)
-
-**Fix**:
-- Added `buys_24h`/`sells_24h` extraction from DexScreener API
-- Implemented percentage-based scoring: `(buys / (buys + sells)) * 100`
-- New thresholds:
-  - >80% buys → 16-20 points (Very Bullish)
-  - 70-80% → 12-16 points (Bullish)
-  - 50-70% → 8-12 points (Neutral)
-  - 30-50% → 4-8 points (Bearish)
-  - <30% → 0-4 points (Very Bearish)
-- Volume-weighted when available
-- Ignores if <20 transactions
-- All data tracked in database for ML training
-
-**Files changed**:
-- `scoring/conviction_engine.py` - Complete buy/sell ratio rewrite
-- `helius_fetcher.py` - Added buys/sells extraction (lines 757-762)
-- `database.py` - Schema updates (4 new columns)
-- `active_token_tracker.py` - Save buy/sell metrics
-
-#### 4. 🗂️ **Project Reorganization**
-- Moved files from `ralph/` to proper directories:
-  - `ralph/moralis_historical_collector.py` → `tools/historical_data_collector.py`
-  - `ralph/known_runner_tokens.json` → `data/known_runner_tokens.json`
-  - `ralph/MORALIS_SETUP_GUIDE.md` → `docs/MORALIS_SETUP.md`
-- Ralph directory now only contains Ralph-specific code
-
-#### 5. 🚀 **Moralis Historical Data Collector** (Complete Rewrite)
-
-**What it does**:
-- Uses Moralis to find pump.fun bonding curve tokens that graduated to $1M-$100M MCaps
-- Extracts whale wallets using dual strategy:
-  1. **Current top holders** (who holds now)
-  2. **Early buyers** from transfer history (who bought in first 100 transfers)
-- Tracks whale win rates across successful tokens
-- Identifies most successful whales for whale-copy strategy
-
-**Early Whale Intelligence** (NEW!):
-- Identifies whales who bought within first 100 transfers
-- Marked with `"early_buyer": true` flag
-- Highly predictive because:
-  - Early whales have conviction before the crowd
-  - Not chasing pumps (lower risk entry)
-  - ML can learn: "If wallet X bought early → 85% success rate"
-  - Enables real-time whale-copy strategy
-
-**Outputs**:
-- `data/historical_training_data.json` - 150 tokens with full metrics
-- `data/successful_whale_wallets.json` - Whales with 50%+ win rates
-
-**Cost**: ~1,510 CU for 150 tokens (3.8% of 40K daily free tier) = **FREE!**
-
-**ML Impact**:
-- Before: 59 labeled examples
-- After: 209+ labeled examples (59 + 150 historical)
-- Increase: 254% more training data!
+**Examples:**
+- ✅ Catch SHRIMP-like mid-cycle pumps (early trigger at 30% bonding)
+- 🚫 Avoid late entries at tops (MCAP cap at $25K)
+- 🚨 Protect users with exit alerts (-15% in 5min)
 
 ---
 
-## Files Changed
+## 🔧 Phase 1: Enhanced Scoring System
 
-### Core System
-- `config.py` - Threshold adjustments
-- `scoring/conviction_engine.py` - Buy/sell ratio rewrite
-- `helius_fetcher.py` - Buy/sell data extraction
-- `database.py` - Schema updates for buy/sell tracking
-- `active_token_tracker.py` - Save buy/sell metrics to DB
-- `main.py` - Run diagnostics at startup
-- `startup_diagnostics.py` (NEW) - Railway-compatible diagnostics
+### 1. Threshold Adjustments
+- **Pre-grad:** 35 → **45** (catch mid-cycle, not just early)
+- **Post-grad:** 40 → **75** (much stricter, avoid tops)
 
-### Historical Collector
-- `tools/historical_data_collector.py` (REWRITE) - Moralis integration + whale extraction
-- `data/known_runner_tokens.json` (MOVED) - Curated successful tokens
-- `docs/MORALIS_SETUP.md` (MOVED) - Moralis setup guide
-- `docs/HISTORICAL_COLLECTOR_GUIDE.md` (NEW) - Complete usage guide
+### 2. Volume/Momentum/Velocity Enhancements
+**More graduated scoring (less binary):**
 
-### Documentation
-- `ralph/SESSION_SUMMARY.md` - Updated with all changes
-- `docs/HISTORICAL_COLLECTOR_GUIDE.md` - Comprehensive usage guide with whale intelligence
+**Volume:**
+- Spiking (2x+): 10 pts
+- Growing (1.25x+): 7 pts ⬆️ (was 5)
+- Steady (1x+): 3 pts ✨ NEW
 
----
+**Momentum:**
+- Very strong (50%+): 10 pts
+- Strong (30%+): 7 pts ⬆️ (was 5, threshold raised from 20%)
+- Moderate (10%+): 3 pts ✨ NEW
 
-## How to Use (After Merge)
+**Velocity:**
+- 30+: 10 pts ⬆️ (was 8)
+- 20+: 8 pts ⬆️ (was 6)
+- 10+: 5 pts ⬆️ (was 4)
+- 5+: 3 pts ⬆️ (was 2)
+- 2+: 1 pt ✨ NEW
 
-### 1. Verify Diagnostics
-Check Railway logs for startup diagnostics output confirming ML readiness.
+### 3. Enabled Narratives
+- \`ENABLE_NARRATIVES = True\` (was False)
+- Adds 0-25 points for hot narratives (AI Agent, DeSci, RWA, etc.)
+- Helps catch early trend plays
 
-### 2. Run Historical Collector
-```bash
-# Get Moralis API key (free): https://admin.moralis.io
-# Add to Railway: MORALIS_API_KEY
+### 4. Stricter Rug Penalties
+- **RugCheck extra penalty:** -10 if score >3/10
+- **Dev sell detection:** Enabled (-20 if >20% sell)
+- **Concentration improvement bonus:** +5 if top 10 decreases
 
-# SSH into Railway
-railway shell
-
-# Run collector (10-15 minutes)
-python tools/historical_data_collector.py --count 150
-```
-
-### 3. Train ML Model
-```bash
-python ralph/ml_pipeline.py --train
-```
-
-ML will train on 209+ examples instead of just 59!
+### 5. Removed Twitter/LunarCrush
+- Cleaned up unused weight dictionaries
+- Already disabled, now fully removed from config
 
 ---
 
-## Expected Results
+## ⚡ Phase 2: Timing & Exit Rules
 
-### Immediate:
-- ✅ 60-80% more signals posted (lower conviction threshold)
-- ✅ Better entry points (lower liquidity threshold catches 40-60% bonding)
-- ✅ Accurate buy/sell ratio scoring (no more 8/20 for everything)
-- ✅ All buy/sell data tracked for ML
+### 1. Early Trigger System
+**Catch mid-cycle pumps at 30% bonding**
 
-### After Historical Collection:
-- ✅ 150 historical tokens with proven outcomes
-- ✅ 47+ successful whales identified (50%+ win rate)
-- ✅ Early whale intelligence for whale-copy strategy
-- ✅ 254% more ML training data
+### 2. MCAP Cap System
+**Prevent late entries at tops**
 
-### ML Improvements:
-- Baseline: ~60% accuracy (current)
-- Expected: 70-80% accuracy (with historical data)
-- Impact: 10-20% better signal quality
+### 3. Post-Call Monitoring
+**Automatic price monitoring with exit alerts**
+
+### 4. "Why No Signal" Logging
+**Detailed breakdown for ML training**
 
 ---
 
-## Testing Checklist
+## 📁 Files Changed
 
-- [ ] Merge PR to main
-- [ ] Wait 2-3 min for Railway deploy
-- [ ] Check Railway logs for diagnostics output
-- [ ] Verify signals now posting with real buy/sell ratios (not all 8/20)
-- [ ] Get Moralis API key
-- [ ] Add MORALIS_API_KEY to Railway
-- [ ] Run historical collector
-- [ ] Verify output files created
-- [ ] Train ML model
-- [ ] Deploy and monitor improved predictions
+### New Files
+- \`post_call_monitor.py\` - AsyncIO-based price monitoring system
+- \`docs/GROK_RECOMMENDATIONS_20260126.md\` - Phase 1 documentation
+- \`docs/TIMING_EXIT_RULES_20260126.md\` - Phase 2 documentation
+
+### Modified Files
+- \`config.py\` - All threshold, weight, and feature config updates
+- \`scoring/conviction_engine.py\` - Enhanced scoring logic + timing rules
 
 ---
 
-## Cost Analysis
+## 📋 Commits Included
 
-All changes use free tiers:
-- DexScreener: FREE (unlimited)
-- Moralis: 1,510 CU / 40,000 daily = 3.8% usage = **FREE**
-- Total: **$0**
+1. \`c04eb6e\` - feat: Implement Grok recommendations - enhanced scoring & stricter thresholds
+2. \`9c3fa47\` - feat: Add timing/exit rules and data monitoring (Grok Phase 2)
 
----
-
-## Credits
-
-This session implemented:
-- Database diagnostics for Railway-only workflow
-- Threshold tuning based on real data (100 signals, 59 outcomes)
-- Buy/sell ratio fix (was broken, showing 8/20 for all tokens)
-- Project file reorganization (out of ralph/ directory)
-- Moralis integration for pump.fun discovery
-- Early whale extraction for predictive intelligence
-- Comprehensive documentation
-
-**Impact**: System now collects better signals AND has 254% more ML training data!
+**Branch:** \`claude/check-sessions-clarity-6CaJr\`
+**Base:** \`main\`

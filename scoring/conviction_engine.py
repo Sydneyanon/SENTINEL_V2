@@ -7,8 +7,9 @@ from datetime import datetime, timedelta
 from loguru import logger
 import config
 from rug_detector import RugDetector
-from lunarcrush_fetcher import get_lunarcrush_fetcher
-from twitter_fetcher import get_twitter_fetcher
+# Removed - no budget for these APIs
+# from lunarcrush_fetcher import get_lunarcrush_fetcher
+# from twitter_fetcher import get_twitter_fetcher
 from credit_tracker import get_credit_tracker  # OPT-055: Track credit usage
 from rugcheck_api import get_rugcheck_api  # RugCheck.xyz API integration
 from ralph.integrate_ml import get_ml_predictor  # ML predictions for conviction scoring
@@ -25,11 +26,13 @@ class ConvictionEngine:
     - Unique Buyers: 0-15 points
     - Volume Velocity: 0-10 points
     - Price Momentum: 0-10 points
-    - LunarCrush Social: 0-20 points (if enabled)
-    - Twitter Buzz: 0-15 points (if enabled)
+    - Telegram Calls: 0-20 points
     - Bundle Penalty: -5 to -40 points (with overrides)
     - Holder Concentration: -15 to -40 points (with KOL bonus)
-    Total: 0-145+ points (can exceed with bonuses)
+    - ML Prediction: -30 to +20 points
+    Total: 0-130+ points (can exceed with bonuses)
+
+    NOTE: LunarCrush and Twitter scoring removed (no budget)
     """
     
     def __init__(
@@ -51,11 +54,9 @@ class ConvictionEngine:
         # Initialize rug detector
         self.rug_detector = RugDetector(smart_wallet_tracker=smart_wallet_tracker)
 
-        # Initialize LunarCrush fetcher
-        self.lunarcrush = get_lunarcrush_fetcher()
-
-        # Initialize Twitter fetcher
-        self.twitter = get_twitter_fetcher()
+        # LunarCrush and Twitter removed (no budget)
+        # self.lunarcrush = get_lunarcrush_fetcher()
+        # self.twitter = get_twitter_fetcher()
 
         # OPT-055: Initialize credit tracker
         self.credit_tracker = get_credit_tracker()
@@ -105,7 +106,6 @@ class ConvictionEngine:
             print("   ├─ 👥 Unique Buyers (0-15 pts)")
             print("   ├─ 🚀 Price Momentum (0-10 pts)")
             print("   ├─ 📊 Volume Velocity (0-10 pts)")
-            print("   ├─ 🐦 Twitter Buzz (0-15 pts)")
             print("   ├─ 📱 Telegram Calls (0-20 pts)")
             print("   └─ 🚨 Rug Detection Penalties (-40 to 0)")
             print()
@@ -253,48 +253,18 @@ class ConvictionEngine:
                 }
 
             # ================================================================
-            # PHASE 3.5: SOCIAL SENTIMENT (LUNARCRUSH) - FREE
+            # PHASE 3.5: SOCIAL SENTIMENT - REMOVED (No budget)
             # ================================================================
+            # LunarCrush and Twitter scoring removed to save API costs
+            # All social scoring now comes from Telegram calls only
 
             social_score = 0
-            social_data = {}
-
-            if config.ENABLE_LUNARCRUSH:
-                social_data = await self._score_social_sentiment(token_symbol)
-                social_score = social_data.get('score', 0)
-
-                if social_score > 0:
-                    logger.info(f"   🌙 LunarCrush: +{social_score} points")
-                    if social_data.get('is_trending'):
-                        logger.info(f"      📈 TRENDING in top {social_data['trending_rank']}")
-                    if social_data.get('sentiment', 0) > 3.5:
-                        logger.info(f"      😊 Bullish sentiment: {social_data['sentiment']}/5")
-
-            mid_total += social_score
-
-            # ================================================================
-            # PHASE 3.6: TWITTER BUZZ (FREE TIER) - FREE
-            # ================================================================
-            # SELECTIVE: Check when token is at 40%+ bonding AND 25+ conviction
-            # LOWERED: Was 60%/70, now 40%/25 to catch early KOL plays
-            # Free tier: 100 tweet reads/month with max_results=5 = ~5 calls/week
-
             twitter_score = 0
+            social_data = {}
             twitter_data = {}
 
-            if config.ENABLE_TWITTER and bonding_pct >= 40 and mid_total >= 25:
-                logger.info(f"   🐦 Checking Twitter (bonding: {bonding_pct}%, score: {mid_total})...")
-                twitter_data = await self._score_twitter_buzz(token_symbol, token_address)
-                twitter_score = twitter_data.get('score', 0)
-
-                if twitter_score > 0:
-                    logger.info(f"   🐦 Twitter: +{twitter_score} points")
-                    if twitter_data.get('has_buzz'):
-                        logger.info(f"      🔥 BUZZ: {twitter_data['mention_count']} mentions, {twitter_data['total_engagement']} engagement")
-                else:
-                    logger.info(f"   🐦 Twitter: No buzz detected")
-
-            mid_total += twitter_score
+            logger.info(f"   🌙 LunarCrush: DISABLED (no budget)")
+            logger.info(f"   🐦 Twitter: DISABLED (no budget)")
 
             # ================================================================
             # PHASE 3.7: SOCIAL CONFIRMATION (TELEGRAM CALLS) - FREE
@@ -375,9 +345,9 @@ class ConvictionEngine:
                     logger.error(f"   ❌ Error checking Telegram calls: {e}")
                     social_confirmation_score = 0
 
-            # Cap total social score (Twitter + Telegram) at 25 pts
+            # Cap total social score (Telegram only now) at 25 pts
             # This prevents over-scoring noisy hype
-            total_social = twitter_score + social_confirmation_score
+            total_social = social_confirmation_score  # Twitter removed
             if total_social > 25:
                 excess = total_social - 25
                 social_confirmation_score -= excess
@@ -651,6 +621,12 @@ class ConvictionEngine:
                         # Very safe: no penalty (score 0-2)
                         logger.info(f"   ✅ RugCheck: SAFE (score: {score_norm}/10)")
 
+                    # GROK: Additional penalty if score > 3/10 (catch medium+ risk tokens)
+                    if score_norm is not None and score_norm > 3:
+                        extra_penalty = -10
+                        rugcheck_penalty += extra_penalty
+                        logger.warning(f"   🚨 GROK PENALTY: score > 3/10 → {extra_penalty} pts (total: {rugcheck_penalty})")
+
                     # Log specific risk flags
                     if rugcheck_result.get('mutable_metadata'):
                         logger.info(f"      ℹ️  Mutable metadata (common for new tokens)")
@@ -805,14 +781,114 @@ class ConvictionEngine:
 
             # Determine threshold
             threshold = config.MIN_CONVICTION_SCORE if is_pre_grad else config.POST_GRAD_THRESHOLD
-            
-            passed = final_score >= threshold
-            
+
+            # GROK: Early trigger at 30% bonding if 200+ unique buyers
+            early_trigger_applied = False
+            if (is_pre_grad and
+                config.TIMING_RULES['early_trigger']['enabled'] and
+                bonding_pct >= config.TIMING_RULES['early_trigger']['bonding_threshold'] and
+                unique_buyers >= config.TIMING_RULES['early_trigger']['min_unique_buyers']):
+                # Allow signal even if slightly below threshold (good fundamentals)
+                early_trigger_threshold = threshold - 5  # 5 point grace period
+                if final_score >= early_trigger_threshold:
+                    early_trigger_applied = True
+                    logger.info(f"   ⚡ EARLY TRIGGER: {bonding_pct:.0f}% bonding, {unique_buyers} buyers (threshold relaxed to {early_trigger_threshold})")
+
+            # Check if passed threshold (with early trigger consideration)
+            passed = final_score >= threshold or early_trigger_applied
+
+            # GROK: MCAP cap - skip if too high (avoid tops)
+            mcap = token_data.get('market_cap', 0)
+            mcap_cap_triggered = False
+            if passed and config.TIMING_RULES['mcap_cap']['enabled']:
+                max_mcap = (config.TIMING_RULES['mcap_cap']['max_mcap_pre_grad'] if is_pre_grad
+                           else config.TIMING_RULES['mcap_cap']['max_mcap_post_grad'])
+                if mcap > max_mcap:
+                    passed = False
+                    mcap_cap_triggered = True
+                    if config.TIMING_RULES['mcap_cap']['log_skipped']:
+                        logger.warning(f"   🚫 MCAP CAP: ${mcap:.0f} > ${max_mcap} (too late, skipping signal)")
+
             logger.info("=" * 60)
             logger.info(f"   🎯 FINAL CONVICTION: {final_score}/100")
             logger.info(f"   📊 Threshold: {threshold} ({'PRE-GRAD' if is_pre_grad else 'POST-GRAD'})")
+            if early_trigger_applied:
+                logger.info(f"   ⚡ Early trigger activated!")
+            if mcap_cap_triggered:
+                logger.info(f"   🚫 MCAP cap triggered - signal blocked")
             logger.info(f"   {'✅ SIGNAL!' if passed else '⏭️  Skip'}")
             logger.info("=" * 60)
+
+            # GROK: Log "Why no signal" breakdown if close to threshold
+            if not passed and config.SIGNAL_LOGGING.get('log_why_no_signal', True):
+                gap_to_threshold = threshold - final_score
+                min_gap = config.SIGNAL_LOGGING.get('min_gap_to_log', 5)
+
+                # Log if within X points of threshold or if MCAP cap triggered
+                if gap_to_threshold <= min_gap or mcap_cap_triggered:
+                    logger.warning("\n" + "!" * 60)
+                    logger.warning("   ⚠️  WHY NO SIGNAL - Breakdown:")
+                    logger.warning(f"   📉 Gap to threshold: {gap_to_threshold:.1f} points")
+
+                    if mcap_cap_triggered:
+                        logger.warning(f"   🚫 MCAP too high: ${mcap:.0f} > ${max_mcap}")
+
+                    # Show weakest scoring components
+                    breakdown_items = [
+                        ('Smart Wallet', base_scores['smart_wallet'], 40),
+                        ('Narrative', base_scores['narrative'], 25),
+                        ('Volume', base_scores['volume'], 10),
+                        ('Momentum', base_scores['momentum'], 10),
+                        ('Buy/Sell Ratio', base_scores.get('buy_sell_ratio', 0), 20),
+                        ('Unique Buyers', unique_buyers_score, 15),
+                        ('Telegram Calls', social_confirmation_score, 15),
+                        ('Velocity', base_scores.get('volume_liquidity_velocity', 0), 10),
+                    ]
+
+                    # Sort by potential gains (max points - actual points)
+                    potential_gains = [(name, max_pts - actual, actual, max_pts)
+                                      for name, actual, max_pts in breakdown_items]
+                    potential_gains.sort(key=lambda x: x[1], reverse=True)
+
+                    logger.warning("   📊 Top opportunities for improvement:")
+                    for i, (name, gain, actual, max_pts) in enumerate(potential_gains[:3]):
+                        if gain > 0:
+                            logger.warning(f"      {i+1}. {name}: {actual}/{max_pts} pts (potential +{gain})")
+
+                    # Show penalties applied
+                    penalties = []
+                    if rugcheck_penalty < 0:
+                        penalties.append(f"RugCheck: {rugcheck_penalty}")
+                    if bundle_result['penalty'] < 0:
+                        penalties.append(f"Bundle: {bundle_result['penalty']}")
+                    if holder_result['penalty'] < 0:
+                        penalties.append(f"Holder: {holder_result['penalty']}")
+                    if base_scores.get('mcap_penalty', 0) < 0:
+                        penalties.append(f"MCAP: {base_scores.get('mcap_penalty', 0)}")
+
+                    if penalties:
+                        logger.warning(f"   ⚠️  Penalties applied: {', '.join(penalties)}")
+
+                    # Recommendations
+                    if config.SIGNAL_LOGGING.get('include_recommendations', True):
+                        recommendations = []
+                        if base_scores['smart_wallet'] < 20:
+                            recommendations.append("Wait for KOL buys")
+                        if base_scores['narrative'] == 0 and config.ENABLE_NARRATIVES:
+                            recommendations.append("No hot narrative match")
+                        if unique_buyers_score < 10:
+                            recommendations.append(f"Need more buyers ({unique_buyers} currently)")
+                        if rugcheck_penalty < -15:
+                            recommendations.append("High rug risk - avoid")
+                        if mcap_cap_triggered:
+                            recommendations.append("Entered too late (MCAP too high)")
+
+                        if recommendations:
+                            logger.warning("   💡 Recommendations:")
+                            for rec in recommendations[:3]:
+                                logger.warning(f"      • {rec}")
+
+                    logger.warning("!" * 60 + "\n")
 
             # Debug: Log token metadata being returned
             logger.info(f"   🏷️  Token metadata: {token_data.get('token_symbol')} / {token_data.get('token_name')}")
@@ -822,6 +898,8 @@ class ConvictionEngine:
                 'passed': passed,
                 'threshold': threshold,
                 'is_pre_grad': is_pre_grad,
+                'early_trigger_applied': early_trigger_applied,  # GROK: Early trigger flag
+                'mcap_cap_triggered': mcap_cap_triggered,        # GROK: MCAP cap flag
                 'token_address': token_address,  # FIXED: Include token address for links
                 'token_data': token_data,  # FIXED: Include full token data
                 'breakdown': {
@@ -870,26 +948,29 @@ class ConvictionEngine:
             }
     
     def _score_volume_velocity(self, token_data: Dict) -> int:
-        """Score based on volume velocity (0-10 points)"""
+        """Score based on volume velocity (0-10 points) - GROK ENHANCED: More graduated"""
         volume_24h = token_data.get('volume_24h', 0)
         mcap = token_data.get('market_cap', 1)
-        
+
         if mcap == 0:
             return 0
-        
+
         volume_to_mcap = volume_24h / mcap if mcap > 0 else 0
-        
-        # High volume relative to mcap = strong activity
+
+        # High volume relative to mcap = strong activity (more graduated scoring)
         if volume_to_mcap > 2.0:  # 200%+ daily volume
-            return config.VOLUME_WEIGHTS['spiking']
+            return config.VOLUME_WEIGHTS['spiking']  # 10 pts
         elif volume_to_mcap > 1.25:  # 125%+ daily volume
-            return config.VOLUME_WEIGHTS['growing']
+            return config.VOLUME_WEIGHTS['growing']  # 7 pts
+        elif volume_to_mcap > 1.0:  # 100%+ daily volume (steady)
+            return config.VOLUME_WEIGHTS.get('steady', 3)  # 3 pts
         else:
             return 0
     
     def _score_price_momentum(self, token_data: Dict) -> int:
         """
         Score based on price momentum (0-10 points base + multi-timeframe bonus)
+        GROK ENHANCED: More graduated scoring (3/7/10 instead of 0/5/10)
 
         - Pre-grad: Uses 5m price change (0-10 pts)
         - Post-grad: Uses 5m price change + multi-timeframe bonus (1h/6h/24h, +5 pts each)
@@ -897,13 +978,15 @@ class ConvictionEngine:
         bonding_pct = token_data.get('bonding_curve_pct', 0)
         is_pre_grad = bonding_pct < 100
 
-        # Base score from 5m price change
+        # Base score from 5m price change (more graduated)
         price_change_5m = token_data.get('price_change_5m', 0)
 
         if price_change_5m >= 50:  # +50% in 5 min
-            base_score = config.MOMENTUM_WEIGHTS['very_strong']
-        elif price_change_5m >= 20:  # +20% in 5 min
-            base_score = config.MOMENTUM_WEIGHTS['strong']
+            base_score = config.MOMENTUM_WEIGHTS['very_strong']  # 10 pts
+        elif price_change_5m >= 30:  # +30% in 5 min
+            base_score = config.MOMENTUM_WEIGHTS['strong']  # 7 pts
+        elif price_change_5m >= 10:  # +10% in 5 min (moderate)
+            base_score = config.MOMENTUM_WEIGHTS.get('moderate', 3)  # 3 pts
         else:
             base_score = 0
 
@@ -1129,7 +1212,8 @@ class ConvictionEngine:
 
     def _score_volume_liquidity_velocity(self, token_data: Dict) -> int:
         """
-        Score based on volume/liquidity velocity (0-8 points)
+        Score based on volume/liquidity velocity (0-10 points)
+        GROK ENHANCED: More graduated scoring for moderate flows
         OPT-044: High velocity indicates hot trading activity
 
         Pattern from 36 runners:
@@ -1149,15 +1233,17 @@ class ConvictionEngine:
         # Calculate velocity ratio
         velocity_ratio = volume_24h / max(liquidity, 1000)
 
-        # Scoring logic
+        # Scoring logic (more graduated)
         if velocity_ratio > 30:  # Extremely hot trading
-            return 8
-        elif velocity_ratio > 20:  # Very hot trading activity
-            return 6
+            return 10  # Raised from 8
+        elif velocity_ratio > 20:  # Very hot trading activity (GROK: >20% flow)
+            return 8  # Raised from 6
         elif velocity_ratio > 10:  # Good momentum
-            return 4
+            return 5  # Raised from 4
         elif velocity_ratio > 5:  # Moderate activity
-            return 2
+            return 3  # Raised from 2
+        elif velocity_ratio > 2:  # Light activity
+            return 1  # New tier
         elif velocity_ratio < 1:  # Low activity (red flag)
             return -3
         else:
