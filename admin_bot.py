@@ -339,6 +339,7 @@ class AdminBot:
                 response += "\n"
 
             wins = 0
+            flat = 0
             losses = 0
 
             # Show limited signals with gains
@@ -360,36 +361,42 @@ class AdminBot:
                 except:
                     age_str = "?"
 
-                # Get highest milestone reached (the REAL win)
-                peak_milestone = await self.database.get_highest_milestone(token_address) if token_address else None
+                # Get peak from max_price_reached (tracked every price check),
+                # fall back to milestone table for older signals
+                peak_price = signal.get('max_price_reached')
+                if peak_price and entry and entry > 0:
+                    peak_multiple = peak_price / entry
+                else:
+                    peak_multiple = await self.database.get_highest_milestone(token_address) if token_address else None
 
                 # Fetch current price
                 current_price = await self._get_current_price(token_address) if token_address else None
 
                 if entry and entry > 0:
                     # Determine win/loss based on PEAK, not current
-                    if peak_milestone and peak_milestone >= 1.5:
-                        # Hit at least 1.5x - it's a WIN
+                    # WIN = hit at least 2.0x (a real pump)
+                    if peak_multiple and peak_multiple >= 2.0:
                         emoji = "🟢"
                         wins += 1
-                        peak_str = f"{peak_milestone:.1f}x"
-                    elif peak_milestone and peak_milestone >= 1.0:
-                        # Small profit
+                        peak_str = f"{peak_multiple:.1f}x"
+                    elif peak_multiple and peak_multiple >= 1.1:
+                        # Marginal gain (1.1x-1.99x) - NOT a win
                         emoji = "🟡"
-                        wins += 1
-                        peak_pct = (peak_milestone - 1) * 100
+                        flat += 1
+                        peak_pct = (peak_multiple - 1) * 100
                         peak_str = f"+{peak_pct:.0f}%"
                     else:
-                        # Never hit profit or rugged
+                        # Never pumped or rugged
                         emoji = "🔴"
                         losses += 1
-                        if peak_milestone:
-                            peak_pct = (peak_milestone - 1) * 100
-                            peak_str = f"{peak_pct:.0f}%"
+                        if peak_multiple and peak_multiple > 0:
+                            peak_pct = (peak_multiple - 1) * 100
+                            peak_str = f"{peak_pct:+.0f}%"
                         else:
-                            peak_str = "0x"
+                            peak_str = "no data"
 
                     # Show Entry → Peak → Current
+                    peak_display = f"{peak_multiple:.1f}x" if peak_multiple else "?"
                     if current_price:
                         current_mult = current_price / entry
                         if current_mult >= 2.0:
@@ -400,13 +407,13 @@ class AdminBot:
 
                         response += f"{emoji} <b>${symbol}</b> Peak: {peak_str}\n"
                         response += f"   Entry: ${entry:.8f}\n"
-                        response += f"   Peak: {peak_milestone}x | Now: {current_str}\n"
+                        response += f"   Peak: {peak_display} | Now: {current_str}\n"
                         response += f"   Score: {score}/100 | {age_str} ago\n\n"
                     else:
                         # Dead token
                         response += f"{emoji} <b>${symbol}</b> Peak: {peak_str}\n"
                         response += f"   Entry: ${entry:.8f}\n"
-                        response += f"   Peak: {peak_milestone}x | Now: DEAD\n"
+                        response += f"   Peak: {peak_display} | Now: DEAD\n"
                         response += f"   Score: {score}/100 | {age_str} ago\n\n"
                 else:
                     # Can't calculate
@@ -415,11 +422,11 @@ class AdminBot:
                     losses += 1
 
             # Add summary (based on displayed signals only)
-            total = wins + losses
+            total = wins + flat + losses
             if total > 0:
                 win_rate = (wins / total) * 100
-                response += f"📊 <b>Win Rate: {win_rate:.0f}%</b> ({wins}W / {losses}L)\n"
-                response += f"<i>Based on {MAX_DISPLAY} most recent signals shown above</i>"
+                response += f"📊 <b>Win Rate: {win_rate:.0f}%</b> ({wins}W / {flat}F / {losses}L)\n"
+                response += f"<i>W=2x+ | F=flat | L=loss — {total} signals shown</i>"
 
             await self._send_response(update, context, response)
 
