@@ -272,15 +272,18 @@ class PerformanceTracker:
             ''', new_type, token_address)
     
     def _get_milestone_banner(self, milestone: float) -> str:
-        """Get the right video banner file_id for this milestone tier"""
-        if milestone >= 1000:
+        """Get the right video banner file_id for this milestone tier.
+        Falls back to main signal banner if tier-specific not set."""
+        if milestone >= 1000 and config.MILESTONE_BANNER_1000X:
             return config.MILESTONE_BANNER_1000X  # INFERNO
-        elif milestone >= 100:
+        elif milestone >= 100 and config.MILESTONE_BANNER_100X:
             return config.MILESTONE_BANNER_100X   # HELL FIRE
-        elif milestone >= 10:
+        elif milestone >= 10 and config.MILESTONE_BANNER_10X:
             return config.MILESTONE_BANNER_10X    # SCORCHED EARTH
-        else:
+        elif config.MILESTONE_BANNER_2X:
             return config.MILESTONE_BANNER_2X     # LET IT BURN
+        # Fall back to main signal banner
+        return config.TELEGRAM_BANNER_FILE_ID
 
     async def _post_milestone_update(self, signal: Dict, milestone: float, current_price: float, multiple: float, signal_type: str):
         """Post milestone update to Telegram with tier-based video banner"""
