@@ -44,9 +44,9 @@ class TelegramPublisher:
             logger.info(f"✅ Telegram bot initialized: @{me.username}")
             
             if self.banner_file_id:
-                logger.info("🎨 Animated banner enabled")
+                logger.info(f"🎨 Video banner enabled (file_id: {self.banner_file_id[:20]}...)")
             else:
-                logger.info("ℹ️ No banner configured - signals will be text-only")
+                logger.info(f"⚠️ No banner configured - signals will be text-only (raw value: {repr(config.TELEGRAM_BANNER_FILE_ID)})")
             
             return True
         except Exception as e:
@@ -384,6 +384,7 @@ class TelegramPublisher:
                 # If we have a banner, send as video message with compact caption
                 if self.banner_file_id:
                     try:
+                        logger.info(f"🎬 Sending video banner for ${symbol}...")
                         result = await self.bot.send_video(
                             chat_id=self.channel_id,
                             video=self.banner_file_id,

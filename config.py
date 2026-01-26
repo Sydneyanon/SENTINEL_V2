@@ -17,7 +17,7 @@ DATABASE_URL = os.getenv('DATABASE_URL')
 # Telegram Bot (PROMETHEUS)
 TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 TELEGRAM_CHANNEL_ID = os.getenv('TELEGRAM_CHANNEL_ID')  # Should be like: -1001234567890
-TELEGRAM_BANNER_FILE_ID = os.getenv('TELEGRAM_BANNER_FILE_ID', 'BAACAgUAAxkBAAEaX7ppd5NErIfPltGUXK9d1izb_B4CWwACJR0AAkpyuFdb23bR8TPhUjgE')  # Animated MP4 for signal announcements
+TELEGRAM_BANNER_FILE_ID = os.getenv('TELEGRAM_BANNER_FILE_ID') or 'BAACAgUAAxkBAAEaX7ppd5NErIfPltGUXK9d1izb_B4CWwACJR0AAkpyuFdb23bR8TPhUjgE'  # Animated MP4 for signal announcements
 ADMIN_TELEGRAM_USER_ID = int(os.getenv('ADMIN_TELEGRAM_USER_ID', 0)) if os.getenv('ADMIN_TELEGRAM_USER_ID') else None  # Your Telegram user ID for admin commands
 ADMIN_CHANNEL_ID = os.getenv('ADMIN_CHANNEL_ID')  # Optional: Admin channel for command responses (if not set, bot replies in DM)
 ENABLE_TELEGRAM = True  # Enable Telegram posting
@@ -290,9 +290,9 @@ SCORE_DECAY = {
 
 TIMING_RULES = {
     'early_trigger': {
-        'enabled': True,              # Enable early trigger at 30% bonding
-        'bonding_threshold': 30,      # Trigger at 30% bonding (from 40%)
-        'min_unique_buyers': 200,     # Only if 200+ unique buyers
+        'enabled': True,              # Enable early trigger at 45% bonding
+        'bonding_threshold': 45,      # Raised from 30% - too many rugs at 30% bonding
+        'min_unique_buyers': 300,     # Raised from 200 - need more organic demand proof
         'min_conviction_boost': 0     # No extra conviction needed (already at threshold)
     },
 
