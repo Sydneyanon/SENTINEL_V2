@@ -781,14 +781,114 @@ class ConvictionEngine:
 
             # Determine threshold
             threshold = config.MIN_CONVICTION_SCORE if is_pre_grad else config.POST_GRAD_THRESHOLD
-            
-            passed = final_score >= threshold
-            
+
+            # GROK: Early trigger at 30% bonding if 200+ unique buyers
+            early_trigger_applied = False
+            if (is_pre_grad and
+                config.TIMING_RULES['early_trigger']['enabled'] and
+                bonding_pct >= config.TIMING_RULES['early_trigger']['bonding_threshold'] and
+                unique_buyers >= config.TIMING_RULES['early_trigger']['min_unique_buyers']):
+                # Allow signal even if slightly below threshold (good fundamentals)
+                early_trigger_threshold = threshold - 5  # 5 point grace period
+                if final_score >= early_trigger_threshold:
+                    early_trigger_applied = True
+                    logger.info(f"   ⚡ EARLY TRIGGER: {bonding_pct:.0f}% bonding, {unique_buyers} buyers (threshold relaxed to {early_trigger_threshold})")
+
+            # Check if passed threshold (with early trigger consideration)
+            passed = final_score >= threshold or early_trigger_applied
+
+            # GROK: MCAP cap - skip if too high (avoid tops)
+            mcap = token_data.get('market_cap', 0)
+            mcap_cap_triggered = False
+            if passed and config.TIMING_RULES['mcap_cap']['enabled']:
+                max_mcap = (config.TIMING_RULES['mcap_cap']['max_mcap_pre_grad'] if is_pre_grad
+                           else config.TIMING_RULES['mcap_cap']['max_mcap_post_grad'])
+                if mcap > max_mcap:
+                    passed = False
+                    mcap_cap_triggered = True
+                    if config.TIMING_RULES['mcap_cap']['log_skipped']:
+                        logger.warning(f"   🚫 MCAP CAP: ${mcap:.0f} > ${max_mcap} (too late, skipping signal)")
+
             logger.info("=" * 60)
             logger.info(f"   🎯 FINAL CONVICTION: {final_score}/100")
             logger.info(f"   📊 Threshold: {threshold} ({'PRE-GRAD' if is_pre_grad else 'POST-GRAD'})")
+            if early_trigger_applied:
+                logger.info(f"   ⚡ Early trigger activated!")
+            if mcap_cap_triggered:
+                logger.info(f"   🚫 MCAP cap triggered - signal blocked")
             logger.info(f"   {'✅ SIGNAL!' if passed else '⏭️  Skip'}")
             logger.info("=" * 60)
+
+            # GROK: Log "Why no signal" breakdown if close to threshold
+            if not passed and config.SIGNAL_LOGGING.get('log_why_no_signal', True):
+                gap_to_threshold = threshold - final_score
+                min_gap = config.SIGNAL_LOGGING.get('min_gap_to_log', 5)
+
+                # Log if within X points of threshold or if MCAP cap triggered
+                if gap_to_threshold <= min_gap or mcap_cap_triggered:
+                    logger.warning("\n" + "!" * 60)
+                    logger.warning("   ⚠️  WHY NO SIGNAL - Breakdown:")
+                    logger.warning(f"   📉 Gap to threshold: {gap_to_threshold:.1f} points")
+
+                    if mcap_cap_triggered:
+                        logger.warning(f"   🚫 MCAP too high: ${mcap:.0f} > ${max_mcap}")
+
+                    # Show weakest scoring components
+                    breakdown_items = [
+                        ('Smart Wallet', base_scores['smart_wallet'], 40),
+                        ('Narrative', base_scores['narrative'], 25),
+                        ('Volume', base_scores['volume'], 10),
+                        ('Momentum', base_scores['momentum'], 10),
+                        ('Buy/Sell Ratio', base_scores.get('buy_sell_ratio', 0), 20),
+                        ('Unique Buyers', unique_buyers_score, 15),
+                        ('Telegram Calls', social_confirmation_score, 15),
+                        ('Velocity', base_scores.get('volume_liquidity_velocity', 0), 10),
+                    ]
+
+                    # Sort by potential gains (max points - actual points)
+                    potential_gains = [(name, max_pts - actual, actual, max_pts)
+                                      for name, actual, max_pts in breakdown_items]
+                    potential_gains.sort(key=lambda x: x[1], reverse=True)
+
+                    logger.warning("   📊 Top opportunities for improvement:")
+                    for i, (name, gain, actual, max_pts) in enumerate(potential_gains[:3]):
+                        if gain > 0:
+                            logger.warning(f"      {i+1}. {name}: {actual}/{max_pts} pts (potential +{gain})")
+
+                    # Show penalties applied
+                    penalties = []
+                    if rugcheck_penalty < 0:
+                        penalties.append(f"RugCheck: {rugcheck_penalty}")
+                    if bundle_result['penalty'] < 0:
+                        penalties.append(f"Bundle: {bundle_result['penalty']}")
+                    if holder_result['penalty'] < 0:
+                        penalties.append(f"Holder: {holder_result['penalty']}")
+                    if base_scores.get('mcap_penalty', 0) < 0:
+                        penalties.append(f"MCAP: {base_scores.get('mcap_penalty', 0)}")
+
+                    if penalties:
+                        logger.warning(f"   ⚠️  Penalties applied: {', '.join(penalties)}")
+
+                    # Recommendations
+                    if config.SIGNAL_LOGGING.get('include_recommendations', True):
+                        recommendations = []
+                        if base_scores['smart_wallet'] < 20:
+                            recommendations.append("Wait for KOL buys")
+                        if base_scores['narrative'] == 0 and config.ENABLE_NARRATIVES:
+                            recommendations.append("No hot narrative match")
+                        if unique_buyers_score < 10:
+                            recommendations.append(f"Need more buyers ({unique_buyers} currently)")
+                        if rugcheck_penalty < -15:
+                            recommendations.append("High rug risk - avoid")
+                        if mcap_cap_triggered:
+                            recommendations.append("Entered too late (MCAP too high)")
+
+                        if recommendations:
+                            logger.warning("   💡 Recommendations:")
+                            for rec in recommendations[:3]:
+                                logger.warning(f"      • {rec}")
+
+                    logger.warning("!" * 60 + "\n")
 
             # Debug: Log token metadata being returned
             logger.info(f"   🏷️  Token metadata: {token_data.get('token_symbol')} / {token_data.get('token_name')}")
@@ -798,6 +898,8 @@ class ConvictionEngine:
                 'passed': passed,
                 'threshold': threshold,
                 'is_pre_grad': is_pre_grad,
+                'early_trigger_applied': early_trigger_applied,  # GROK: Early trigger flag
+                'mcap_cap_triggered': mcap_cap_triggered,        # GROK: MCAP cap flag
                 'token_address': token_address,  # FIXED: Include token address for links
                 'token_data': token_data,  # FIXED: Include full token data
                 'breakdown': {

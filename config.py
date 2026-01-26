@@ -285,6 +285,43 @@ SCORE_DECAY = {
 }
 
 # =============================================================================
+# TIMING & EXIT RULES (GROK RECOMMENDATIONS)
+# =============================================================================
+
+TIMING_RULES = {
+    'early_trigger': {
+        'enabled': True,              # Enable early trigger at 30% bonding
+        'bonding_threshold': 30,      # Trigger at 30% bonding (from 40%)
+        'min_unique_buyers': 200,     # Only if 200+ unique buyers
+        'min_conviction_boost': 0     # No extra conviction needed (already at threshold)
+    },
+
+    'mcap_cap': {
+        'enabled': True,              # Cap signals at high MCAP (avoid tops)
+        'max_mcap_pre_grad': 25000,   # Skip if MCAP >$25K on pre-grad call
+        'max_mcap_post_grad': 50000,  # Skip if MCAP >$50K on post-grad call
+        'log_skipped': True           # Log skipped signals for analysis
+    },
+
+    'post_call_monitoring': {
+        'enabled': True,              # Monitor price after signal
+        'exit_alert_threshold': -15,  # Alert if price drops -15% in 5min
+        'monitoring_duration': 300,   # Monitor for 5 minutes (300 seconds)
+        'check_interval': 30,         # Check every 30 seconds
+        'send_telegram_alert': True   # Send exit alert to Telegram
+    }
+}
+
+# Signal Quality Logging (for analysis & backtesting)
+SIGNAL_LOGGING = {
+    'log_why_no_signal': True,        # Log detailed breakdown when threshold missed
+    'log_score_components': True,     # Log all scoring components
+    'min_gap_to_log': 5,              # Only log if within 5 pts of threshold
+    'save_to_database': True,         # Save missed signals to DB for analysis
+    'include_recommendations': True   # Include what would push it over threshold
+}
+
+# =============================================================================
 # SMART WALLET TRACKING (ELITE KOLs)
 # =============================================================================
 
