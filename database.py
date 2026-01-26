@@ -129,6 +129,11 @@ class Database:
 
             # OPT-000 PREREQUISITE: Add outcome tracking for data-driven optimizations
             try:
+                # Track signal source (kol_buy, telegram_call, whale_buy, etc.)
+                await conn.execute('''
+                    ALTER TABLE signals
+                    ADD COLUMN IF NOT EXISTS signal_source TEXT
+                ''')
                 await conn.execute('''
                     ALTER TABLE signals
                     ADD COLUMN IF NOT EXISTS outcome TEXT
@@ -298,13 +303,14 @@ class Database:
         async with self.pool.acquire() as conn:
             await conn.execute('''
                 INSERT INTO signals
-                (token_address, token_name, token_symbol, signal_type, bonding_curve_pct,
+                (token_address, token_name, token_symbol, signal_type, signal_source, bonding_curve_pct,
                  conviction_score, entry_price, liquidity, volume_24h, market_cap,
                  buys_24h, sells_24h, buy_percentage, buy_sell_score)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
                 ON CONFLICT (token_address) DO UPDATE SET
                     conviction_score = EXCLUDED.conviction_score,
                     bonding_curve_pct = EXCLUDED.bonding_curve_pct,
+                    signal_source = EXCLUDED.signal_source,
                     buys_24h = EXCLUDED.buys_24h,
                     sells_24h = EXCLUDED.sells_24h,
                     buy_percentage = EXCLUDED.buy_percentage,
@@ -312,7 +318,8 @@ class Database:
                     updated_at = NOW()
             ''', signal_data['token_address'], signal_data.get('token_name'),
                 signal_data.get('token_symbol'), signal_data['signal_type'],
-                signal_data.get('bonding_curve_pct'), signal_data['conviction_score'],
+                signal_data.get('signal_source', 'unknown'), signal_data.get('bonding_curve_pct'),
+                signal_data['conviction_score'],
                 signal_data.get('entry_price'), signal_data.get('liquidity'),
                 signal_data.get('volume_24h'), signal_data.get('market_cap'),
                 signal_data.get('buys_24h'), signal_data.get('sells_24h'),

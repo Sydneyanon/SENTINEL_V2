@@ -672,6 +672,7 @@ class ActiveTokenTracker:
                     'token_name': state.token_data.get('token_name'),
                     'token_symbol': symbol,
                     'signal_type': 'KOL_TRIGGERED',
+                    'signal_source': state.source,  # Track whether from kol_buy or telegram_call
                     'bonding_curve_pct': state.token_data.get('bonding_curve_pct', 0),
                     'conviction_score': score,
                     'entry_price': state.token_data.get('price_usd', 0),
