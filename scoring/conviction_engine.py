@@ -86,7 +86,30 @@ class ConvictionEngine:
             token_name = token_data.get('token_name', token_symbol)
             bonding_pct = token_data.get('bonding_curve_pct', 0)
             is_pre_grad = bonding_pct < 100
-            
+
+            # 🎬 SCENE 4: CONVICTION SCORING ENGINE
+            print("\n" + "="*80)
+            print("🎬 SCENE 4: CONVICTION SCORING - THE BRAIN OF PROMETHEUS")
+            print("="*80)
+            print(f"🧠 Analyzing: ${token_symbol} ({token_name})")
+            print(f"📍 Address: {token_address[:8]}...{token_address[-6:]}")
+            print(f"📊 Status: {'🌱 PRE-GRADUATION (pump.fun)' if is_pre_grad else '🎓 POST-GRADUATION (Raydium)'}")
+            print(f"⚡ Bonding Curve: {bonding_pct:.1f}%")
+            print()
+            print("🎯 MULTI-FACTOR SCORING SYSTEM (0-100+ scale):")
+            print("   ├─ 👑 Elite KOL Activity (0-40 pts)")
+            print("   ├─ 🎯 Narrative Match (0-25 pts)")
+            print("   ├─ 💹 Buy/Sell Ratio (0-20 pts)")
+            print("   ├─ 👥 Unique Buyers (0-15 pts)")
+            print("   ├─ 🚀 Price Momentum (0-10 pts)")
+            print("   ├─ 📊 Volume Velocity (0-10 pts)")
+            print("   ├─ 🐦 Twitter Buzz (0-15 pts)")
+            print("   ├─ 📱 Telegram Calls (0-20 pts)")
+            print("   └─ 🚨 Rug Detection Penalties (-40 to 0)")
+            print()
+            print("⏳ Calculating real-time conviction score...")
+            print("="*80 + "\n")
+
             logger.info(f"🔍 Analyzing ${token_symbol} ({token_address[:8]}...) - {'PRE-GRAD' if is_pre_grad else 'POST-GRAD'}")
             
             # ================================================================

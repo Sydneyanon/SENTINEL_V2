@@ -597,6 +597,17 @@ async def smart_wallet_webhook(request: Request):
     """
     try:
         data = await request.json()
+
+        # 🎬 SCENE 1: WEBHOOK ARRIVAL
+        print("\n" + "="*80)
+        print("🎬 SCENE 1: KOL ACTIVITY DETECTED - HELIUS WEBHOOK ARRIVAL")
+        print("="*80)
+        print("📡 A transaction just hit the Solana blockchain...")
+        print("🔍 Helius detected activity from one of our 36 elite KOL wallets")
+        print("⚡ Webhook delivered to PROMETHEUS in real-time")
+        print("📊 Analyzing transaction data to identify token purchases...")
+        print("="*80 + "\n")
+
         logger.info("📥 Received smart wallet webhook")
 
         # Process through smart wallet tracker (saves to DB)
@@ -606,10 +617,37 @@ async def smart_wallet_webhook(request: Request):
         token_addresses = extract_token_addresses_from_webhook(data)
 
         if token_addresses:
+            # 🎬 SCENE 2: TOKEN EXTRACTION
+            print("\n" + "="*80)
+            print("🎬 SCENE 2: TOKEN EXTRACTION - IDENTIFYING THE MEMECOIN")
+            print("="*80)
+            print(f"💰 KOL purchased {len(token_addresses)} token(s)")
+            print("🔬 Filtering out stablecoins, wrapped SOL, and established tokens...")
+            print(f"✅ Found {len(token_addresses)} memecoin purchase(s) to analyze")
+            for addr in token_addresses:
+                print(f"   📍 Token: {addr[:8]}...{addr[-6:]}")
+            print("🎯 Initiating real-time tracking system...")
+            print("="*80 + "\n")
+
             logger.info(f"🎯 KOL bought {len(token_addresses)} token(s) - starting tracking...")
 
             # Start tracking each token
-            for token_address in token_addresses:
+            for i, token_address in enumerate(token_addresses, 1):
+                # 🎬 SCENE 3: TRACKING INITIATION
+                print("\n" + "="*80)
+                print(f"🎬 SCENE 3: TRACKING INITIATION ({i}/{len(token_addresses)})")
+                print("="*80)
+                print(f"🎯 Target: {token_address[:8]}...{token_address[-6:]}")
+                print("📊 Launching ActiveTokenTracker...")
+                print("   ├─ Fetching token metadata from pump.fun...")
+                print("   ├─ Decoding bonding curve progress...")
+                print("   ├─ Checking if already graduated to Raydium...")
+                print("   ├─ Collecting initial price & liquidity data...")
+                print("   ├─ Identifying unique buyers from blockchain...")
+                print("   └─ Preparing real-time conviction scoring...")
+                print("⏱️  Polling interval: Every 5-30 seconds based on activity")
+                print("="*80 + "\n")
+
                 await active_tracker.start_tracking(token_address)
 
                 # Track unique buyers from this webhook
