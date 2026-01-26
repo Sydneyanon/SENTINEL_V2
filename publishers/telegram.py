@@ -265,7 +265,6 @@ class TelegramPublisher:
         fire_count = min(conviction // 20, 5)
         fire_emojis = "\U0001f525" * fire_count
 
-        # Format mcap/liquidity as compact K/M
         def fmt_k(v):
             if v >= 1_000_000:
                 return f"${v/1_000_000:.1f}M"
@@ -274,7 +273,7 @@ class TelegramPublisher:
             return f"${v:.0f}"
 
         msg = f"\U0001f525 <b>PROMETHEUS SIGNAL</b> {fire_emojis}\n\n"
-        msg += f"<b>${symbol}</b> | <b>Conviction: {conviction}/100</b>\n\n"
+        msg += f"<b>${symbol}</b> | Conviction: {conviction}/100\n\n"
         msg += f"\U0001f4b0 ${price:.8f} | \U0001f48e MCap {fmt_k(mcap)}\n"
         msg += f"\U0001f4a7 Liq {fmt_k(liquidity)} | \U0001f465 {holders} {holder_label}\n"
         msg += f"\U0001f4ca {bonding:.1f}% bonded"
@@ -287,7 +286,7 @@ class TelegramPublisher:
             msg += f" | \u23f1\ufe0f {age_minutes:.0f}m old"
         msg += "\n"
 
-        # Compact breakdown - only non-zero scores on one line
+        # Scores line - only non-zero
         if breakdown:
             parts = []
             score_map = [
@@ -300,32 +299,30 @@ class TelegramPublisher:
                 if v > 0:
                     parts.append(f"{label} +{v}")
             if parts:
-                msg += f"\n<b>\U0001f4ca Scores:</b> {' | '.join(parts)}\n"
+                msg += f"\n\U0001f4ca Scores: {' | '.join(parts)}\n"
 
-        # Compact wallets - top 2
+        # KOLs / Whales / Calls counts
         wallet_data = signal_data.get('smart_wallet_data', {})
         wallets = wallet_data.get('wallets', [])
-        if wallets:
-            msg += f"\n<b>\U0001f451 Elite Traders:</b>\n"
-            for w in wallets[:2]:
-                name = w.get('name', 'KOL')
-                if not name or name == 'None':
-                    name = 'KOL'
-                tier = w.get('tier', '')
-                tier_map = {'god': 'GOD', 'elite': 'ELITE', 'top_kol': 'TOP KOL', 'whale': 'WHALE'}
-                tier_str = tier_map.get(tier, 'KOL')
-                wr = w.get('win_rate', 0)
-                line = f"<b>{name}</b> [{tier_str}]"
-                if wr > 0:
-                    line += f" {wr*100:.0f}% WR"
-                msg += f"{line}\n"
+        kol_count = sum(1 for w in wallets if w.get('tier') in ('god', 'elite', 'top_kol'))
+        whale_count = sum(1 for w in wallets if w.get('tier') == 'whale')
+        call_count = signal_data.get('telegram_call_data', {}).get('mentions', 0)
+
+        counts = []
+        if kol_count > 0:
+            counts.append(f"\U0001f3c6 KOLs: {kol_count}")
+        if whale_count > 0:
+            counts.append(f"\U0001f433 Whales: {whale_count}")
+        if call_count > 0:
+            counts.append(f"\U0001f4e3 Calls: {call_count}")
+        if counts:
+            msg += f"\n{'  |  '.join(counts)}\n"
 
         # Links
         msg += f'\n<a href="https://dexscreener.com/solana/{token_address}">DexS</a>'
         msg += f' | <a href="https://birdeye.so/token/{token_address}">Bird</a>'
         msg += f' | <a href="https://pump.fun/{token_address}">Pump</a>\n'
-        msg += f"\n<code>{token_address}</code>\n"
-        msg += f"\n\u26a0\ufe0f DYOR | \U0001f525 The fire spreads."
+        msg += f"\n<code>{token_address}</code>"
 
         return msg
 
