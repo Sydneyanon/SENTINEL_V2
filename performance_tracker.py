@@ -95,14 +95,18 @@ class PerformanceTracker:
                 await asyncio.sleep(5)
     
     async def _monitoring_loop(self):
-        """Main monitoring loop - checks every minute"""
+        """Main monitoring loop - adaptive polling.
+        Fresh signals (< 1h) checked every 15s to catch fast pumps.
+        Older signals checked every 60s."""
+        cycle = 0
         while self.running:
             try:
-                await self._check_all_signals()
-                await asyncio.sleep(60)  # Check every minute
+                await self._check_all_signals(cycle)
+                cycle += 1
+                await asyncio.sleep(15)
             except Exception as e:
                 logger.error(f"❌ Error in monitoring loop: {e}")
-                await asyncio.sleep(60)
+                await asyncio.sleep(15)
     
     async def _daily_report_loop(self):
         """Posts daily report at midnight UTC"""
@@ -123,15 +127,21 @@ class PerformanceTracker:
                 logger.error(f"❌ Error in daily report loop: {e}")
                 await asyncio.sleep(3600)  # Try again in an hour
     
-    async def _check_all_signals(self):
-        """Check performance of all active signals"""
+    async def _check_all_signals(self, cycle: int = 0):
+        """Check performance of all active signals.
+        Fresh signals (< 1h) checked every cycle (15s).
+        Older signals checked every 4th cycle (~60s)."""
         try:
-            # Get all posted signals from today and yesterday (still relevant)
             signals = await self._get_active_signals()
-            
+            now = datetime.utcnow()
+
             for signal in signals:
-                await self._check_signal_performance(signal)
-                
+                age = now - signal['created_at']
+                is_fresh = age.total_seconds() < 3600  # < 1 hour old
+
+                if is_fresh or cycle % 4 == 0:
+                    await self._check_signal_performance(signal)
+
         except Exception as e:
             logger.error(f"❌ Error checking signals: {e}")
     
