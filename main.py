@@ -475,6 +475,9 @@ async def lifespan(app: FastAPI):
         )
         logger.info("✅ PumpPortal monitor initialized")
 
+        # Link pump monitor to conviction engine for velocity spike detection
+        conviction_engine.pump_monitor = pumpportal_monitor
+
         # Wait a bit for everything to stabilize before starting background task
         logger.info("⏳ Waiting 2 seconds before starting PumpPortal task...")
         await asyncio.sleep(2)
