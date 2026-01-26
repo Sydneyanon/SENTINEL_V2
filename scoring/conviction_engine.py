@@ -38,13 +38,15 @@ class ConvictionEngine:
         narrative_detector=None,
         helius_fetcher=None,
         active_tracker=None,
-        pump_monitor=None
+        pump_monitor=None,
+        database=None
     ):
         self.smart_wallet_tracker = smart_wallet_tracker
         self.narrative_detector = narrative_detector
         self.helius_fetcher = helius_fetcher
         self.active_tracker = active_tracker
         self.pump_monitor = pump_monitor
+        self.database = database
 
         # Initialize rug detector
         self.rug_detector = RugDetector(smart_wallet_tracker=smart_wallet_tracker)
@@ -383,6 +385,52 @@ class ConvictionEngine:
                 telegram_call_data['capped'] = True
 
             mid_total += social_confirmation_score
+
+            # ================================================================
+            # PHASE 3.7.5: MULTI-CALL BONUS (persistent telegram data)
+            # ================================================================
+            # Award bonus points for repeated calls from multiple groups
+            # This indicates coordinated/organic buzz across the community
+
+            multi_call_bonus = 0
+
+            if config.ENABLE_TELEGRAM_SCRAPER and self.database:
+                try:
+                    # Query persistent database for call stats (last 30 min)
+                    call_stats = await self.database.get_telegram_call_stats(
+                        token_address=token_address,
+                        minutes=30
+                    )
+
+                    call_count = call_stats.get('call_count', 0)
+                    group_count = call_stats.get('group_count', 0)
+
+                    if call_count > 0:
+                        logger.info(f"   📊 Multi-call analysis: {call_count} calls from {group_count} groups (30m)")
+
+                        # BONUS 1: High call frequency (same CA mentioned 3+ times)
+                        if call_count >= 3:
+                            multi_call_bonus += 10
+                            logger.info(f"      🔥 HIGH FREQUENCY BONUS: +10 pts ({call_count} calls)")
+
+                        # BONUS 2: Multi-group confirmation (3+ different groups)
+                        if group_count >= 3:
+                            multi_call_bonus += 15
+                            logger.info(f"      🔥 MULTI-GROUP BONUS: +15 pts ({group_count} groups)")
+
+                        # If both bonuses apply, cap at +20 to avoid over-scoring
+                        if multi_call_bonus > 20:
+                            logger.info(f"      ⚖️  Multi-call bonus capped at +20 pts")
+                            multi_call_bonus = 20
+
+                        if multi_call_bonus > 0:
+                            telegram_call_data['multi_call_bonus'] = multi_call_bonus
+
+                except Exception as e:
+                    logger.error(f"   ❌ Error calculating multi-call bonus: {e}")
+                    multi_call_bonus = 0
+
+            mid_total += multi_call_bonus
 
             # ================================================================
             # PHASE 3.8: SOCIAL VERIFICATION - FREE
