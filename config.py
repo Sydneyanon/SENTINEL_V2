@@ -380,15 +380,15 @@ WALLET_SCORE_THRESHOLDS = {
 # PERFORMANCE TRACKING & ROI ANALYSIS
 # =============================================================================
 
-# Milestone multipliers for performance alerts
+# Milestone multipliers for database tracking (all milestones recorded)
 # Granular tracking:
 # - 1-10x: every 1x
 # - 10-100x: every 1x
 # - 100-1000x: every 50x
 # - 1000x+: every 1000x
 MILESTONES = (
-    # 1-10x (every 1x)
-    [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] +
+    # 2-10x (every 1x) - no 1x, that's just entry price
+    [2, 3, 4, 5, 6, 7, 8, 9, 10] +
     # 11-100x (every 1x)
     list(range(11, 101)) +
     # 100-1000x (every 50x)
@@ -396,6 +396,21 @@ MILESTONES = (
     # 1000x+ (every 1000x)
     [2000, 3000, 4000, 5000, 10000]
 )
+
+# Milestones that trigger a Telegram post (subset of MILESTONES)
+# All milestones still recorded in database for analytics
+MILESTONE_POST_THRESHOLDS = [
+    2, 3, 4, 5,                             # LET IT BURN
+    10, 20, 30, 40, 50,                     # SCORCHED EARTH
+    100, 200, 300, 400, 500,                # HELL FIRE
+    1000,                                    # INFERNO
+]
+
+# Milestone video banner tiers (set file_ids in env vars when videos are ready)
+MILESTONE_BANNER_2X = os.getenv('MILESTONE_BANNER_2X')       # LET IT BURN (2-5x)
+MILESTONE_BANNER_10X = os.getenv('MILESTONE_BANNER_10X')     # SCORCHED EARTH (10-50x)
+MILESTONE_BANNER_100X = os.getenv('MILESTONE_BANNER_100X')   # HELL FIRE (100-500x)
+MILESTONE_BANNER_1000X = os.getenv('MILESTONE_BANNER_1000X') # INFERNO (1000x)
 
 # How long to track token performance (hours)
 TRACKING_DURATION = 24
