@@ -4,6 +4,7 @@ KOL-Triggered Real-Time Tracking with Conviction Scoring + Telegram Alpha Calls
 """
 import asyncio
 from typing import Dict, List
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from loguru import logger
 from datetime import datetime, timedelta
@@ -45,8 +46,6 @@ except ImportError:
 # ============================================================================
 # GLOBAL INSTANCES
 # ============================================================================
-
-app = FastAPI(title="Prometheus - Autonomous Signals")
 
 # Database
 db = None
@@ -336,13 +335,15 @@ async def run_daily_pipeline():
         logger.error(traceback.format_exc())
 
 # ============================================================================
-# STARTUP
+# LIFESPAN HANDLER (FastAPI lifespan events)
 # ============================================================================
 
-@app.on_event("startup")
-async def startup():
-    """Initialize all components"""
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Initialize all components on startup and cleanup on shutdown"""
     global conviction_engine, pumpportal_monitor, db, performance_tracker, active_tracker, helius_fetcher, smart_wallet_tracker, telegram_monitor
+
+    # ========== STARTUP ==========
     
     logger.info("=" * 70)
     logger.info("🔥 PROMETHEUS - AUTONOMOUS SIGNAL SYSTEM")
@@ -548,6 +549,35 @@ async def startup():
     # Start background tasks
     asyncio.create_task(cleanup_task())
 
+    # ========== YIELD - App is now running ==========
+    yield
+
+    # ========== SHUTDOWN ==========
+    logger.info("🛑 Shutting down Prometheus...")
+
+    if pumpportal_monitor:
+        await pumpportal_monitor.stop()
+
+    if performance_tracker:
+        await performance_tracker.stop()
+
+    if telegram_monitor:
+        await telegram_monitor.stop()
+
+    if db:
+        await db.close()
+
+    logger.info("✅ Shutdown complete")
+
+# ============================================================================
+# FASTAPI APP INSTANCE
+# ============================================================================
+
+app = FastAPI(
+    title="Prometheus - Autonomous Signals",
+    lifespan=lifespan
+)
+
 # ============================================================================
 # WEBHOOKS
 # ============================================================================
@@ -731,29 +761,6 @@ async def pumpportal_diagnostic():
         "connection_attempts": pumpportal_monitor.connection_attempts if pumpportal_monitor else 0,
         "messages_received": pumpportal_monitor.messages_received if pumpportal_monitor else 0,
     }
-
-# ============================================================================
-# SHUTDOWN
-# ============================================================================
-
-@app.on_event("shutdown")
-async def shutdown():
-    """Cleanup on shutdown"""
-    logger.info("🛑 Shutting down Prometheus...")
-
-    if pumpportal_monitor:
-        await pumpportal_monitor.stop()
-
-    if performance_tracker:
-        await performance_tracker.stop()
-
-    if telegram_monitor:
-        await telegram_monitor.stop()
-
-    if db:
-        await db.close()
-
-    logger.info("✅ Shutdown complete")
 
 # ============================================================================
 # MAIN
