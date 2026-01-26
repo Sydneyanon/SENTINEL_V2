@@ -204,6 +204,49 @@ class DailyTokenCollector:
         # Initialize database
         await self.collector.initialize()
 
+        # AUTO-DISCOVER NEW KOLS FROM GMGN LEADERBOARD
+        logger.info("\n" + "=" * 80)
+        logger.info("🔍 AUTO-DISCOVERING NEW KOLS FROM GMGN LEADERBOARD")
+        logger.info("=" * 80)
+        try:
+            from wallet_autodiscovery import discover_top_traders
+            new_kols = await discover_top_traders(limit=20)
+
+            if new_kols:
+                logger.info(f"✅ Discovered {len(new_kols)} top traders:")
+                for kol in new_kols[:5]:  # Show top 5
+                    logger.info(f"   📊 {kol['name']} ({kol['tier']}): {kol['win_rate']*100:.1f}% WR, ${kol['total_profit']:,.0f} profit")
+
+                # Save to database for tracking
+                if self.collector.db:
+                    logger.info("\n💾 Saving new KOLs to database...")
+                    for kol in new_kols:
+                        # Insert as smart wallet activity entry
+                        await self.collector.db.execute("""
+                            INSERT INTO smart_wallet_activity (
+                                wallet_address, wallet_name, wallet_tier,
+                                token_address, transaction_type, timestamp,
+                                win_rate, pnl_30d
+                            ) VALUES ($1, $2, $3, $4, $5, NOW(), $6, $7)
+                            ON CONFLICT (transaction_signature) DO NOTHING
+                        """,
+                            kol['address'],
+                            kol['name'],
+                            kol['tier'],
+                            'discovery',  # Placeholder token address
+                            'discovery',  # Special type for discovery entries
+                            kol['win_rate'],
+                            kol['total_profit']
+                        )
+                    logger.info(f"   ✅ Saved {len(new_kols)} KOLs for real-time tracking")
+            else:
+                logger.warning("⚠️ No KOLs discovered from GMGN leaderboard")
+        except Exception as e:
+            logger.error(f"❌ KOL auto-discovery failed: {e}")
+            import traceback
+            logger.debug(traceback.format_exc())
+        logger.info("=" * 80 + "\n")
+
         # Get today's top tokens
         tokens_data = await self.get_daily_top_tokens(limit=self.tokens_per_day)
 
