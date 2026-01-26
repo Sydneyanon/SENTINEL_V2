@@ -67,14 +67,15 @@ DISABLE_POLLING_BELOW_THRESHOLD = True  # Only poll tokens >= 50 conviction
 # =============================================================================
 
 # Signal thresholds based on graduation status
-# UPDATE 2026-01-26: Lowered thresholds after removing Twitter/LunarCrush (35 pts lost)
+# UPDATE 2026-01-26 (GROK RECOMMENDATIONS):
 # - Removed Twitter (0-15 pts) and LunarCrush (0-20 pts) due to budget constraints
-# - Total max score reduced from ~145 to ~110 points
-# - Lowered thresholds proportionally (~30%) to maintain signal volume
-# - Data analysis shows: Need more signals to train ML effectively
-# - Goal: Collect 50-100 tokens/day for ML training
-MIN_CONVICTION_SCORE = 35  # Lowered from 50 (lost 35 pts from social APIs)
-POST_GRAD_THRESHOLD = 40   # Lowered from 50, slightly higher for graduated tokens
+# - Raised pre-grad threshold from 35 to 45 (catch mid-cycle pumps like SHRIMP)
+# - Raised post-grad threshold to 75 (safer phase, avoid tops)
+# - Enhanced volume/momentum/velocity scoring (more graduated, less binary)
+# - Enabled narratives for better early detection (+0-25 pts)
+# - Stricter rug penalties to reduce rug calls
+MIN_CONVICTION_SCORE = 45  # Raised from 35 - catch mid-cycle pumps, not just early
+POST_GRAD_THRESHOLD = 75   # Raised from 40 - much stricter for graduated tokens
 
 # Base score threshold for distribution checks
 # Only check distribution if base score >= this value
@@ -138,16 +139,18 @@ HOLDER_FETCH_GATES = {
     'always_fetch_post_grad': True  # Always check holders post-graduation
 }
 
-# Volume Velocity (0-10 points)
+# Volume Velocity (0-10 points) - GROK ENHANCED: More graduated
 VOLUME_WEIGHTS = {
     'spiking': 10,          # Volume 2x+ expected rate
-    'growing': 5            # Volume 1.25x+ expected rate
+    'growing': 7,           # Volume 1.25x+ expected rate (raised from 5)
+    'steady': 3             # Volume >1x expected rate (new tier)
 }
 
-# Price Momentum (0-10 points)
+# Price Momentum (0-10 points) - GROK ENHANCED: More graduated
 MOMENTUM_WEIGHTS = {
     'very_strong': 10,      # +50% in 5 minutes
-    'strong': 5             # +20% in 5 minutes
+    'strong': 7,            # +30% in 5 minutes (raised from 5)
+    'moderate': 3           # +10% in 5 minutes (new tier)
 }
 
 # Distribution Scoring (0-15 points)
@@ -168,24 +171,7 @@ HOLDER_WEIGHTS = {
     'low': 5                # 20-49 holders
 }
 
-# Social Sentiment Scoring (LunarCrush - 0-20 points)
-LUNARCRUSH_WEIGHTS = {
-    'trending_top20': 10,   # Trending in top 20
-    'trending_top50': 7,    # Trending in top 50
-    'trending_top100': 3,   # Trending in top 100
-    'sentiment_high': 5,    # Sentiment >= 4.0
-    'sentiment_medium': 3,  # Sentiment >= 3.5
-    'volume_spike': 5,      # Social volume +100%
-    'volume_growth': 3      # Social volume +50%
-}
-
-# Twitter Buzz Scoring (Free Tier - 0-15 points)
-TWITTER_WEIGHTS = {
-    'high_buzz': 15,        # 5+ mentions, 10+ avg engagement
-    'medium_buzz': 10,      # 3+ mentions
-    'low_buzz': 5,          # 1+ mentions
-    'viral_tweet': 12       # Single tweet with 100+ likes (minimum)
-}
+# Twitter and LunarCrush scoring removed (no budget) - see lines 418-419
 
 # Telegram Social Confirmation Scoring (FREE - 0-15 points)
 # Only applies to tokens already tracked by KOLs (social confirmation)
@@ -269,6 +255,12 @@ RUG_DETECTION = {
             'enabled': True,
             'per_kol': 10,           # +10 pts per KOL in top 10
             'penalty_reduction': 5    # Reduce penalty by 5 per KOL
+        },
+        'improvement_bonus': {
+            'enabled': True,         # GROK: Reward improving distribution
+            'bonus_points': 5,       # +5 pts if top 10 decreases
+            'min_polls': 2,          # Need at least 2 polls to compare
+            'min_improvement': 5     # Min 5% improvement to qualify
         }
     },
     
@@ -277,12 +269,12 @@ RUG_DETECTION = {
     'post_grad_forgive_bundles': True  # Forgive early bundles if distribution improved
 }
 
-# Anti-Rug Detection: Dev Sell Penalties (Future enhancement)
+# Anti-Rug Detection: Dev Sell Penalties (GROK ENHANCED)
 DEV_SELL_DETECTION = {
-    'enabled': False,  # Not implemented yet
-    'penalty_points': -25,
-    'dev_sell_threshold': 0.20,
-    'early_window_minutes': 30
+    'enabled': True,   # GROK: Enabled for stricter rug detection
+    'penalty_points': -20,  # GROK: -20 pts if dev sells >20%
+    'dev_sell_threshold': 0.20,  # 20% dev sell threshold
+    'early_window_minutes': 30  # Only apply in first 30 minutes
 }
 
 # Score Decay: Reduce conviction if metrics drop
@@ -412,7 +404,7 @@ LOG_FILE = "prometheus.log"
 # FEATURE FLAGS
 # =============================================================================
 
-ENABLE_NARRATIVES = False   # Narrative detection (disabled - narratives are static)
+ENABLE_NARRATIVES = True    # GROK: Enabled for early detection (+0-25 pts)
 ENABLE_PERFORMANCE_TRACKING = True
 ENABLE_MILESTONE_ALERTS = True
 ENABLE_LUNARCRUSH = False   # LunarCrush disabled (no budget for API)

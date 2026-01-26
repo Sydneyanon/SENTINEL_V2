@@ -621,6 +621,12 @@ class ConvictionEngine:
                         # Very safe: no penalty (score 0-2)
                         logger.info(f"   ✅ RugCheck: SAFE (score: {score_norm}/10)")
 
+                    # GROK: Additional penalty if score > 3/10 (catch medium+ risk tokens)
+                    if score_norm is not None and score_norm > 3:
+                        extra_penalty = -10
+                        rugcheck_penalty += extra_penalty
+                        logger.warning(f"   🚨 GROK PENALTY: score > 3/10 → {extra_penalty} pts (total: {rugcheck_penalty})")
+
                     # Log specific risk flags
                     if rugcheck_result.get('mutable_metadata'):
                         logger.info(f"      ℹ️  Mutable metadata (common for new tokens)")
@@ -840,26 +846,29 @@ class ConvictionEngine:
             }
     
     def _score_volume_velocity(self, token_data: Dict) -> int:
-        """Score based on volume velocity (0-10 points)"""
+        """Score based on volume velocity (0-10 points) - GROK ENHANCED: More graduated"""
         volume_24h = token_data.get('volume_24h', 0)
         mcap = token_data.get('market_cap', 1)
-        
+
         if mcap == 0:
             return 0
-        
+
         volume_to_mcap = volume_24h / mcap if mcap > 0 else 0
-        
-        # High volume relative to mcap = strong activity
+
+        # High volume relative to mcap = strong activity (more graduated scoring)
         if volume_to_mcap > 2.0:  # 200%+ daily volume
-            return config.VOLUME_WEIGHTS['spiking']
+            return config.VOLUME_WEIGHTS['spiking']  # 10 pts
         elif volume_to_mcap > 1.25:  # 125%+ daily volume
-            return config.VOLUME_WEIGHTS['growing']
+            return config.VOLUME_WEIGHTS['growing']  # 7 pts
+        elif volume_to_mcap > 1.0:  # 100%+ daily volume (steady)
+            return config.VOLUME_WEIGHTS.get('steady', 3)  # 3 pts
         else:
             return 0
     
     def _score_price_momentum(self, token_data: Dict) -> int:
         """
         Score based on price momentum (0-10 points base + multi-timeframe bonus)
+        GROK ENHANCED: More graduated scoring (3/7/10 instead of 0/5/10)
 
         - Pre-grad: Uses 5m price change (0-10 pts)
         - Post-grad: Uses 5m price change + multi-timeframe bonus (1h/6h/24h, +5 pts each)
@@ -867,13 +876,15 @@ class ConvictionEngine:
         bonding_pct = token_data.get('bonding_curve_pct', 0)
         is_pre_grad = bonding_pct < 100
 
-        # Base score from 5m price change
+        # Base score from 5m price change (more graduated)
         price_change_5m = token_data.get('price_change_5m', 0)
 
         if price_change_5m >= 50:  # +50% in 5 min
-            base_score = config.MOMENTUM_WEIGHTS['very_strong']
-        elif price_change_5m >= 20:  # +20% in 5 min
-            base_score = config.MOMENTUM_WEIGHTS['strong']
+            base_score = config.MOMENTUM_WEIGHTS['very_strong']  # 10 pts
+        elif price_change_5m >= 30:  # +30% in 5 min
+            base_score = config.MOMENTUM_WEIGHTS['strong']  # 7 pts
+        elif price_change_5m >= 10:  # +10% in 5 min (moderate)
+            base_score = config.MOMENTUM_WEIGHTS.get('moderate', 3)  # 3 pts
         else:
             base_score = 0
 
@@ -1099,7 +1110,8 @@ class ConvictionEngine:
 
     def _score_volume_liquidity_velocity(self, token_data: Dict) -> int:
         """
-        Score based on volume/liquidity velocity (0-8 points)
+        Score based on volume/liquidity velocity (0-10 points)
+        GROK ENHANCED: More graduated scoring for moderate flows
         OPT-044: High velocity indicates hot trading activity
 
         Pattern from 36 runners:
@@ -1119,15 +1131,17 @@ class ConvictionEngine:
         # Calculate velocity ratio
         velocity_ratio = volume_24h / max(liquidity, 1000)
 
-        # Scoring logic
+        # Scoring logic (more graduated)
         if velocity_ratio > 30:  # Extremely hot trading
-            return 8
-        elif velocity_ratio > 20:  # Very hot trading activity
-            return 6
+            return 10  # Raised from 8
+        elif velocity_ratio > 20:  # Very hot trading activity (GROK: >20% flow)
+            return 8  # Raised from 6
         elif velocity_ratio > 10:  # Good momentum
-            return 4
+            return 5  # Raised from 4
         elif velocity_ratio > 5:  # Moderate activity
-            return 2
+            return 3  # Raised from 2
+        elif velocity_ratio > 2:  # Light activity
+            return 1  # New tier
         elif velocity_ratio < 1:  # Low activity (red flag)
             return -3
         else:
