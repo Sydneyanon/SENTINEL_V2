@@ -18,8 +18,6 @@ class TelegramPublisher:
         self.bot: Optional[Bot] = None
         self.channel_id = config.TELEGRAM_CHANNEL_ID
         self.enabled = config.ENABLE_TELEGRAM
-        # Banner disabled temporarily - file_id was for thumbnail, not animation
-        # To re-enable: upload actual GIF/animation and get new file_id
         self.banner_file_id = getattr(config, 'TELEGRAM_BANNER_FILE_ID', None)
 
         # OPT-051: Health check tracking
@@ -381,12 +379,11 @@ class TelegramPublisher:
 
         for attempt in range(1, max_retries + 1):
             try:
-                message = self._format_signal(signal_data)
+                compact_caption = self._format_signal_compact(signal_data)
 
-                # If we have a banner, send as single video message with compact caption
+                # If we have a banner, send as video message with compact caption
                 if self.banner_file_id:
                     try:
-                        compact_caption = self._format_signal_compact(signal_data)
                         result = await self.bot.send_video(
                             chat_id=self.channel_id,
                             video=self.banner_file_id,
@@ -396,19 +393,18 @@ class TelegramPublisher:
                             disable_notification=False
                         )
                     except TelegramError as e:
-                        logger.warning(f"⚠️ Banner failed ({e}), sending text-only")
-                        # Fallback to full text-only message
+                        logger.warning(f"⚠️ Video banner failed ({e}), sending compact text-only")
                         result = await self.bot.send_message(
                             chat_id=self.channel_id,
-                            text=message,
+                            text=compact_caption,
                             parse_mode=ParseMode.HTML,
                             disable_web_page_preview=False
                         )
                 else:
-                    # No banner - send full text message
+                    # No banner - send compact text message
                     result = await self.bot.send_message(
                         chat_id=self.channel_id,
-                        text=message,
+                        text=compact_caption,
                         parse_mode=ParseMode.HTML,
                         disable_web_page_preview=False
                     )
@@ -510,12 +506,13 @@ Failed signals logged to database with 'posting_failed' flag.
 The fire has been stolen. Watching for elite trader activity... 🔥"""
             
             if self.banner_file_id:
-                # Send with banner if available
-                await self.bot.send_animation(
+                # Send with video banner
+                await self.bot.send_video(
                     chat_id=self.channel_id,
-                    animation=self.banner_file_id,
+                    video=self.banner_file_id,
                     caption=test_message,
-                    parse_mode=ParseMode.HTML
+                    parse_mode=ParseMode.HTML,
+                    supports_streaming=True
                 )
             else:
                 await self.bot.send_message(
@@ -535,39 +532,40 @@ The fire has been stolen. Watching for elite trader activity... 🔥"""
     
     async def upload_banner(self, banner_path: str) -> Optional[str]:
         """
-        Upload banner GIF and return file_id for future use
-        
+        Upload banner video/GIF and return file_id for future use
+
         Args:
-            banner_path: Path to the banner GIF file
-            
+            banner_path: Path to the banner video (MP4) or GIF file
+
         Returns:
             file_id if successful, None otherwise
         """
         if not self.bot or not self.channel_id:
             logger.error("Bot not initialized")
             return None
-        
+
         try:
-            with open(banner_path, 'rb') as gif:
-                result = await self.bot.send_animation(
+            with open(banner_path, 'rb') as f:
+                result = await self.bot.send_video(
                     chat_id=self.channel_id,
-                    animation=gif,
-                    caption="🎨 Banner uploaded! Saving file_id..."
+                    video=f,
+                    caption="🎨 Banner uploaded! Saving file_id...",
+                    supports_streaming=True
                 )
-                
-                file_id = result.animation.file_id
+
+                file_id = result.video.file_id
                 logger.info(f"✅ Banner uploaded successfully!")
-                logger.info(f"📝 Add this to your config.py:")
-                logger.info(f'TELEGRAM_BANNER_FILE_ID = "{file_id}"')
-                
+                logger.info(f"📝 Set this environment variable:")
+                logger.info(f'TELEGRAM_BANNER_FILE_ID={file_id}')
+
                 # Delete the test message
                 await self.bot.delete_message(
                     chat_id=self.channel_id,
                     message_id=result.message_id
                 )
-                
+
                 return file_id
-                
+
         except FileNotFoundError:
             logger.error(f"❌ Banner file not found: {banner_path}")
             return None
