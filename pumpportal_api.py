@@ -144,15 +144,16 @@ class PumpPortalAPI:
                             logger.warning(f"⚠️  Pump.fun API returned empty name/symbol for {token_address[:8]}")
                             return None
 
-                    elif resp.status in [429, 503]:
-                        # Rate limited or server error - retry with backoff
+                    elif resp.status in [429, 500, 502, 503, 504, 530]:
+                        # Rate limited or transient server/Cloudflare error - retry with backoff
+                        # 530 = Cloudflare origin error (common with Pump.fun under load)
                         if attempt < 3:
-                            delay = 2 ** attempt  # 1s, 2s, 4s
-                            logger.warning(f"⚠️  Pump.fun API {resp.status} - retry in {delay}s...")
+                            delay = 2 ** attempt  # 2s, 4s, 8s
+                            logger.warning(f"⚠️  Pump.fun API {resp.status} - retry {attempt}/3 in {delay}s...")
                             await asyncio.sleep(delay)
                             return await self._fetch_from_pumpfun(token_address, attempt + 1)
                         else:
-                            logger.warning(f"⚠️  Pump.fun API {resp.status} after 3 attempts")
+                            logger.warning(f"⚠️  Pump.fun API {resp.status} after 3 attempts - falling back")
                             return None
 
                     else:
