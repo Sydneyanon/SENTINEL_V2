@@ -570,7 +570,7 @@ class ActiveTokenTracker:
                            f"liq=${state.token_data.get('liquidity', 0):.0f}")
             
             # Check if we should send signal
-            from config import MIN_CONVICTION_SCORE
+            from config import MIN_CONVICTION_SCORE, MAX_MARKET_CAP_FILTER
             
             # Strict validation - don't send signal if token data is incomplete
             # RELAXED: Allow UNKNOWN symbols (Helius often doesn't have metadata for new tokens)
@@ -590,6 +590,7 @@ class ActiveTokenTracker:
                 'price': price > 0,
                 'liquidity': liq >= 1000,  # Min $1k liquidity
                 'mcap': mcap > 0,
+                'mcap_not_too_high': mcap <= MAX_MARKET_CAP_FILTER,  # Not already mooned
             }
 
             # Holder count check (exempt pre-grad tokens since they're still building)
@@ -620,6 +621,8 @@ class ActiveTokenTracker:
                         failed_checks.append(f"liquidity=${liq:.0f} (must be >= $1k)")
                     if not data_quality_checks.get('mcap', True):
                         failed_checks.append(f"mcap=${mcap:.0f} (must be > 0)")
+                    if not data_quality_checks.get('mcap_not_too_high', True):
+                        failed_checks.append(f"mcap=${mcap:.0f} (exceeds max ${MAX_MARKET_CAP_FILTER:.0f} - already mooned)")
                     if not data_quality_checks.get('holders', True):
                         holder_count = state.token_data.get('holder_count', 0)
                         failed_checks.append(f"holders={holder_count} (post-grad must have holders)")

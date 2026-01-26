@@ -424,6 +424,10 @@ TRACK_METRICS = {
 
 # Cleanup settings
 MAX_TRACKED_TOKENS = 1000   # Maximum tokens to track in memory
+
+# Maximum market cap for signal calls ($20K for testing)
+# Tokens above this MCAP won't trigger new signals (already mooned)
+MAX_MARKET_CAP_FILTER = int(os.getenv('MAX_MARKET_CAP_FILTER', '20000'))  # $20K default
 CLEANUP_THRESHOLD = 500     # How many to remove when limit hit
 
 # Buyer tracking duration
@@ -442,6 +446,8 @@ LOG_FILE = "prometheus.log"
 # =============================================================================
 
 ENABLE_NARRATIVES = True    # GROK: Enabled for early detection (+0-25 pts)
+ENABLE_REALTIME_NARRATIVES = True  # RSS + BERTopic for emerging narratives (no API cost)
+NARRATIVE_UPDATE_INTERVAL = 900  # Update narratives every 15 minutes (900s)
 ENABLE_PERFORMANCE_TRACKING = True
 ENABLE_MILESTONE_ALERTS = True
 ENABLE_LUNARCRUSH = False   # LunarCrush disabled (no budget for API)

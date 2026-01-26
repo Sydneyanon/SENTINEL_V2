@@ -56,3 +56,8 @@ telethon>=1.28.0  # Telegram client (only if using built-in monitor)
 xgboost>=2.0.3
 scikit-learn>=1.4.0
 numpy>=1.26.0
+
+# Real-time Narrative Detection (RSS + BERTopic)
+feedparser>=6.0.10  # RSS parsing
+bertopic>=0.15.0  # Topic modeling
+sentence-transformers>=2.2.2  # Embeddings (all-MiniLM-L6-v2)
