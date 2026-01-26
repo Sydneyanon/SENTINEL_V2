@@ -17,6 +17,8 @@ RUN apt-get update && apt-get install -y \
     gfortran \
     libopenblas-dev \
     liblapack-dev \
+    pkg-config \
+    cmake \
     && rm -rf /var/lib/apt/lists/*
 
 # Upgrade pip and install build tools
@@ -25,6 +27,14 @@ RUN pip3 install --no-cache-dir --upgrade pip setuptools wheel
 # Copy requirements and install dependencies
 WORKDIR /app
 COPY requirements.txt /app/
+
+# Install numpy and Cython first (required for hdbscan compilation)
+RUN pip3 install --no-cache-dir numpy>=1.26.0 Cython
+
+# Install hdbscan explicitly before other packages that depend on it
+RUN pip3 install --no-cache-dir hdbscan
+
+# Install remaining dependencies
 RUN pip3 install --no-cache-dir -r requirements.txt
 
 # Copy application code
