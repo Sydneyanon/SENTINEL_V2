@@ -271,57 +271,74 @@ class PerformanceTracker:
                 WHERE token_address = $2
             ''', new_type, token_address)
     
+    def _get_milestone_banner(self, milestone: float) -> str:
+        """Get the right video banner file_id for this milestone tier"""
+        if milestone >= 1000:
+            return config.MILESTONE_BANNER_1000X  # INFERNO
+        elif milestone >= 100:
+            return config.MILESTONE_BANNER_100X   # HELL FIRE
+        elif milestone >= 10:
+            return config.MILESTONE_BANNER_10X    # SCORCHED EARTH
+        else:
+            return config.MILESTONE_BANNER_2X     # LET IT BURN
+
     async def _post_milestone_update(self, signal: Dict, milestone: float, current_price: float, multiple: float, signal_type: str):
-        """Post milestone update to Telegram"""
+        """Post milestone update to Telegram with tier-based video banner"""
         try:
             symbol = signal['token_symbol']
             token_address = signal['token_address']
             entry_price = signal['entry_price']
-            
+
             # Calculate time since signal
             time_since = datetime.utcnow() - signal['created_at']
             hours = int(time_since.total_seconds() / 3600)
             minutes = int((time_since.total_seconds() % 3600) / 60)
-            
-            # Determine emoji based on milestone
-            if milestone >= 10:
-                emoji = "🚀🚀🚀"
-            elif milestone >= 5:
-                emoji = "🚀🚀"
+
+            gain_pct = (multiple - 1) * 100
+
+            # Build compact caption (fits 1024 char video caption limit)
+            message = f"\U0001f525 <b>PROMETHEUS | {int(milestone)}x</b>\n\n"
+            message += f"<b>${symbol}</b> hit <b>{int(milestone)}x</b>\n\n"
+            message += f"\U0001f4b0 Entry: ${entry_price:.8f}\n"
+            message += f"\U0001f48e Current: ${current_price:.8f}\n"
+            message += f"\U0001f4c8 Gain: <b>+{gain_pct:.1f}%</b>\n"
+            message += f"\u23f1\ufe0f Time: {hours}h {minutes}m\n\n"
+            message += f'<a href="https://dexscreener.com/solana/{token_address}">DexS</a>'
+            message += f' | <a href="https://birdeye.so/token/{token_address}">Bird</a>'
+            message += f' | <a href="https://pump.fun/{token_address}">Pump</a>\n\n'
+            message += f"<code>{token_address}</code>"
+
+            # Try video banner first, fall back to text
+            banner_id = self._get_milestone_banner(milestone)
+            if banner_id:
+                try:
+                    await self.telegram.bot.send_video(
+                        chat_id=self.telegram.channel_id,
+                        video=banner_id,
+                        caption=message,
+                        parse_mode='HTML',
+                        supports_streaming=True
+                    )
+                except Exception as vid_err:
+                    logger.warning(f"\u26a0\ufe0f Milestone banner failed ({vid_err}), sending text-only")
+                    await self.telegram.bot.send_message(
+                        chat_id=self.telegram.channel_id,
+                        text=message,
+                        parse_mode='HTML',
+                        disable_web_page_preview=True
+                    )
             else:
-                emoji = "🚀"
-            
-            # Tracking source for transparency
-            price_source = "pump.fun (PumpPortal)" if signal_type == 'PRE_GRADUATION' else "Raydium (DexScreener)"
-            
-            # Build message
-            message = f"""🎯 <b>MILESTONE REACHED</b> {emoji}
+                await self.telegram.bot.send_message(
+                    chat_id=self.telegram.channel_id,
+                    text=message,
+                    parse_mode='HTML',
+                    disable_web_page_preview=True
+                )
 
-<b>${symbol}</b> hit <b>{milestone}x</b>!
+            logger.info(f"\U0001f4e4 Milestone update posted: {symbol} hit {int(milestone)}x")
 
-📊 Signal Type: {signal_type.replace('_', ' ').title()}
-💰 Entry: ${entry_price:.8f}
-💎 Current: ${current_price:.8f}
-📈 Gain: <b>+{(multiple - 1) * 100:.1f}%</b> ({milestone}x)
-⏱ Time: {hours}h {minutes}m
-📡 Source: {price_source}
-
-🔗 <a href="https://dexscreener.com/solana/{token_address}">Chart</a> | <a href="https://pump.fun/{token_address}">Pump.fun</a>
-
-<code>{token_address}</code>
-"""
-            
-            await self.telegram.bot.send_message(
-                chat_id=self.telegram.channel_id,
-                text=message,
-                parse_mode='HTML',
-                disable_web_page_preview=True
-            )
-            
-            logger.info(f"📤 Milestone update posted: {symbol} hit {milestone}x")
-            
         except Exception as e:
-            logger.error(f"❌ Failed to post milestone update: {e}")
+            logger.error(f"\u274c Failed to post milestone update: {e}")
     
     async def post_daily_report(self):
         """Post daily performance report"""
