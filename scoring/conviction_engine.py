@@ -141,12 +141,21 @@ class ConvictionEngine:
                 )
                 base_scores['narrative'] = narrative_data.get('score', 0)
                 if base_scores['narrative'] > 0:
-                    logger.info(f"   🎯 Narratives: {base_scores['narrative']} points (matched: {narrative_data.get('primary_narrative', 'N/A')})")
-                else:
-                    logger.info(f"   🎯 Narratives: 0 points (no narrative match)")
+                    # Show which system matched (RSS+BERTopic realtime vs static)
+                    realtime_score = narrative_data.get('realtime_score', 0)
+                    static_score = narrative_data.get('static_score', 0)
+
+                    if realtime_score > 0:
+                        # RSS + BERTopic match
+                        reason = narrative_data.get('realtime_reason', 'N/A')
+                        logger.info(f"   🎯 Narratives: {base_scores['narrative']} points [RSS+BERTopic] - {reason}")
+                    elif static_score > 0:
+                        # Static match
+                        logger.info(f"   🎯 Narratives: {base_scores['narrative']} points [Static] (matched: {narrative_data.get('primary_narrative', 'N/A')})")
+                    else:
+                        logger.info(f"   🎯 Narratives: {base_scores['narrative']} points")
             else:
                 base_scores['narrative'] = 0
-                logger.info(f"   🎯 Narratives: DISABLED (0 points)")
             
             # 3. Volume Velocity (0-10 points)
             volume_score = self._score_volume_velocity(token_data)
@@ -263,8 +272,7 @@ class ConvictionEngine:
             social_data = {}
             twitter_data = {}
 
-            logger.info(f"   🌙 LunarCrush: DISABLED (no budget)")
-            logger.info(f"   🐦 Twitter: DISABLED (no budget)")
+            # LunarCrush and Twitter disabled - logs removed for cleaner output
 
             # ================================================================
             # PHASE 3.7: SOCIAL CONFIRMATION (TELEGRAM CALLS) - FREE
@@ -649,12 +657,14 @@ class ConvictionEngine:
                 logger.warning(f"   🚨 PAID BOOST DETECTED: {boost_penalty} pts (potential pump & dump)")
                 mid_total += boost_penalty
 
-            # 1. Liquidity < $20k (too thin, likely rug)
-            # OPT-044: Increased from $2k to $20k (ML shows liquidity is 3rd most important feature)
-            # Higher threshold prevents rug pulls and manipulation
-            liquidity = token_data.get('liquidity', 0)
-            if liquidity > 0 and liquidity < config.MIN_LIQUIDITY:
-                emergency_blocks.append(f"Liquidity too low: ${liquidity:.0f} < ${config.MIN_LIQUIDITY}")
+            # LIQUIDITY FILTERS DISABLED - User requested removal
+            # Tokens below $20k max market cap will have very little liquidity by nature
+            # Blocking on zero liquidity was preventing valid signals
+
+            # 1. Liquidity check - DISABLED
+            # liquidity = token_data.get('liquidity', 0)
+            # if liquidity > 0 and liquidity < config.MIN_LIQUIDITY:
+            #     emergency_blocks.append(f"Liquidity too low: ${liquidity:.0f} < ${config.MIN_LIQUIDITY}")
 
             # 2. Token age < 30 seconds (too fresh, wait for real activity)
             # REDUCED from 2min to 30sec: KOLs buy within 0-60sec, we were too late!
@@ -665,9 +675,9 @@ class ConvictionEngine:
                 if token_age_seconds < 30:  # 30 seconds (was 2 minutes)
                     emergency_blocks.append(f"Token too new: {token_age_seconds:.0f}s old (< 30sec)")
 
-            # 3. No liquidity at all (pre-graduation tokens need some liquidity)
-            if liquidity == 0 and bonding_pct < 100:
-                emergency_blocks.append(f"Zero liquidity on pre-grad token")
+            # 3. Zero liquidity check - DISABLED
+            # if liquidity == 0 and bonding_pct < 100:
+            #     emergency_blocks.append(f"Zero liquidity on pre-grad token")
 
             # OPT-055: Count emergency flags for smart gating decision
             emergency_flag_count = len(emergency_blocks)
