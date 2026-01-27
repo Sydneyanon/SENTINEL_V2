@@ -886,6 +886,9 @@ class AdminBot:
             stats = collector.stats
             enriched = stats.get('enriched', 0)
             discovered = stats.get('discovered', 0)
+            no_dex = stats.get('skipped_no_dex', 0)
+            filtered = stats.get('skipped_filters', 0)
+            existing = stats.get('skipped_existing', 0)
             credits = stats.get('credits_used_estimate', 0)
 
             # Get total dataset size
@@ -902,6 +905,7 @@ class AdminBot:
                 f"✅ <b>Helius backfill complete!</b>\n\n"
                 f"<b>Discovered:</b> {discovered} tokens\n"
                 f"<b>Added:</b> +{enriched} new tokens\n"
+                f"<b>Skipped:</b> {existing} existing, {no_dex} no DEX pair, {filtered} filtered\n"
                 f"<b>Dataset total:</b> {total} tokens\n"
                 f"<b>Credits used:</b> ~{credits}\n\n"
                 f"{'✅ Ready for ML training!' if total >= 200 else f'Need {200 - total} more tokens for ML training.'}")
