@@ -341,12 +341,12 @@ class PumpMonitorV2:
         If criteria met, route to active_tracker for full conviction scoring.
 
         Criteria (from config.ORGANIC_SCANNER):
-        - min_unique_buyers: 38+ unique buyers (OR velocity bypass)
-        - min_buy_ratio: 60%+ buys vs sells
+        - min_unique_buyers: 60+ unique buyers (OR velocity bypass)
+        - min_buy_ratio: 70%+ buys vs sells
         - max_bundle_ratio: <20% same-block buys (anti-bundle)
-        - min_bonding_pct: past 25% bonding
-        - max_bonding_pct: below 90% bonding (not too late)
-        - velocity_bypass: If buyer velocity >2x in 5min, bypass buyer count
+        - min_bonding_pct: past 40% bonding (avoid very early sniped rugs)
+        - max_bonding_pct: below 85% bonding (not too late)
+        - velocity_bypass: If buyer velocity >2.5x in 5min, bypass buyer count
         """
         # Skip if already tracked, promoted, or rejected
         if token_address in self.organic_promoted:
