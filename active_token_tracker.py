@@ -711,8 +711,11 @@ class ActiveTokenTracker:
                     # OPT-000 PREREQUISITE: Save signal metadata for pattern analysis
                     try:
                         # Extract metadata from conviction_data
-                        kol_wallets = [w['address'] for w in state.kol_buys] if state.kol_buys else []
-                        kol_tiers = [w.get('tier', 'unknown') for w in state.kol_buys] if state.kol_buys else []
+                        # Extract KOL wallet data from conviction scoring results
+                        sw_data = conviction_data.get('smart_wallet_data', {})
+                        sw_wallets = sw_data.get('wallets', [])
+                        kol_wallets = [w.get('wallet', w.get('address', '')) for w in sw_wallets] if sw_wallets else []
+                        kol_tiers = [w.get('tier', 'unknown') for w in sw_wallets] if sw_wallets else []
 
                         # Get narratives from conviction breakdown
                         breakdown = conviction_data.get('breakdown', {})
