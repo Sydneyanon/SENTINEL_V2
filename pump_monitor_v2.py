@@ -341,11 +341,12 @@ class PumpMonitorV2:
         If criteria met, route to active_tracker for full conviction scoring.
 
         Criteria (from config.ORGANIC_SCANNER):
-        - min_unique_buyers: 50+ unique buyers
-        - min_buy_ratio: 65%+ buys vs sells
+        - min_unique_buyers: 38+ unique buyers (OR velocity bypass)
+        - min_buy_ratio: 60%+ buys vs sells
         - max_bundle_ratio: <20% same-block buys (anti-bundle)
-        - min_bonding_pct: past 30% bonding
-        - max_bonding_pct: below 85% bonding (not too late)
+        - min_bonding_pct: past 25% bonding
+        - max_bonding_pct: below 90% bonding (not too late)
+        - velocity_bypass: If buyer velocity >2x in 5min, bypass buyer count
         """
         # Skip if already tracked, promoted, or rejected
         if token_address in self.organic_promoted:
@@ -358,16 +359,35 @@ class PumpMonitorV2:
         scanner_cfg = config.ORGANIC_SCANNER
 
         # Check bonding range
-        min_bonding = scanner_cfg.get('min_bonding_pct', 30)
-        max_bonding = scanner_cfg.get('max_bonding_pct', 85)
+        min_bonding = scanner_cfg.get('min_bonding_pct', 25)
+        max_bonding = scanner_cfg.get('max_bonding_pct', 90)
         if bonding_pct < min_bonding or bonding_pct > max_bonding:
             return
 
-        # Check unique buyer count
+        # Check unique buyer count (with velocity bypass)
         buyer_count = len(self.unique_buyers.get(token_address, set()))
-        min_buyers = scanner_cfg.get('min_unique_buyers', 50)
+        min_buyers = scanner_cfg.get('min_unique_buyers', 38)
+        velocity_bypassed = False
+
         if buyer_count < min_buyers:
-            return
+            # Velocity bypass: if buyer acceleration is >2x in last 5 min, bypass count
+            velocity_multiplier = scanner_cfg.get('velocity_bypass_multiplier', 2.0)
+            history = self.buyer_history.get(token_address, [])
+            if len(history) >= 2:
+                now = datetime.now()
+                cutoff = now - timedelta(seconds=300)  # 5 min window
+                buyers_at_cutoff = 0
+                buyers_now = buyer_count
+                for ts, count in history:
+                    if ts <= cutoff:
+                        buyers_at_cutoff = count
+                if buyers_at_cutoff > 0 and buyers_now >= buyers_at_cutoff * velocity_multiplier:
+                    velocity_bypassed = True
+                    symbol = data.get('symbol', token_address[:8])
+                    logger.info(f"⚡ Organic scanner: ${symbol} velocity bypass! {buyers_at_cutoff}→{buyers_now} buyers ({buyers_now/buyers_at_cutoff:.1f}x in 5m)")
+
+            if not velocity_bypassed:
+                return
 
         # Check buy/sell ratio
         stats = self.trade_stats.get(token_address, {'buys': 0, 'sells': 0, 'blocks': {}})
@@ -407,7 +427,8 @@ class PumpMonitorV2:
         self.organic_promoted.add(token_address)
 
         logger.info("=" * 60)
-        logger.info(f"🔬 ORGANIC SCANNER: ${symbol} QUALIFIED!")
+        bypass_tag = " [VELOCITY BYPASS]" if velocity_bypassed else ""
+        logger.info(f"🔬 ORGANIC SCANNER: ${symbol} QUALIFIED!{bypass_tag}")
         logger.info(f"   👥 Buyers: {buyer_count} | 💹 Buy ratio: {buy_ratio:.0%} | ⚡ Bonding: {bonding_pct:.0f}%")
         logger.info(f"   📊 Trades: {total_trades} ({stats['buys']} buys / {stats['sells']} sells)")
         logger.info(f"   🎯 Routing to ActiveTokenTracker for conviction scoring...")

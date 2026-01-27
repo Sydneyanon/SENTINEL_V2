@@ -223,8 +223,19 @@ class ConvictionEngine:
                     logger.info(f"   🚀 VELOCITY SPIKE: +{velocity_spike_bonus} pts (FOMO at {velocity_spike['spike_at_pct']}% bonding)")
             base_scores['velocity_spike'] = velocity_spike_bonus
 
+            # 9. Graduation Speed Bonus (-10 to +15 points) - POST-GRAD ONLY
+            # Fast graduation = strong demand signal; slow + low growth = weak
+            grad_speed_bonus = 0
+            if not is_pre_grad:
+                grad_speed_bonus = self._score_graduation_speed(token_address, token_data)
+                if grad_speed_bonus > 0:
+                    logger.info(f"   🎓 Graduation Speed: +{grad_speed_bonus} pts (fast grad = strong demand)")
+                elif grad_speed_bonus < 0:
+                    logger.warning(f"   🎓 Graduation Speed: {grad_speed_bonus} pts (slow grad + low growth)")
+            base_scores['graduation_speed'] = grad_speed_bonus
+
             base_total = sum(base_scores.values())
-            logger.info(f"   💰 BASE SCORE: {base_total}/133")
+            logger.info(f"   💰 BASE SCORE: {base_total}/148")
             
             # ================================================================
             # PHASE 2: BUNDLE DETECTION (FREE) ⭐
@@ -945,6 +956,7 @@ class ConvictionEngine:
                 'breakdown': {
                     'buyer_velocity': base_scores.get('buyer_velocity', 0),
                     'bonding_speed': base_scores.get('bonding_speed', 0),
+                    'graduation_speed': base_scores.get('graduation_speed', 0),
                     'smart_wallet': base_scores['smart_wallet'],
                     'narrative': base_scores['narrative'],
                     'volume': base_scores['volume'],
@@ -1052,24 +1064,62 @@ class ConvictionEngine:
         return score
 
     def _score_post_grad_volume(self, token_data: Dict) -> int:
-        """Post-grad volume scoring using DexScreener volume/mcap ratio (existing logic)"""
+        """
+        Post-grad volume scoring using DexScreener multi-timeframe data.
+
+        Uses best of:
+        1. h1 volume velocity (volume_1h / liquidity) - real-time momentum
+        2. h1 volume × price_change_1h composite - momentum quality
+        3. volume_24h / mcap ratio - original fallback
+
+        This eliminates 0-scoring for recently graduated tokens where
+        volume_24h hasn't accumulated but h1 activity is strong.
+        """
         volume_24h = token_data.get('volume_24h', 0)
+        volume_1h = token_data.get('volume_1h', 0)
+        volume_6h = token_data.get('volume_6h', 0)
         mcap = token_data.get('market_cap', 1)
+        liquidity = token_data.get('liquidity', 0)
+        price_change_1h = token_data.get('price_change_1h', 0)
 
-        if mcap == 0:
-            return 0
+        scores = []
 
-        volume_to_mcap = volume_24h / mcap if mcap > 0 else 0
+        # Method 1: h1 volume velocity (volume_1h / liquidity)
+        # Best for recently graduated tokens with active trading
+        if volume_1h > 0 and liquidity > 0:
+            h1_velocity = volume_1h / liquidity
+            if h1_velocity > 5.0:        # 5x liquidity traded in 1h
+                scores.append(config.VOLUME_WEIGHTS['spiking'])   # 15
+            elif h1_velocity > 2.0:      # 2x liquidity
+                scores.append(config.VOLUME_WEIGHTS['growing'])   # 10
+            elif h1_velocity > 0.5:      # Half liquidity
+                scores.append(config.VOLUME_WEIGHTS.get('steady', 5))  # 5
 
-        # High volume relative to mcap = strong activity (on-chain-first: increased weights)
-        if volume_to_mcap > 2.0:  # 200%+ daily volume
-            return config.VOLUME_WEIGHTS['spiking']  # 15 pts
-        elif volume_to_mcap > 1.25:  # 125%+ daily volume
-            return config.VOLUME_WEIGHTS['growing']  # 10 pts
-        elif volume_to_mcap > 1.0:  # 100%+ daily volume (steady)
-            return config.VOLUME_WEIGHTS.get('steady', 5)  # 5 pts
-        else:
-            return 0
+            if scores:
+                logger.debug(f"      Post-grad h1 velocity: {h1_velocity:.1f}x (vol_1h=${volume_1h:.0f} / liq=${liquidity:.0f})")
+
+        # Method 2: h1 composite (volume + positive price = quality momentum)
+        if volume_1h > 0 and price_change_1h > 0 and liquidity > 0:
+            composite = (price_change_1h * volume_1h) / liquidity
+            if composite > 100:
+                scores.append(config.VOLUME_WEIGHTS['spiking'])   # 15
+            elif composite > 30:
+                scores.append(config.VOLUME_WEIGHTS['growing'])   # 10
+            elif composite > 5:
+                scores.append(config.VOLUME_WEIGHTS.get('steady', 5))  # 5
+
+        # Method 3: Original volume_24h/mcap ratio (always available post-grad)
+        if mcap > 0 and volume_24h > 0:
+            volume_to_mcap = volume_24h / mcap
+            if volume_to_mcap > 2.0:
+                scores.append(config.VOLUME_WEIGHTS['spiking'])   # 15
+            elif volume_to_mcap > 1.25:
+                scores.append(config.VOLUME_WEIGHTS['growing'])   # 10
+            elif volume_to_mcap > 1.0:
+                scores.append(config.VOLUME_WEIGHTS.get('steady', 5))  # 5
+
+        # Take the best score across all methods
+        return max(scores) if scores else 0
     
     def _score_price_momentum(self, token_data: Dict) -> int:
         """
@@ -1478,3 +1528,77 @@ class ConvictionEngine:
             return weights['slow']     # 4 pts
         else:
             return weights['crawl']    # 0 pts
+
+    def _score_graduation_speed(self, token_address: str, token_data: Dict) -> int:
+        """
+        Score based on graduation speed (-10 to +15 points) - POST-GRAD ONLY
+        Fast graduation = strong organic demand; slow graduation = weak signal.
+
+        Uses:
+        - PumpPortal bonding milestone timestamps (100% milestone = graduation)
+        - token_data created_at as fallback
+        - Buyer count for slow-grad penalty qualification
+        """
+        grad_cfg = config.GRADUATION_SPEED_BONUS
+
+        # Calculate graduation time in minutes
+        grad_minutes = None
+
+        # Method 1: PumpPortal bonding milestones (most accurate)
+        if self.pump_monitor:
+            milestones = self.pump_monitor.bonding_milestones.get(token_address, {})
+            # Check for 100% milestone (graduation)
+            if 100 in milestones:
+                grad_ts = milestones[100]['timestamp']
+                # Get token creation time from earliest milestone or buyer tracking start
+                start_time = self.pump_monitor.buyer_tracking_start.get(token_address)
+                if start_time:
+                    grad_minutes = (grad_ts - start_time).total_seconds() / 60
+            # Fallback: estimate from 10% and extrapolate
+            elif milestones:
+                earliest_pct = min(milestones.keys())
+                earliest_ts = milestones[earliest_pct]['timestamp']
+                start_time = self.pump_monitor.buyer_tracking_start.get(token_address)
+                if start_time and earliest_pct > 0:
+                    time_to_earliest = (earliest_ts - start_time).total_seconds() / 60
+                    # Extrapolate: if it took X min to reach Y%, estimate total
+                    rate_per_min = earliest_pct / max(time_to_earliest, 0.1)
+                    if rate_per_min > 0:
+                        grad_minutes = 100 / rate_per_min
+
+        # Method 2: token_data timestamps
+        if grad_minutes is None:
+            created_at = token_data.get('created_at')
+            graduated_at = token_data.get('graduated_at')
+            if created_at and graduated_at:
+                grad_minutes = (graduated_at - created_at).total_seconds() / 60
+            elif created_at:
+                # Assume just graduated if post-grad
+                grad_minutes = (datetime.utcnow() - created_at).total_seconds() / 60
+
+        if grad_minutes is None:
+            return 0
+
+        # Get buyer count for slow-grad check
+        buyer_count = 0
+        if self.pump_monitor:
+            buyer_count = len(self.pump_monitor.unique_buyers.get(token_address, set()))
+        if buyer_count == 0 and self.active_tracker:
+            buyer_count = len(self.active_tracker.unique_buyers.get(token_address, set()))
+
+        # Score based on graduation speed
+        fast_threshold = grad_cfg.get('fast_grad_minutes', 15)
+        slow_threshold = grad_cfg.get('slow_grad_minutes', 30)
+
+        if grad_minutes <= fast_threshold:
+            score = grad_cfg.get('fast_grad_bonus', 15)
+            logger.debug(f"      Grad time: {grad_minutes:.1f}m (fast, <{fast_threshold}m)")
+            return score
+        elif grad_minutes >= slow_threshold:
+            min_buyers_for_slow = grad_cfg.get('slow_grad_min_buyers', 100)
+            if buyer_count < min_buyers_for_slow:
+                score = grad_cfg.get('slow_grad_penalty', -10)
+                logger.debug(f"      Grad time: {grad_minutes:.1f}m (slow, >{slow_threshold}m) + low buyers ({buyer_count})")
+                return score
+
+        return 0  # Neutral (between fast and slow thresholds)

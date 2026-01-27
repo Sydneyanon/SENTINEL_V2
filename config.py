@@ -154,14 +154,27 @@ BONDING_SPEED_WEIGHTS = {
 # =============================================================================
 ORGANIC_SCANNER = {
     'enabled': True,
-    'min_unique_buyers': 50,       # Minimum unique buyers to trigger tracking
-    'min_buy_ratio': 0.65,         # At least 65% buys (vs sells)
+    'min_unique_buyers': 38,       # Lowered from 50 - catch mid-cycle tokens earlier
+    'min_buy_ratio': 0.60,         # Lowered from 0.65 - allow slightly more balanced activity
     'max_bundle_ratio': 0.20,      # Max 20% of buys from same block (anti-bundle)
     'watch_window_seconds': 300,   # Watch tokens for 5 min before deciding
-    'min_bonding_pct': 30,         # Only consider tokens past 30% bonding
-    'max_bonding_pct': 85,         # Don't enter too late (already near graduation)
+    'min_bonding_pct': 25,         # Lowered from 30 - catch earlier momentum
+    'max_bonding_pct': 90,         # Raised from 85 - allow near-graduation catches
     'max_tracked_candidates': 100, # Max tokens to watch simultaneously
     'cooldown_seconds': 60,        # Wait 60s between scanner evaluations
+    'velocity_bypass_multiplier': 2.0,  # If buyer velocity >2x in 5min, bypass buyer count
+}
+
+# =============================================================================
+# NEW: GRADUATION SPEED BONUS (Post-grad only)
+# Rewards fast graduations (strong demand) and penalizes slow ones
+# =============================================================================
+GRADUATION_SPEED_BONUS = {
+    'fast_grad_minutes': 15,       # Graduated in <15 min = strong demand
+    'fast_grad_bonus': 15,         # +15 pts for fast graduation
+    'slow_grad_minutes': 30,       # Graduated in >30 min = weak demand
+    'slow_grad_penalty': -10,      # -10 pts for slow graduation with low growth
+    'slow_grad_min_buyers': 100,   # Below this buyer count = "low growth"
 }
 
 # Phase 3: Smart Polling Intervals (adaptive based on stage)
