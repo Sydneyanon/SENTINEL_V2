@@ -59,8 +59,9 @@ STRICT_KOL_ONLY_MODE = True  # ← SET TO TRUE TO SAVE CREDITS!
 # When False: Connect to PumpPortal for FREE unique buyers + KOL detection
 DISABLE_PUMPPORTAL = False  # ← RE-ENABLED for unique buyers + KOL trade detection!
 
-# Disable polling for tokens below threshold (saves credits)
-DISABLE_POLLING_BELOW_THRESHOLD = True  # Only poll tokens >= 50 conviction
+# Tiered polling optimization (saves credits while catching runners)
+# Pre-grad: always polled (30s). Post-grad: <0 skipped, <20 slow (90s), >=20 normal (30s)
+DISABLE_POLLING_BELOW_THRESHOLD = True
 
 # =============================================================================
 # CONVICTION SCORING THRESHOLDS

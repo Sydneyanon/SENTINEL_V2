@@ -420,7 +420,7 @@ class ConvictionEngine:
             # Data comes from PumpPortal (pre-grad) or DexScreener (post-grad)
             #
             # SCORING ASYMMETRY (pre-grad socials matter less):
-            # - Pre-grad: -20 (none) to +13 (full set) — most pre-grad skip socials
+            # - Pre-grad: -10 (none) to +13 (full set) — most memecoins skip socials
             # - Post-grad: -15 (none) to +21 (full + active) — socials more meaningful once DEX listed
 
             social_verification_score = 0
@@ -429,8 +429,8 @@ class ConvictionEngine:
             # Check if social data is available (from PumpPortal or DexScreener)
             # If data not available yet for pre-grad, assume no socials (penalize unknown)
             if token_data.get('has_twitter') is None and is_pre_grad:
-                social_verification_score = -20
-                logger.warning(f"   ⚠️  PRE-GRAD: Social data not loaded yet - assuming no socials: -20 pts")
+                social_verification_score = -10
+                logger.warning(f"   ⚠️  PRE-GRAD: Social data not loaded yet - assuming no socials: -10 pts")
             elif token_data.get('has_twitter') is not None:
                 has_website = token_data.get('has_website', False)
                 has_twitter = token_data.get('has_twitter', False)
@@ -446,10 +446,11 @@ class ConvictionEngine:
                 # PRE-GRAD SCORING: -20 to +13 (more punitive for no socials)
                 if is_pre_grad:
                     if social_count == 0:
-                        # No socials pre-grad = likely low-effort rug
-                        social_verification_score = -20
+                        # No socials pre-grad = common for memecoins, light penalty
+                        # FIX: Was -20, too harsh - missed $STARTUP (+695%) runner
+                        social_verification_score = -10
                         social_verification_data['anonymous'] = True
-                        logger.warning(f"   ⚠️  PRE-GRAD: No socials: -20 pts (low-effort rug)")
+                        logger.warning(f"   ⚠️  PRE-GRAD: No socials: -10 pts (common for memecoins)")
                     elif has_telegram and not has_twitter:
                         # Only Telegram = easy to fake/spam
                         social_verification_score = 2
@@ -643,10 +644,11 @@ class ConvictionEngine:
                             logger.warning(f"      🔴 {risk.get('name', 'Unknown risk')}")
 
                 else:
-                    # RugCheck failed - penalize pre-grad (don't trust unknown risk)
+                    # RugCheck failed - light penalty for pre-grad (API may just be slow)
+                    # FIX: Was -15, too harsh - missed $STARTUP (+695%) runner
                     if is_pre_grad:
-                        rugcheck_penalty = -15
-                        logger.warning(f"   ⚠️  RugCheck API unavailable - assuming risk for pre-grad: {rugcheck_penalty} pts")
+                        rugcheck_penalty = -5
+                        logger.warning(f"   ⚠️  RugCheck API unavailable - light penalty for pre-grad: {rugcheck_penalty} pts")
                     else:
                         logger.debug(f"   ⚠️  RugCheck API unavailable: {rugcheck_result.get('error', 'Unknown error')}")
 
