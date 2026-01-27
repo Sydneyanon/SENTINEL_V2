@@ -634,12 +634,14 @@ NARRATIVE_COMBOS = {
 # Monitors all Pump.fun program events for sub-second token creation detection
 # Replaces flaky PumpPortal WS for initial discovery, PumpPortal still used for trades
 HELIUS_PUMP_WEBHOOK = {
-    'enabled': True,
+    'enabled': False,  # DISABLED: Enhanced webhooks burn ~10M credits/month watching ALL pump.fun txs
+                       # PumpPortal WebSocket provides same organic discovery data for FREE
+                       # Helius credits should be reserved for enrichment (authority, holders, tx patterns)
     'program_id': '6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P',  # Pump.fun program
     'webhook_type': 'enhanced',                # Enhanced = parsed data (costs credits)
     'transaction_types': ['ANY'],              # Catch all pump.fun txs (filter in handler)
     'endpoint_path': '/webhook/pump-program',  # Our FastAPI endpoint
-    'auto_register': True,                     # Register webhook on startup
+    'auto_register': False,                    # Don't auto-register (saves credits)
 }
 
 # Dev Sell Detection via Helius (rug prevention)
