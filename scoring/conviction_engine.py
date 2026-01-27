@@ -161,6 +161,7 @@ class ConvictionEngine:
                 logger.debug(f"   ⚡ Bonding Speed: 0 points")
 
             # 2. Narrative Detection (0-10 points) - if enabled (reduced from 25)
+            narrative_data = {}  # Track for Telegram display
             if self.narrative_detector and config.ENABLE_NARRATIVES:
                 narrative_data = self.narrative_detector.analyze_token(
                     token_symbol,
@@ -440,6 +441,7 @@ class ConvictionEngine:
                     'reason': 'Score too low after Telegram calls',
                     'token_address': token_address,
                     'token_data': token_data,
+                    'narrative_data': narrative_data,
                     'breakdown': {
                         **base_scores,
                         'bundle_penalty': bundle_result['penalty'],
@@ -867,6 +869,7 @@ class ConvictionEngine:
                     'emergency_reasons': emergency_blocks,
                     'token_address': token_address,
                     'token_data': token_data,
+                    'narrative_data': narrative_data,
                     'breakdown': {},
                     'rug_checks': {
                         'rugcheck_api': rugcheck_result,
@@ -1094,7 +1097,8 @@ class ConvictionEngine:
                 'telegram_call_data': telegram_call_data,
                 'social_verification_data': social_verification_data,
                 'smart_wallet_data': smart_wallet_data,  # FIXED: Include wallet data for display
-                'ml_prediction': ml_result  # ML prediction with class, confidence, and bonus
+                'ml_prediction': ml_result,  # ML prediction with class, confidence, and bonus
+                'narrative_data': narrative_data  # Narrative match data for Telegram display
             }
             
         except Exception as e:
