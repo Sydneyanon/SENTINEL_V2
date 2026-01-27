@@ -727,8 +727,20 @@ class AdminBot:
             bundle_penalties = rug.get('bundles', {}).get('penalties', {})
             response += f"  • Bundle penalty: {bundle_penalties.get('minor', 0)}/{bundle_penalties.get('medium', 0)}/{bundle_penalties.get('massive', 0)}\n\n"
 
+            response += "<b>Discovery Mode:</b>\n"
+            if not config.STRICT_KOL_ONLY_MODE:
+                scanner = config.ORGANIC_SCANNER
+                response += f"  • Mode: 🔬 ORGANIC SCANNER\n"
+                response += f"  • Min buyers: {scanner.get('min_unique_buyers', 50)}\n"
+                response += f"  • Min buy ratio: {scanner.get('min_buy_ratio', 0.65):.0%}\n"
+                response += f"  • Bonding range: {scanner.get('min_bonding_pct', 30)}-{scanner.get('max_bonding_pct', 85)}%\n"
+                response += f"  • KOL scoring: DISABLED\n\n"
+            else:
+                response += f"  • Mode: 👑 KOL-TRIGGERED\n"
+                response += f"  • KOL scoring: ACTIVE (0-{config.SMART_WALLET_WEIGHTS.get('max_score', 40)} pts)\n\n"
+
             response += "<b>Features:</b>\n"
-            response += f"  • Narratives: {'ON' if getattr(config, 'ENABLE_NARRATIVES', False) else 'OFF'}\n"
+            response += f"  • Narratives: {'ON' if getattr(config, 'ENABLE_NARRATIVES', False) else 'OFF'} (max 10 pts)\n"
             response += f"  • Telegram posting: {'ON' if config.ENABLE_TELEGRAM else 'OFF'}\n"
             response += f"  • PumpPortal: {'OFF' if config.DISABLE_PUMPPORTAL else 'ON'}\n"
 

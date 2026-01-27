@@ -140,36 +140,43 @@ def extract_token_addresses_from_webhook(webhook_data: List[Dict]) -> List[str]:
 async def handle_pumpportal_signal(token_data: Dict, signal_type: str):
     """
     Handle signals from PumpPortal monitor
-    NOW: Only used for graduation signals or tokens not yet tracked by KOLs
-    
+    NOW: Handles organic scanner discoveries + graduation signals
+
     Args:
         token_data: Token information from PumpPortal
-        signal_type: 'NEW_TOKEN', 'PRE_GRADUATION', or 'POST_GRADUATION'
+        signal_type: 'NEW_TOKEN', 'PRE_GRADUATION', 'POST_GRADUATION', or 'ORGANIC_DISCOVERY'
     """
     try:
         token_address = token_data.get('token_address')
-        
+
+        # ORGANIC DISCOVERY: Token passed organic scanner filters
+        if signal_type == 'ORGANIC_DISCOVERY':
+            symbol = token_data.get('token_symbol', 'UNKNOWN')
+            if active_tracker and not active_tracker.is_tracked(token_address):
+                logger.info(f"🔬 Organic discovery via callback: ${symbol} - starting tracking")
+                await active_tracker.start_tracking(token_address, source='organic_scanner')
+            return
+
         # If this is a NEW_TOKEN event, check if it's tracked by ActiveTracker
         if signal_type == 'NEW_TOKEN':
-            # Check if we're already tracking this (KOL bought it)
+            # Check if we're already tracking this
             if active_tracker and active_tracker.is_tracked(token_address):
                 # Update with PumpPortal data
                 await active_tracker.update_token_trade(token_address, token_data)
                 return  # Don't process further, ActiveTracker handles it
             else:
-                # Not tracked by KOLs, skip
+                # Not tracked, skip (organic scanner handles discovery separately)
                 return
-        
+
         # For PRE_GRADUATION and POST_GRADUATION, check if tracked
         if active_tracker and active_tracker.is_tracked(token_address):
             # Just update the tracked token with graduation info
             await active_tracker.update_token_trade(token_address, token_data)
             return
-        
-        # If we get here, it's a graduation for a non-KOL token
-        # You can optionally score these too, but they're lower priority
-        logger.debug(f"⏭️  Graduation for non-KOL token: {token_address[:8]}")
-        
+
+        # If we get here, it's a graduation for a non-tracked token
+        logger.debug(f"⏭️  Graduation for non-tracked token: {token_address[:8]}")
+
     except Exception as e:
         logger.error(f"❌ Error handling PumpPortal signal: {e}")
 
@@ -497,11 +504,16 @@ async def lifespan(app: FastAPI):
     logger.info("=" * 70)
     logger.info("⚙️  CONFIGURATION")
     logger.info("=" * 70)
-    logger.info(f"🎯 KOL-Triggered Tracking: ENABLED")
-    logger.info(f"Min Conviction Score: {config.MIN_CONVICTION_SCORE}/100")
-    logger.info(f"Elite Wallets: {len(smart_wallet_tracker.tracked_wallets)} tracked")
-    logger.info(f"💰 Data Sources: Helius + Bonding Curve + DexScreener")
-    logger.info(f"⚡ PumpPortal: {'DISABLED' if config.DISABLE_PUMPPORTAL else 'ENABLED'} (saves resources)")
+    discovery_mode = "ON-CHAIN ORGANIC SCANNER" if not config.STRICT_KOL_ONLY_MODE else "KOL-Triggered"
+    logger.info(f"🎯 Discovery Mode: {discovery_mode}")
+    if not config.STRICT_KOL_ONLY_MODE:
+        scanner_cfg = config.ORGANIC_SCANNER
+        logger.info(f"   🔬 Organic Scanner: ENABLED (min {scanner_cfg['min_unique_buyers']} buyers, {scanner_cfg['min_buy_ratio']:.0%} buy ratio)")
+        logger.info(f"   👑 KOL Scoring: DISABLED (structure preserved)")
+    logger.info(f"Min Conviction Score: {config.MIN_CONVICTION_SCORE}/100 (pre-grad) | {config.POST_GRAD_THRESHOLD}/100 (post-grad)")
+    logger.info(f"Elite Wallets: {len(smart_wallet_tracker.tracked_wallets)} loaded (scoring {'active' if config.SMART_WALLET_WEIGHTS.get('max_score', 0) > 0 else 'disabled'})")
+    logger.info(f"💰 Data Sources: PumpPortal + Helius + Bonding Curve + DexScreener")
+    logger.info(f"⚡ PumpPortal: {'DISABLED' if config.DISABLE_PUMPPORTAL else 'ENABLED'}")
     logger.info(f"💎 Credit Optimization: {'ENABLED' if config.DISABLE_POLLING_BELOW_THRESHOLD else 'DISABLED'}")
     logger.info(f"Performance Tracking: ✅ Enabled")
     logger.info(f"Milestones: {', '.join(f'{m}x' for m in config.MILESTONES)}")
@@ -510,7 +522,11 @@ async def lifespan(app: FastAPI):
 
     logger.info("✅ PROMETHEUS READY")
     logger.info("=" * 70)
-    logger.info("🔥 Watching all elite trader activity...")
+    if not config.STRICT_KOL_ONLY_MODE:
+        logger.info("🔬 Organic scanner watching ALL new pump.fun tokens...")
+        logger.info("⚡ Auto-discovering tokens with strong on-chain activity")
+    else:
+        logger.info("🔥 Watching all elite trader activity...")
     logger.info("⚡ Real-time analysis on every trade")
     logger.info("💰 Helius bonding curve decoder for pump.fun tokens")
     logger.info("🚀 Signals posted the moment threshold is crossed")

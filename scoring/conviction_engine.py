@@ -19,20 +19,22 @@ class ConvictionEngine:
     """
     Analyzes tokens and calculates conviction scores (0-100)
 
-    Scoring breakdown (with rug detection):
-    - Smart Wallet Activity: 0-40 points
-    - Narrative Detection: 0-25 points (if enabled)
+    Scoring breakdown (ON-CHAIN-FIRST - KOL scoring disabled):
+    - Buyer Velocity: 0-25 points (NEW - replaces KOL 0-40)
+    - Unique Buyers: 0-20 points (increased from 0-15)
     - Buy/Sell Ratio: 0-20 points (percentage-based)
-    - Unique Buyers: 0-15 points
-    - Volume Velocity: 0-10 points
+    - Volume Velocity: 0-15 points (increased from 0-10)
+    - Bonding Curve Speed: 0-15 points (NEW)
     - Price Momentum: 0-10 points
-    - Telegram Calls: 0-20 points
+    - Narrative Detection: 0-10 points (reduced from 0-25)
+    - Telegram Calls: 0-10 points (reduced from 0-15)
     - Bundle Penalty: -5 to -40 points (with overrides)
-    - Holder Concentration: -15 to -40 points (with KOL bonus)
+    - Holder Concentration: -15 to -40 points
     - ML Prediction: -30 to +20 points
-    Total: 0-130+ points (can exceed with bonuses)
+    Total: 0-125+ points (can exceed with bonuses)
 
-    NOTE: LunarCrush and Twitter scoring removed (no budget)
+    NOTE: Smart wallet (KOL) scoring structure preserved but disabled.
+          Set config.SMART_WALLET_WEIGHTS['max_score'] > 0 to re-enable.
     """
     
     def __init__(
@@ -99,14 +101,15 @@ class ConvictionEngine:
             print(f"📊 Status: {'🌱 PRE-GRADUATION (pump.fun)' if is_pre_grad else '🎓 POST-GRADUATION (Raydium)'}")
             print(f"⚡ Bonding Curve: {bonding_pct:.1f}%")
             print()
-            print("🎯 MULTI-FACTOR SCORING SYSTEM (0-100+ scale):")
-            print("   ├─ 👑 Elite KOL Activity (0-40 pts)")
-            print("   ├─ 🎯 Narrative Match (0-25 pts)")
+            print("🎯 ON-CHAIN-FIRST SCORING SYSTEM (0-100+ scale):")
+            print("   ├─ 🏃 Buyer Velocity (0-25 pts)")
+            print("   ├─ 👥 Unique Buyers (0-20 pts)")
             print("   ├─ 💹 Buy/Sell Ratio (0-20 pts)")
-            print("   ├─ 👥 Unique Buyers (0-15 pts)")
+            print("   ├─ 📊 Volume Velocity (0-15 pts)")
+            print("   ├─ ⚡ Bonding Curve Speed (0-15 pts)")
             print("   ├─ 🚀 Price Momentum (0-10 pts)")
-            print("   ├─ 📊 Volume Velocity (0-10 pts)")
-            print("   ├─ 📱 Telegram Calls (0-20 pts)")
+            print("   ├─ 🎯 Narrative Match (0-10 pts)")
+            print("   ├─ 📱 Telegram Calls (0-10 pts)")
             print("   └─ 🚨 Rug Detection Penalties (-40 to 0)")
             print()
             print("⏳ Calculating real-time conviction score...")
@@ -124,22 +127,47 @@ class ConvictionEngine:
             ml_result = {'ml_enabled': False, 'ml_bonus': 0, 'prediction_class': 0,
                         'class_name': 'unknown', 'confidence': 0.0}
             
-            # 1. Smart Wallet Activity (0-40 points)
+            # 1. Smart Wallet Activity (DISABLED - structure preserved for re-enable)
             smart_wallet_data = await self.smart_wallet_tracker.get_smart_wallet_activity(
-                token_address, 
+                token_address,
                 hours=24
             )
-            base_scores['smart_wallet'] = smart_wallet_data.get('score', 0)
-            logger.info(f"   👑 Smart Wallets: {base_scores['smart_wallet']} points")
-            
-            # 2. Narrative Detection (0-25 points) - if enabled
+            # Only score if KOL scoring is enabled (max_score > 0)
+            if config.SMART_WALLET_WEIGHTS.get('max_score', 0) > 0:
+                base_scores['smart_wallet'] = smart_wallet_data.get('score', 0)
+                logger.info(f"   👑 Smart Wallets: {base_scores['smart_wallet']} points")
+            else:
+                base_scores['smart_wallet'] = 0
+                kol_count = smart_wallet_data.get('wallet_count', 0)
+                if kol_count > 0:
+                    logger.info(f"   👑 Smart Wallets: DISABLED ({kol_count} KOL(s) detected but not scored)")
+                else:
+                    logger.debug(f"   👑 Smart Wallets: DISABLED (on-chain-first mode)")
+
+            # 1b. Buyer Velocity (0-25 points) - NEW: Replaces KOL scoring
+            buyer_velocity_score = self._score_buyer_velocity(token_address)
+            base_scores['buyer_velocity'] = buyer_velocity_score
+            if buyer_velocity_score > 0:
+                logger.info(f"   🏃 Buyer Velocity: {buyer_velocity_score} points")
+            else:
+                logger.info(f"   🏃 Buyer Velocity: 0 points (insufficient buyer activity)")
+
+            # 1c. Bonding Curve Speed (0-15 points) - NEW: On-chain demand indicator
+            bonding_speed_score = self._score_bonding_speed(token_address, token_data)
+            base_scores['bonding_speed'] = bonding_speed_score
+            if bonding_speed_score > 0:
+                logger.info(f"   ⚡ Bonding Speed: {bonding_speed_score} points")
+            else:
+                logger.debug(f"   ⚡ Bonding Speed: 0 points")
+
+            # 2. Narrative Detection (0-10 points) - if enabled (reduced from 25)
             if self.narrative_detector and config.ENABLE_NARRATIVES:
                 narrative_data = self.narrative_detector.analyze_token(
                     token_symbol,
                     token_name,
                     token_data.get('description', '')
                 )
-                base_scores['narrative'] = narrative_data.get('score', 0)
+                base_scores['narrative'] = min(narrative_data.get('score', 0), 10)  # Cap at 10 (on-chain-first)
                 if base_scores['narrative'] > 0:
                     # Show which system matched (RSS+BERTopic realtime vs static)
                     realtime_score = narrative_data.get('realtime_score', 0)
@@ -296,18 +324,19 @@ class ConvictionEngine:
                         call_age = now - call_data['first_seen']
                         call_age_minutes = call_age.total_seconds() / 60
 
-                        # Variable scoring based on Grok's recommendations
+                        # Variable scoring based on intensity (reads from config)
+                        tg_weights = config.TELEGRAM_CONFIRMATION_WEIGHTS
                         if mention_count >= 6 or group_count >= 3:
                             # High intensity: 6+ mentions OR 3+ groups
-                            social_confirmation_score = 15
+                            social_confirmation_score = tg_weights['high_intensity']
                             telegram_call_data['intensity'] = 'high'
                         elif mention_count >= 3 or (very_recent_count >= 2 and group_count >= 2):
                             # Medium intensity: 3-5 mentions OR growing buzz
-                            social_confirmation_score = 10
+                            social_confirmation_score = tg_weights['medium_intensity']
                             telegram_call_data['intensity'] = 'medium'
                         elif mention_count >= 1:
                             # Low intensity: 1-2 mentions
-                            social_confirmation_score = 5
+                            social_confirmation_score = tg_weights['low_intensity']
                             telegram_call_data['intensity'] = 'low'
 
                         # Age decay: reduce points if call is old
@@ -332,11 +361,12 @@ class ConvictionEngine:
                     logger.error(f"   ❌ Error checking Telegram calls: {e}")
                     social_confirmation_score = 0
 
-            # Cap total social score (Telegram only now) at 25 pts
+            # Cap total social score (Telegram only now) at configured max
             # This prevents over-scoring noisy hype
+            max_social = config.TELEGRAM_CONFIRMATION_WEIGHTS.get('max_social_total', 15)
             total_social = social_confirmation_score  # Twitter removed
-            if total_social > 25:
-                excess = total_social - 25
+            if total_social > max_social:
+                excess = total_social - max_social
                 social_confirmation_score -= excess
                 logger.info(f"   ⚖️  Social cap applied: reduced Telegram by {excess} pts (max 25 total)")
                 telegram_call_data['capped'] = True
@@ -375,10 +405,10 @@ class ConvictionEngine:
                             multi_call_bonus += 15
                             logger.info(f"      🔥 MULTI-GROUP BONUS: +15 pts ({group_count} groups)")
 
-                        # If both bonuses apply, cap at +20 to avoid over-scoring
-                        if multi_call_bonus > 20:
-                            logger.info(f"      ⚖️  Multi-call bonus capped at +20 pts")
-                            multi_call_bonus = 20
+                        # If both bonuses apply, cap at +10 to avoid over-scoring (reduced from 20)
+                        if multi_call_bonus > 10:
+                            logger.info(f"      ⚖️  Multi-call bonus capped at +10 pts")
+                            multi_call_bonus = 10
 
                         if multi_call_bonus > 0:
                             telegram_call_data['multi_call_bonus'] = multi_call_bonus
@@ -841,16 +871,16 @@ class ConvictionEngine:
                     if mcap_cap_triggered:
                         logger.warning(f"   🚫 MCAP too high: ${mcap:.0f} > ${max_mcap}")
 
-                    # Show weakest scoring components
+                    # Show weakest scoring components (on-chain-first)
                     breakdown_items = [
-                        ('Smart Wallet', base_scores['smart_wallet'], 40),
-                        ('Narrative', base_scores['narrative'], 25),
-                        ('Volume', base_scores['volume'], 10),
-                        ('Momentum', base_scores['momentum'], 10),
+                        ('Buyer Velocity', base_scores.get('buyer_velocity', 0), 25),
+                        ('Unique Buyers', unique_buyers_score, 20),
                         ('Buy/Sell Ratio', base_scores.get('buy_sell_ratio', 0), 20),
-                        ('Unique Buyers', unique_buyers_score, 15),
-                        ('Telegram Calls', social_confirmation_score, 15),
-                        ('Velocity', base_scores.get('volume_liquidity_velocity', 0), 10),
+                        ('Volume', base_scores['volume'], 15),
+                        ('Bonding Speed', base_scores.get('bonding_speed', 0), 15),
+                        ('Momentum', base_scores['momentum'], 10),
+                        ('Narrative', base_scores['narrative'], 10),
+                        ('Telegram Calls', social_confirmation_score, 10),
                     ]
 
                     # Sort by potential gains (max points - actual points)
@@ -880,12 +910,14 @@ class ConvictionEngine:
                     # Recommendations
                     if config.SIGNAL_LOGGING.get('include_recommendations', True):
                         recommendations = []
-                        if base_scores['smart_wallet'] < 20:
-                            recommendations.append("Wait for KOL buys")
+                        if base_scores.get('buyer_velocity', 0) < 10:
+                            recommendations.append("Need faster buyer velocity (low accumulation)")
                         if base_scores['narrative'] == 0 and config.ENABLE_NARRATIVES:
                             recommendations.append("No hot narrative match")
                         if unique_buyers_score < 10:
                             recommendations.append(f"Need more buyers ({unique_buyers} currently)")
+                        if base_scores.get('bonding_speed', 0) == 0 and is_pre_grad:
+                            recommendations.append("Bonding curve filling too slowly")
                         if rugcheck_penalty < -15:
                             recommendations.append("High rug risk - avoid")
                         if mcap_cap_triggered:
@@ -911,6 +943,8 @@ class ConvictionEngine:
                 'token_address': token_address,  # FIXED: Include token address for links
                 'token_data': token_data,  # FIXED: Include full token data
                 'breakdown': {
+                    'buyer_velocity': base_scores.get('buyer_velocity', 0),
+                    'bonding_speed': base_scores.get('bonding_speed', 0),
                     'smart_wallet': base_scores['smart_wallet'],
                     'narrative': base_scores['narrative'],
                     'volume': base_scores['volume'],
@@ -956,7 +990,7 @@ class ConvictionEngine:
             }
     
     def _score_volume_velocity(self, token_data: Dict) -> int:
-        """Score based on volume velocity (0-10 points) - GROK ENHANCED: More graduated"""
+        """Score based on volume velocity (0-15 points) - ON-CHAIN: Increased from 10"""
         volume_24h = token_data.get('volume_24h', 0)
         mcap = token_data.get('market_cap', 1)
 
@@ -965,13 +999,13 @@ class ConvictionEngine:
 
         volume_to_mcap = volume_24h / mcap if mcap > 0 else 0
 
-        # High volume relative to mcap = strong activity (more graduated scoring)
+        # High volume relative to mcap = strong activity (on-chain-first: increased weights)
         if volume_to_mcap > 2.0:  # 200%+ daily volume
-            return config.VOLUME_WEIGHTS['spiking']  # 10 pts
+            return config.VOLUME_WEIGHTS['spiking']  # 15 pts
         elif volume_to_mcap > 1.25:  # 125%+ daily volume
-            return config.VOLUME_WEIGHTS['growing']  # 7 pts
+            return config.VOLUME_WEIGHTS['growing']  # 10 pts
         elif volume_to_mcap > 1.0:  # 100%+ daily volume (steady)
-            return config.VOLUME_WEIGHTS.get('steady', 3)  # 3 pts
+            return config.VOLUME_WEIGHTS.get('steady', 5)  # 5 pts
         else:
             return 0
     
@@ -1026,19 +1060,19 @@ class ConvictionEngine:
         return base_score
     
     def _score_unique_buyers(self, unique_buyers: int) -> int:
-        """Score based on unique buyer count (0-15 points)"""
+        """Score based on unique buyer count (0-20 points) - ON-CHAIN: Increased from 15"""
         weights = config.UNIQUE_BUYER_WEIGHTS
 
-        if unique_buyers >= 50:
-            return weights['exceptional']
-        elif unique_buyers >= 30:
-            return weights['high']
-        elif unique_buyers >= 15:
-            return weights['medium']
-        elif unique_buyers >= 5:
-            return weights['low']
+        if unique_buyers >= 100:
+            return weights['exceptional']  # 20 pts
+        elif unique_buyers >= 50:
+            return weights['high']         # 15 pts
+        elif unique_buyers >= 25:
+            return weights['medium']       # 10 pts
+        elif unique_buyers >= 10:
+            return weights['low']          # 5 pts
         else:
-            return weights['minimal']
+            return weights['minimal']      # 0 pts
 
     async def _score_social_sentiment(self, token_symbol: str) -> Dict:
         """
@@ -1286,3 +1320,99 @@ class ConvictionEngine:
             return -3
         else:
             return 0  # Under $1M = early opportunity
+
+    def _score_buyer_velocity(self, token_address: str) -> int:
+        """
+        Score based on buyer velocity (0-25 points) - NEW: Replaces KOL scoring
+        Measures how fast unique buyers are accumulating in a 5-minute window.
+
+        Uses PumpPortal buyer history data (FREE).
+        """
+        if not self.pump_monitor:
+            return 0
+
+        weights = config.BUYER_VELOCITY_WEIGHTS
+        window_seconds = weights.get('window_seconds', 300)
+
+        # Get buyer history from pump monitor
+        history = self.pump_monitor.buyer_history.get(token_address, [])
+        if not history:
+            # Fallback: use total unique buyers and tracking duration
+            buyer_count = len(self.pump_monitor.unique_buyers.get(token_address, set()))
+            duration_min = self.pump_monitor.get_buyer_tracking_duration(token_address)
+            if duration_min <= 0 or buyer_count == 0:
+                return 0
+            # Extrapolate to 5-min rate
+            buyers_per_5min = buyer_count / max(duration_min, 0.5) * 5
+        else:
+            # Calculate buyers gained in the last window_seconds
+            now = datetime.now()
+            cutoff = now - timedelta(seconds=window_seconds)
+
+            # Find buyer count at cutoff and now
+            buyers_at_cutoff = 0
+            buyers_now = 0
+            for ts, count in history:
+                if ts <= cutoff:
+                    buyers_at_cutoff = count
+                buyers_now = count  # Last entry is most recent
+
+            if buyers_at_cutoff == 0:
+                # No history at cutoff, use first entry
+                if history:
+                    buyers_at_cutoff = history[0][1]
+
+            buyers_per_5min = buyers_now - buyers_at_cutoff
+
+        # Score based on velocity thresholds
+        if buyers_per_5min >= 100:
+            return weights['explosive']   # 25 pts
+        elif buyers_per_5min >= 50:
+            return weights['very_fast']   # 20 pts
+        elif buyers_per_5min >= 25:
+            return weights['fast']        # 15 pts
+        elif buyers_per_5min >= 15:
+            return weights['moderate']    # 10 pts
+        elif buyers_per_5min >= 5:
+            return weights['slow']        # 5 pts
+        else:
+            return weights['minimal']     # 0 pts
+
+    def _score_bonding_speed(self, token_address: str, token_data: Dict) -> int:
+        """
+        Score based on bonding curve fill speed (0-15 points) - NEW
+        How fast the bonding curve is progressing = organic demand indicator.
+
+        Uses bonding_velocity from PumpPortal milestone tracking (FREE).
+        Only applies to pre-graduation tokens.
+        """
+        bonding_pct = token_data.get('bonding_curve_pct', 0)
+        is_pre_grad = bonding_pct < 100
+
+        if not is_pre_grad:
+            return 0  # Post-grad tokens don't have bonding curves
+
+        weights = config.BONDING_SPEED_WEIGHTS
+
+        # Try to get velocity from token_data (set by PumpPortal)
+        bonding_velocity = token_data.get('bonding_velocity', 0)
+
+        # Fallback: calculate from pump_monitor milestone data
+        if bonding_velocity == 0 and self.pump_monitor:
+            start_time = self.pump_monitor.buyer_tracking_start.get(token_address)
+            if start_time and bonding_pct > 0:
+                elapsed_seconds = (datetime.now() - start_time).total_seconds()
+                if elapsed_seconds > 0:
+                    bonding_velocity = bonding_pct / (elapsed_seconds / 60)  # %/min
+
+        # Score based on velocity thresholds
+        if bonding_velocity >= 5.0:
+            return weights['rocket']   # 15 pts
+        elif bonding_velocity >= 2.0:
+            return weights['fast']     # 12 pts
+        elif bonding_velocity >= 1.0:
+            return weights['steady']   # 8 pts
+        elif bonding_velocity >= 0.5:
+            return weights['slow']     # 4 pts
+        else:
+            return weights['crawl']    # 0 pts

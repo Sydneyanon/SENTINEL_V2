@@ -2,15 +2,17 @@
 PumpPortal Monitor V2 - Real-time pump.fun bonding curve tracking
 UPDATED: Now tracks unique buyers for FREE pre-graduation distribution scoring
          + Detects KOL trades from PumpPortal and logs with names
+         + Organic scanner: auto-discovers tokens with strong on-chain activity
 """
 import asyncio
 import json
 from typing import Callable, Dict, Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 import websockets
 import aiohttp
 from loguru import logger
 from data.curated_wallets import get_wallet_info
+import config
 
 class PumpMonitorV2:
     """Monitors pump.fun tokens via PumpPortal WebSocket"""
@@ -37,10 +39,19 @@ class PumpMonitorV2:
         self.buyer_history = {}  # {token_address: [(timestamp, buyer_count), ...]}
         self.velocity_spikes = {}  # {token_address: {'detected': bool, 'spike_at_pct': int}}
 
+        # ORGANIC SCANNER: Track candidate tokens for automatic discovery
+        self.organic_candidates = {}  # {token_address: {'first_seen': datetime, 'buys': int, 'sells': int, 'same_block_buys': {}, 'symbol': str}}
+        self.organic_promoted = set()  # Tokens already sent to tracker (avoid duplicates)
+        self.organic_rejected = set()  # Tokens rejected (too old, failed filters)
+        self.last_organic_eval = datetime.now()  # Rate-limit evaluations
+
+        # Track buy/sell per token for ratio calculation
+        self.trade_stats = {}  # {token_address: {'buys': int, 'sells': int, 'blocks': {block_slot: count}}}
+
         self.running = False
         self.connection_attempts = 0
         self.messages_received = 0
-        logger.info("🎬 PumpMonitorV2 initialized with unique buyer tracking + bonding milestone tracking")
+        logger.info("🎬 PumpMonitorV2 initialized with unique buyer tracking + bonding milestones + organic scanner")
         
     async def start(self):
         """Start monitoring"""
@@ -166,6 +177,19 @@ class PumpMonitorV2:
         if not token_address:
             return
         
+        # Track buy/sell stats per token (for organic scanner ratio)
+        if token_address not in self.trade_stats:
+            self.trade_stats[token_address] = {'buys': 0, 'sells': 0, 'blocks': {}}
+        if tx_type == 'buy':
+            self.trade_stats[token_address]['buys'] += 1
+            # Track same-block buys for bundle detection
+            block_slot = data.get('slot', 0)
+            if block_slot:
+                self.trade_stats[token_address]['blocks'][block_slot] = \
+                    self.trade_stats[token_address]['blocks'].get(block_slot, 0) + 1
+        elif tx_type == 'sell':
+            self.trade_stats[token_address]['sells'] += 1
+
         # NEW: Track unique buyers (only buys, not sells)
         if tx_type == 'buy' and trader_wallet:
             # Track locally in PumpPortal
@@ -296,17 +320,102 @@ class PumpMonitorV2:
             await self.active_tracker.update_token_trade(token_address, data)
             return  # ActiveTracker handles everything from here
         
-        # Pre-graduation range monitoring (40-60%)
-        if 40 <= bonding_pct <= 60:
-            if token_address not in self.tracked_tokens:
-                logger.info(f"⚡ Token in range: {data.get('symbol')} at {bonding_pct:.1f}%")
-                
-                # Extract token data with unique buyer count
-                token_data = await self._extract_token_data(data)
-                
-                await self.on_signal_callback(token_data, 'PRE_GRADUATION')
-                self.tracked_tokens[token_address] = bonding_pct
+        # ORGANIC SCANNER: Evaluate tokens for automatic discovery
+        # Replaces old pre-graduation range monitoring (40-60%)
+        if config.ORGANIC_SCANNER.get('enabled', False) and not config.STRICT_KOL_ONLY_MODE:
+            await self._evaluate_organic_candidate(token_address, data, bonding_pct)
     
+    async def _evaluate_organic_candidate(self, token_address: str, data: Dict, bonding_pct: float):
+        """
+        Organic Scanner: Evaluate if a token meets organic activity thresholds.
+        If criteria met, route to active_tracker for full conviction scoring.
+
+        Criteria (from config.ORGANIC_SCANNER):
+        - min_unique_buyers: 50+ unique buyers
+        - min_buy_ratio: 65%+ buys vs sells
+        - max_bundle_ratio: <20% same-block buys (anti-bundle)
+        - min_bonding_pct: past 30% bonding
+        - max_bonding_pct: below 85% bonding (not too late)
+        """
+        # Skip if already tracked, promoted, or rejected
+        if token_address in self.organic_promoted:
+            return
+        if token_address in self.organic_rejected:
+            return
+        if self.active_tracker and self.active_tracker.is_tracked(token_address):
+            return
+
+        scanner_cfg = config.ORGANIC_SCANNER
+
+        # Check bonding range
+        min_bonding = scanner_cfg.get('min_bonding_pct', 30)
+        max_bonding = scanner_cfg.get('max_bonding_pct', 85)
+        if bonding_pct < min_bonding or bonding_pct > max_bonding:
+            return
+
+        # Check unique buyer count
+        buyer_count = len(self.unique_buyers.get(token_address, set()))
+        min_buyers = scanner_cfg.get('min_unique_buyers', 50)
+        if buyer_count < min_buyers:
+            return
+
+        # Check buy/sell ratio
+        stats = self.trade_stats.get(token_address, {'buys': 0, 'sells': 0, 'blocks': {}})
+        total_trades = stats['buys'] + stats['sells']
+        if total_trades < 20:
+            return  # Not enough data
+        buy_ratio = stats['buys'] / total_trades
+        min_buy_ratio = scanner_cfg.get('min_buy_ratio', 0.65)
+        if buy_ratio < min_buy_ratio:
+            return
+
+        # Check bundle ratio (same-block buys as % of total buys)
+        if stats['buys'] > 0 and stats['blocks']:
+            max_same_block = max(stats['blocks'].values()) if stats['blocks'] else 0
+            bundle_ratio = max_same_block / stats['buys']
+            max_bundle = scanner_cfg.get('max_bundle_ratio', 0.20)
+            if bundle_ratio > max_bundle:
+                symbol = data.get('symbol', token_address[:8])
+                logger.info(f"🚫 Organic scanner REJECTED ${symbol}: bundle ratio {bundle_ratio:.0%} > {max_bundle:.0%}")
+                self.organic_rejected.add(token_address)
+                return
+
+        # Rate limit evaluations
+        now = datetime.now()
+        cooldown = scanner_cfg.get('cooldown_seconds', 60)
+        if (now - self.last_organic_eval).total_seconds() < cooldown:
+            return
+        self.last_organic_eval = now
+
+        # Check candidate limit
+        max_candidates = scanner_cfg.get('max_tracked_candidates', 100)
+        if len(self.organic_promoted) >= max_candidates:
+            return
+
+        # ALL CRITERIA MET - Promote to active tracking!
+        symbol = data.get('symbol', token_address[:8])
+        self.organic_promoted.add(token_address)
+
+        logger.info("=" * 60)
+        logger.info(f"🔬 ORGANIC SCANNER: ${symbol} QUALIFIED!")
+        logger.info(f"   👥 Buyers: {buyer_count} | 💹 Buy ratio: {buy_ratio:.0%} | ⚡ Bonding: {bonding_pct:.0f}%")
+        logger.info(f"   📊 Trades: {total_trades} ({stats['buys']} buys / {stats['sells']} sells)")
+        logger.info(f"   🎯 Routing to ActiveTokenTracker for conviction scoring...")
+        logger.info("=" * 60)
+
+        # Route to active tracker
+        if self.active_tracker:
+            try:
+                await self.active_tracker.start_tracking(token_address, source='organic_scanner')
+                logger.info(f"   ✅ ${symbol} now being tracked (organic discovery)")
+            except Exception as e:
+                logger.error(f"   ❌ Failed to start tracking ${symbol}: {e}")
+        else:
+            # Fallback: send via callback
+            token_data = await self._extract_token_data(data)
+            token_data['source'] = 'organic_scanner'
+            await self.on_signal_callback(token_data, 'ORGANIC_DISCOVERY')
+
     async def _handle_graduation(self, data: Dict):
         """Handle graduation"""
         token_address = data.get('mint')
@@ -491,8 +600,20 @@ class PumpMonitorV2:
             tokens_to_remove = list(self.tracked_tokens.keys())[:500]
             for token in tokens_to_remove:
                 self.tracked_tokens.pop(token, None)
-                # NEW: Also cleanup buyer tracking data
+                # Also cleanup buyer tracking data
                 self.unique_buyers.pop(token, None)
                 self.buyer_tracking_start.pop(token, None)
-            
+                self.trade_stats.pop(token, None)
+
             logger.info(f"🧹 Cleaned up {len(tokens_to_remove)} old tokens")
+
+        # Cleanup organic scanner data (keep sets bounded)
+        if len(self.organic_promoted) > 500:
+            self.organic_promoted = set(list(self.organic_promoted)[-200:])
+        if len(self.organic_rejected) > 2000:
+            self.organic_rejected = set(list(self.organic_rejected)[-500:])
+        if len(self.trade_stats) > 2000:
+            # Remove oldest entries
+            keys_to_remove = list(self.trade_stats.keys())[:1000]
+            for k in keys_to_remove:
+                self.trade_stats.pop(k, None)

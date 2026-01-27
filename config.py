@@ -51,8 +51,8 @@ TELEGRAM_PHONE = os.getenv('TELEGRAM_PHONE')  # Your phone number (optional, for
 
 # STRICT MODE: Only track tokens bought by KOLs (saves massive API credits)
 # When True: Only tracks tokens from /webhook/smart-wallet (KOL buys)
-# When False: Also processes PumpPortal graduations (burns credits fast!)
-STRICT_KOL_ONLY_MODE = True  # ← SET TO TRUE TO SAVE CREDITS!
+# When False: Also processes PumpPortal organic discoveries
+STRICT_KOL_ONLY_MODE = False  # ← Disabled: now using organic scanner for discovery
 
 # Disable PumpPortal entirely (saves CPU/memory)
 # When True: Skip PumpPortal WebSocket entirely (Helius webhooks only)
@@ -68,15 +68,13 @@ DISABLE_POLLING_BELOW_THRESHOLD = True
 # =============================================================================
 
 # Signal thresholds based on graduation status
-# UPDATE 2026-01-26 (GROK RECOMMENDATIONS):
-# - Removed Twitter (0-15 pts) and LunarCrush (0-20 pts) due to budget constraints
-# - Raised pre-grad threshold from 35 to 45 (catch mid-cycle pumps like SHRIMP)
-# - Raised post-grad threshold to 75 (safer phase, avoid tops)
-# - Enhanced volume/momentum/velocity scoring (more graduated, less binary)
-# - Enabled narratives for better early detection (+0-25 pts)
-# - Stricter rug penalties to reduce rug calls
-MIN_CONVICTION_SCORE = 50  # Raised from 45 - cut low-conviction noise (45-49 signals were mostly losses)
-POST_GRAD_THRESHOLD = 75   # Raised from 40 - much stricter for graduated tokens
+# UPDATE 2026-01-27 (ON-CHAIN-FIRST SCORING):
+# - Removed KOL smart wallet scoring (was 0-40 pts) - organic scanner replaces KOL-first discovery
+# - Added buyer velocity scoring (0-25 pts) and bonding curve speed (0-15 pts)
+# - Increased unique buyers (0-20), volume (0-15), reduced narrative (0-10), telegram (0-10)
+# - Lowered post-grad threshold from 75 to 65 (no KOL boost available)
+MIN_CONVICTION_SCORE = 50  # Pre-grad threshold (unchanged)
+POST_GRAD_THRESHOLD = 65   # Lowered from 75 - no KOL boost, pure on-chain scoring
 
 # Base score threshold for distribution checks
 # Only check distribution if base score >= this value
@@ -84,28 +82,29 @@ DISTRIBUTION_CHECK_THRESHOLD = 50
 
 # =============================================================================
 # SCORING WEIGHTS (Total: 0-100 points possible)
+# UPDATE 2026-01-27: On-chain-first scoring (KOL scoring disabled)
 # =============================================================================
 
 # Combined WEIGHTS dictionary (required by conviction engine)
 WEIGHTS = {
-    # Smart Wallet Activity (max 40 points)
-    'smart_wallet_elite': 15,      # Elite wallet bought (+15 per wallet)
-    'smart_wallet_kol': 10,         # Top KOL bought (+10 per wallet)
-    
-    # Narrative Detection (max 25 points)
-    'narrative_hot': 20,            # Hot/trending narrative
-    'narrative_fresh': 10,          # Fresh narrative (< 48h)
-    'narrative_multiple': 5,        # Multiple narratives
-    
+    # Smart Wallet Activity - DISABLED (kept at 0 for structure, can re-enable)
+    'smart_wallet_elite': 0,        # Elite wallet bought (disabled)
+    'smart_wallet_kol': 0,          # Top KOL bought (disabled)
+
+    # Narrative Detection (max 10 points - reduced from 25)
+    'narrative_hot': 10,            # Hot/trending narrative
+    'narrative_fresh': 5,           # Fresh narrative (< 48h)
+    'narrative_multiple': 3,        # Multiple narratives
+
     # Holder Distribution (max 15 points)
     'holders_high': 15,             # 100+ holders
-    'holders_medium': 10,           # 50-99 holders  
+    'holders_medium': 10,           # 50-99 holders
     'holders_low': 5,               # 30-49 holders
-    
-    # Volume Velocity (max 10 points)
-    'volume_spike': 10,             # Strong volume spike
-    'volume_increasing': 5,         # Steady increase
-    
+
+    # Volume Velocity (max 15 points - increased from 10)
+    'volume_spike': 15,             # Strong volume spike
+    'volume_increasing': 10,        # Steady increase
+
     # Price Momentum (max 10 points)
     'momentum_strong': 10,          # Strong upward momentum
     'momentum_moderate': 5,         # Moderate momentum
@@ -115,12 +114,54 @@ WEIGHTS = {
 # DETAILED SCORING WEIGHTS (for specific calculations)
 # =============================================================================
 
-# Smart Wallet Activity (0-40 points)
+# Smart Wallet Activity (DISABLED - kept for structure, can re-enable)
 SMART_WALLET_WEIGHTS = {
-    'per_kol': 10,           # 10 points per KOL wallet that bought
-    'max_score': 40,         # Cap at 4 KOLs (40 points max)
-    'multi_kol_bonus': 15,   # Extra bonus if 2+ KOLs buy within 5 min
+    'per_kol': 0,            # Disabled (was 10)
+    'max_score': 0,          # Disabled (was 40)
+    'multi_kol_bonus': 0,    # Disabled (was 15)
     'kol_time_window': 300   # 5 minutes for multi-KOL bonus
+}
+
+# =============================================================================
+# NEW: BUYER VELOCITY SCORING (0-25 points) - Replaces KOL scoring
+# Measures how fast unique buyers are accumulating
+# =============================================================================
+BUYER_VELOCITY_WEIGHTS = {
+    'explosive': 25,         # 100+ buyers in 5 min (viral organic demand)
+    'very_fast': 20,         # 50-99 buyers in 5 min
+    'fast': 15,              # 25-49 buyers in 5 min
+    'moderate': 10,          # 15-24 buyers in 5 min
+    'slow': 5,               # 5-14 buyers in 5 min
+    'minimal': 0,            # <5 buyers in 5 min
+    'window_seconds': 300,   # 5-minute window for velocity calculation
+}
+
+# =============================================================================
+# NEW: BONDING CURVE SPEED SCORING (0-15 points)
+# How fast the bonding curve is filling (organic demand indicator)
+# =============================================================================
+BONDING_SPEED_WEIGHTS = {
+    'rocket': 15,            # >5%/min bonding velocity (explosive demand)
+    'fast': 12,              # 2-5%/min bonding velocity
+    'steady': 8,             # 1-2%/min bonding velocity
+    'slow': 4,               # 0.5-1%/min bonding velocity
+    'crawl': 0,              # <0.5%/min (weak demand)
+}
+
+# =============================================================================
+# NEW: ORGANIC SCANNER CONFIG
+# Filters for PumpPortal new tokens to identify organic activity
+# =============================================================================
+ORGANIC_SCANNER = {
+    'enabled': True,
+    'min_unique_buyers': 50,       # Minimum unique buyers to trigger tracking
+    'min_buy_ratio': 0.65,         # At least 65% buys (vs sells)
+    'max_bundle_ratio': 0.20,      # Max 20% of buys from same block (anti-bundle)
+    'watch_window_seconds': 300,   # Watch tokens for 5 min before deciding
+    'min_bonding_pct': 30,         # Only consider tokens past 30% bonding
+    'max_bonding_pct': 85,         # Don't enter too late (already near graduation)
+    'max_tracked_candidates': 100, # Max tokens to watch simultaneously
+    'cooldown_seconds': 60,        # Wait 60s between scanner evaluations
 }
 
 # Phase 3: Smart Polling Intervals (adaptive based on stage)
@@ -140,11 +181,11 @@ HOLDER_FETCH_GATES = {
     'always_fetch_post_grad': True  # Always check holders post-graduation
 }
 
-# Volume Velocity (0-10 points) - GROK ENHANCED: More graduated
+# Volume Velocity (0-15 points) - ON-CHAIN: Increased from 10 max
 VOLUME_WEIGHTS = {
-    'spiking': 10,          # Volume 2x+ expected rate
-    'growing': 7,           # Volume 1.25x+ expected rate (raised from 5)
-    'steady': 3             # Volume >1x expected rate (new tier)
+    'spiking': 15,          # Volume 2x+ expected rate (raised from 10)
+    'growing': 10,          # Volume 1.25x+ expected rate (raised from 7)
+    'steady': 5             # Volume >1x expected rate (raised from 3)
 }
 
 # Price Momentum (0-10 points) - GROK ENHANCED: More graduated
@@ -154,15 +195,14 @@ MOMENTUM_WEIGHTS = {
     'moderate': 3           # +10% in 5 minutes (new tier)
 }
 
-# Distribution Scoring (0-15 points)
+# Distribution Scoring (0-20 points) - ON-CHAIN: Increased from 15 max
 # Pre-graduation: Based on unique buyers (FREE)
-# LOWERED: Catch early KOL plays before they get crowded
 UNIQUE_BUYER_WEIGHTS = {
-    'exceptional': 15,  # 50+ unique buyers (strong organic interest)
-    'high': 12,         # 30-49 unique buyers
-    'medium': 8,        # 15-29 unique buyers
-    'low': 5,           # 5-14 unique buyers (early stage)
-    'minimal': 0        # <5 unique buyers (too early/risky)
+    'exceptional': 20,  # 100+ unique buyers (very strong organic, raised from 15)
+    'high': 15,         # 50-99 unique buyers (raised from 12)
+    'medium': 10,       # 25-49 unique buyers (raised from 8)
+    'low': 5,           # 10-24 unique buyers
+    'minimal': 0        # <10 unique buyers (too early/risky)
 }
 
 # Post-graduation: Based on real holders (10 credits)
@@ -174,14 +214,14 @@ HOLDER_WEIGHTS = {
 
 # Twitter and LunarCrush scoring removed (no budget) - see lines 418-419
 
-# Telegram Social Confirmation Scoring (FREE - 0-15 points)
-# Only applies to tokens already tracked by KOLs (social confirmation)
+# Telegram Social Confirmation Scoring (FREE - 0-10 points) - Reduced from 15
+# Applies to tracked tokens as social confirmation
 TELEGRAM_CONFIRMATION_WEIGHTS = {
-    'high_intensity': 15,   # 6+ mentions OR 3+ groups
-    'medium_intensity': 10, # 3-5 mentions OR growing buzz
-    'low_intensity': 5,     # 1-2 mentions
+    'high_intensity': 10,   # 6+ mentions OR 3+ groups (reduced from 15)
+    'medium_intensity': 7,  # 3-5 mentions OR growing buzz (reduced from 10)
+    'low_intensity': 3,     # 1-2 mentions (reduced from 5)
     'age_decay': 0.5,       # 50% reduction if call >2 hours old
-    'max_social_total': 25  # Cap total social score (Twitter + Telegram)
+    'max_social_total': 15  # Cap total social score (reduced from 25)
 }
 
 # Telegram Call-Triggered Tracking (Optional)
@@ -478,76 +518,76 @@ ENABLE_BUILTIN_TELEGRAM_MONITOR = True  # Built-in Telegram monitor - ENABLED!
 # Hot narratives to watch for (updated for 2026 meta)
 # Format: dict with narrative names as keys
 HOT_NARRATIVES = {
-    # AI / Agents (HOTTEST in 2026)
+    # AI / Agents (HOTTEST in 2026) - capped at 10 max
     'ai_agent': {
         'name': 'AI Agent',
         'keywords': ['ai', 'agent', 'autonomous', 'neural', 'gpt', 'bot', 'llm', 'cognition'],
-        'weight': 25,  # Maximum weight
+        'weight': 10,  # Reduced from 25 (narrative max is now 10)
         'active': True
     },
-    
+
     # DeSci (Growing trend)
     'desci': {
         'name': 'DeSci',
         'keywords': ['desci', 'science', 'research', 'biotech', 'lab', 'molecule', 'data'],
-        'weight': 22,
+        'weight': 10,  # Reduced from 22
         'active': True
     },
-    
+
     # RWA (Real World Assets - 2026 focus)
     'rwa': {
         'name': 'RWA',
         'keywords': ['rwa', 'real world', 'asset', 'tokenized', 'treasury', 'bond'],
-        'weight': 20,
+        'weight': 8,   # Reduced from 20
         'active': True
     },
-    
+
     # Privacy / ZK (Solana ZK compression)
     'privacy': {
         'name': 'Privacy',
         'keywords': ['privacy', 'zk', 'zero knowledge', 'anonymous', 'private', 'stealth'],
-        'weight': 18,
+        'weight': 8,   # Reduced from 18
         'active': True
     },
-    
+
     # DeFi (Always relevant)
     'defi': {
         'name': 'DeFi',
         'keywords': ['defi', 'yield', 'stake', 'farm', 'swap', 'liquidity', 'dex'],
-        'weight': 15,
+        'weight': 7,   # Reduced from 15
         'active': True
     },
-    
+
     # Mobile / Saga (Solana mobile push)
     'mobile': {
         'name': 'Mobile',
         'keywords': ['mobile', 'saga', 'phone', 'seeker', 'dapp'],
-        'weight': 15,
+        'weight': 7,   # Reduced from 15
         'active': True
     },
-    
+
     # GameFi
     'gamefi': {
         'name': 'GameFi',
         'keywords': ['game', 'play', 'nft', 'metaverse', 'gaming', 'p2e'],
-        'weight': 12,
+        'weight': 6,   # Reduced from 12
         'active': True
     },
-    
+
     # Meme (Classic)
     'meme': {
         'name': 'Meme',
         'keywords': ['meme', 'pepe', 'doge', 'shiba', 'wojak', 'frog', 'cat', 'dog'],
-        'weight': 10,
+        'weight': 5,   # Reduced from 10
         'active': True
     }
 }
 
-# Narrative combo bonuses (when multiple narratives match)
+# Narrative combo bonuses (when multiple narratives match) - Reduced proportionally
 NARRATIVE_COMBOS = {
-    ('ai_agent', 'desci'): +10,      # AI + DeSci = powerful combo
-    ('ai_agent', 'defi'): +8,        # AI + DeFi = yield farming agents
-    ('rwa', 'defi'): +8,             # RWA + DeFi = tokenized yields
+    ('ai_agent', 'desci'): +5,       # AI + DeSci = powerful combo (reduced from 10)
+    ('ai_agent', 'defi'): +3,        # AI + DeFi = yield farming agents (reduced from 8)
+    ('rwa', 'defi'): +3,             # RWA + DeFi = tokenized yields (reduced from 8)
 }
 
 # =============================================================================
