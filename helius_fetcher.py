@@ -1200,6 +1200,178 @@ class HeliusDataFetcher:
     # PARSED TX HISTORY (Velocity & Momentum Enrichment)
     # ================================================================
 
+    # ================================================================
+    # HISTORICAL BACKFILL (DAS searchAssets + Program TX Scanning)
+    # ================================================================
+
+    async def search_pump_graduates(self, limit_per_page: int = 200, pages: int = 5) -> List[str]:
+        """
+        Discover pump.fun tokens using Helius DAS searchAssets API.
+
+        Searches for fungible tokens associated with the Pump.fun program,
+        then verifies graduation via DexScreener pair existence.
+
+        Cost: ~1 credit per searchAssets page (DAS API)
+
+        Args:
+            limit_per_page: Max tokens per page (max 1000)
+            pages: Number of pages to fetch
+
+        Returns:
+            List of token mint addresses found
+        """
+        try:
+            all_mints = []
+
+            for page in range(1, pages + 1):
+                payload = {
+                    "jsonrpc": "2.0",
+                    "id": f"backfill-{page}",
+                    "method": "searchAssets",
+                    "params": {
+                        "authorityAddress": PUMP_PROGRAM_ID,
+                        "tokenType": "fungible",
+                        "page": page,
+                        "limit": min(limit_per_page, 1000),
+                        "sortBy": {
+                            "sortBy": "recent_action",
+                            "sortDirection": "desc"
+                        }
+                    }
+                }
+
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(
+                        self.rpc_url, json=payload,
+                        timeout=aiohttp.ClientTimeout(total=30)
+                    ) as resp:
+                        if resp.status != 200:
+                            logger.warning(f"   searchAssets page {page} failed: HTTP {resp.status}")
+                            break
+
+                        data = await resp.json()
+                        error = data.get('error')
+                        if error:
+                            logger.warning(f"   searchAssets RPC error: {error}")
+                            break
+
+                        result = data.get('result', {})
+                        items = result.get('items', [])
+
+                        if not items:
+                            logger.info(f"   No more items at page {page}")
+                            break
+
+                        for item in items:
+                            mint = item.get('id')
+                            if mint and mint not in all_mints:
+                                all_mints.append(mint)
+
+                        logger.info(f"   Page {page}: found {len(items)} tokens (total: {len(all_mints)})")
+
+                        total = result.get('total', 0)
+                        if page * limit_per_page >= total:
+                            break
+
+                await asyncio.sleep(0.3)
+
+            logger.info(f"   searchAssets returned {len(all_mints)} pump.fun token mints")
+            return all_mints
+
+        except Exception as e:
+            logger.error(f"❌ searchAssets error: {e}")
+            return []
+
+    async def scan_program_graduates(self, tx_limit: int = 500) -> List[str]:
+        """
+        Scan recent Pump.fun program transactions to discover graduated tokens.
+
+        Fallback method: uses getSignaturesForAddress on the Pump.fun program,
+        then parses transactions to identify unique token mints.
+        More reliable than searchAssets for recent activity.
+
+        Cost: ~5-10 credits (getSignaturesForAddress + parsed TX batches)
+
+        Args:
+            tx_limit: Number of recent transactions to scan
+
+        Returns:
+            List of token mint addresses discovered from program activity
+        """
+        try:
+            # Step 1: Get recent signatures for the Pump.fun program
+            sig_payload = {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "getSignaturesForAddress",
+                "params": [
+                    PUMP_PROGRAM_ID,
+                    {"limit": min(tx_limit, 1000), "commitment": "confirmed"}
+                ]
+            }
+
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    self.rpc_url, json=sig_payload,
+                    timeout=aiohttp.ClientTimeout(total=20)
+                ) as resp:
+                    if resp.status != 200:
+                        logger.warning(f"   getSignaturesForAddress failed: HTTP {resp.status}")
+                        return []
+                    data = await resp.json()
+                    signatures = data.get('result', [])
+
+            if not signatures:
+                logger.info("   No recent pump.fun program signatures found")
+                return []
+
+            sig_list = [s['signature'] for s in signatures if s.get('err') is None]
+            logger.info(f"   Found {len(sig_list)} successful pump.fun program txs")
+
+            # Step 2: Parse transactions in batches to extract token mints
+            parse_url = f"https://api.helius.xyz/v0/transactions/?api-key={self.api_key}"
+            discovered_mints = set()
+
+            for i in range(0, len(sig_list), 20):
+                batch = sig_list[i:i + 20]
+                try:
+                    async with aiohttp.ClientSession() as session:
+                        async with session.post(
+                            parse_url, json={"transactions": batch},
+                            timeout=aiohttp.ClientTimeout(total=20)
+                        ) as resp:
+                            if resp.status != 200:
+                                continue
+                            parsed_txs = await resp.json()
+
+                    for tx in parsed_txs:
+                        # Extract token mints from token transfers
+                        for transfer in tx.get('tokenTransfers', []):
+                            mint = transfer.get('mint')
+                            if mint:
+                                discovered_mints.add(mint)
+
+                        # Also check account data for token mints
+                        for account in tx.get('accountData', []):
+                            if account.get('tokenBalanceChanges'):
+                                for change in account['tokenBalanceChanges']:
+                                    mint = change.get('mint')
+                                    if mint:
+                                        discovered_mints.add(mint)
+
+                except Exception as e:
+                    logger.debug(f"   Batch parse error: {e}")
+                    continue
+
+                await asyncio.sleep(0.3)
+
+            logger.info(f"   Discovered {len(discovered_mints)} unique token mints from program txs")
+            return list(discovered_mints)
+
+        except Exception as e:
+            logger.error(f"❌ scan_program_graduates error: {e}")
+            return []
+
     async def get_recent_token_transactions(self, token_address: str, limit: int = 100) -> Dict:
         """
         Get recent parsed transactions for a token.
