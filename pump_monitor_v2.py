@@ -2,15 +2,17 @@
 PumpPortal Monitor V2 - Real-time pump.fun bonding curve tracking
 UPDATED: Now tracks unique buyers for FREE pre-graduation distribution scoring
          + Detects KOL trades from PumpPortal and logs with names
+         + Organic scanner: auto-discovers tokens with strong on-chain activity
 """
 import asyncio
 import json
 from typing import Callable, Dict, Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 import websockets
 import aiohttp
 from loguru import logger
 from data.curated_wallets import get_wallet_info
+import config
 
 class PumpMonitorV2:
     """Monitors pump.fun tokens via PumpPortal WebSocket"""
@@ -37,10 +39,24 @@ class PumpMonitorV2:
         self.buyer_history = {}  # {token_address: [(timestamp, buyer_count), ...]}
         self.velocity_spikes = {}  # {token_address: {'detected': bool, 'spike_at_pct': int}}
 
+        # ORGANIC SCANNER: Track candidate tokens for automatic discovery
+        self.organic_candidates = {}  # {token_address: {'first_seen': datetime, 'buys': int, 'sells': int, 'same_block_buys': {}, 'symbol': str}}
+        self.organic_promoted = set()  # Tokens already sent to tracker (avoid duplicates)
+        self.organic_rejected = set()  # Tokens rejected (too old, failed filters)
+        self.last_organic_eval = datetime.now()  # Rate-limit evaluations
+
+        # Track buy/sell per token for ratio calculation
+        self.trade_stats = {}  # {token_address: {'buys': int, 'sells': int, 'blocks': {block_slot: count}}}
+
+        # ROLLING SOL VOLUME: Track SOL amounts per trade for phase-aware volume scoring
+        # Pre-grad tokens have no DexScreener data, so we calculate volume momentum
+        # from PumpPortal WebSocket trade events (each trade has solAmount)
+        self.sol_volume_history = {}  # {token_address: [(datetime, sol_amount), ...]}
+
         self.running = False
         self.connection_attempts = 0
         self.messages_received = 0
-        logger.info("🎬 PumpMonitorV2 initialized with unique buyer tracking + bonding milestone tracking")
+        logger.info("🎬 PumpMonitorV2 initialized with unique buyer tracking + bonding milestones + organic scanner")
         
     async def start(self):
         """Start monitoring"""
@@ -166,6 +182,19 @@ class PumpMonitorV2:
         if not token_address:
             return
         
+        # Track buy/sell stats per token (for organic scanner ratio)
+        if token_address not in self.trade_stats:
+            self.trade_stats[token_address] = {'buys': 0, 'sells': 0, 'blocks': {}}
+        if tx_type == 'buy':
+            self.trade_stats[token_address]['buys'] += 1
+            # Track same-block buys for bundle detection
+            block_slot = data.get('slot', 0)
+            if block_slot:
+                self.trade_stats[token_address]['blocks'][block_slot] = \
+                    self.trade_stats[token_address]['blocks'].get(block_slot, 0) + 1
+        elif tx_type == 'sell':
+            self.trade_stats[token_address]['sells'] += 1
+
         # NEW: Track unique buyers (only buys, not sells)
         if tx_type == 'buy' and trader_wallet:
             # Track locally in PumpPortal
@@ -252,6 +281,11 @@ class PumpMonitorV2:
         if sol_amount:
             self.sol_raised[token_address] += float(sol_amount)
 
+            # Track SOL volume with timestamps for rolling window analysis
+            if token_address not in self.sol_volume_history:
+                self.sol_volume_history[token_address] = []
+            self.sol_volume_history[token_address].append((datetime.now(), float(sol_amount)))
+
         # Check if we hit a bonding milestone
         current_bonding_pct = int(bonding_pct)
         for milestone in self.milestone_percentages:
@@ -296,17 +330,123 @@ class PumpMonitorV2:
             await self.active_tracker.update_token_trade(token_address, data)
             return  # ActiveTracker handles everything from here
         
-        # Pre-graduation range monitoring (40-60%)
-        if 40 <= bonding_pct <= 60:
-            if token_address not in self.tracked_tokens:
-                logger.info(f"⚡ Token in range: {data.get('symbol')} at {bonding_pct:.1f}%")
-                
-                # Extract token data with unique buyer count
-                token_data = await self._extract_token_data(data)
-                
-                await self.on_signal_callback(token_data, 'PRE_GRADUATION')
-                self.tracked_tokens[token_address] = bonding_pct
+        # ORGANIC SCANNER: Evaluate tokens for automatic discovery
+        # Replaces old pre-graduation range monitoring (40-60%)
+        if config.ORGANIC_SCANNER.get('enabled', False) and not config.STRICT_KOL_ONLY_MODE:
+            await self._evaluate_organic_candidate(token_address, data, bonding_pct)
     
+    async def _evaluate_organic_candidate(self, token_address: str, data: Dict, bonding_pct: float):
+        """
+        Organic Scanner: Evaluate if a token meets organic activity thresholds.
+        If criteria met, route to active_tracker for full conviction scoring.
+
+        Criteria (from config.ORGANIC_SCANNER):
+        - min_unique_buyers: 38+ unique buyers (OR velocity bypass)
+        - min_buy_ratio: 60%+ buys vs sells
+        - max_bundle_ratio: <20% same-block buys (anti-bundle)
+        - min_bonding_pct: past 25% bonding
+        - max_bonding_pct: below 90% bonding (not too late)
+        - velocity_bypass: If buyer velocity >2x in 5min, bypass buyer count
+        """
+        # Skip if already tracked, promoted, or rejected
+        if token_address in self.organic_promoted:
+            return
+        if token_address in self.organic_rejected:
+            return
+        if self.active_tracker and self.active_tracker.is_tracked(token_address):
+            return
+
+        scanner_cfg = config.ORGANIC_SCANNER
+
+        # Check bonding range
+        min_bonding = scanner_cfg.get('min_bonding_pct', 25)
+        max_bonding = scanner_cfg.get('max_bonding_pct', 90)
+        if bonding_pct < min_bonding or bonding_pct > max_bonding:
+            return
+
+        # Check unique buyer count (with velocity bypass)
+        buyer_count = len(self.unique_buyers.get(token_address, set()))
+        min_buyers = scanner_cfg.get('min_unique_buyers', 38)
+        velocity_bypassed = False
+
+        if buyer_count < min_buyers:
+            # Velocity bypass: if buyer acceleration is >2x in last 5 min, bypass count
+            velocity_multiplier = scanner_cfg.get('velocity_bypass_multiplier', 2.0)
+            history = self.buyer_history.get(token_address, [])
+            if len(history) >= 2:
+                now = datetime.now()
+                cutoff = now - timedelta(seconds=300)  # 5 min window
+                buyers_at_cutoff = 0
+                buyers_now = buyer_count
+                for ts, count in history:
+                    if ts <= cutoff:
+                        buyers_at_cutoff = count
+                if buyers_at_cutoff > 0 and buyers_now >= buyers_at_cutoff * velocity_multiplier:
+                    velocity_bypassed = True
+                    symbol = data.get('symbol', token_address[:8])
+                    logger.info(f"⚡ Organic scanner: ${symbol} velocity bypass! {buyers_at_cutoff}→{buyers_now} buyers ({buyers_now/buyers_at_cutoff:.1f}x in 5m)")
+
+            if not velocity_bypassed:
+                return
+
+        # Check buy/sell ratio
+        stats = self.trade_stats.get(token_address, {'buys': 0, 'sells': 0, 'blocks': {}})
+        total_trades = stats['buys'] + stats['sells']
+        if total_trades < 20:
+            return  # Not enough data
+        buy_ratio = stats['buys'] / total_trades
+        min_buy_ratio = scanner_cfg.get('min_buy_ratio', 0.65)
+        if buy_ratio < min_buy_ratio:
+            return
+
+        # Check bundle ratio (same-block buys as % of total buys)
+        if stats['buys'] > 0 and stats['blocks']:
+            max_same_block = max(stats['blocks'].values()) if stats['blocks'] else 0
+            bundle_ratio = max_same_block / stats['buys']
+            max_bundle = scanner_cfg.get('max_bundle_ratio', 0.20)
+            if bundle_ratio > max_bundle:
+                symbol = data.get('symbol', token_address[:8])
+                logger.info(f"🚫 Organic scanner REJECTED ${symbol}: bundle ratio {bundle_ratio:.0%} > {max_bundle:.0%}")
+                self.organic_rejected.add(token_address)
+                return
+
+        # Rate limit evaluations
+        now = datetime.now()
+        cooldown = scanner_cfg.get('cooldown_seconds', 60)
+        if (now - self.last_organic_eval).total_seconds() < cooldown:
+            return
+        self.last_organic_eval = now
+
+        # Check candidate limit
+        max_candidates = scanner_cfg.get('max_tracked_candidates', 100)
+        if len(self.organic_promoted) >= max_candidates:
+            return
+
+        # ALL CRITERIA MET - Promote to active tracking!
+        symbol = data.get('symbol', token_address[:8])
+        self.organic_promoted.add(token_address)
+
+        logger.info("=" * 60)
+        bypass_tag = " [VELOCITY BYPASS]" if velocity_bypassed else ""
+        logger.info(f"🔬 ORGANIC SCANNER: ${symbol} QUALIFIED!{bypass_tag}")
+        logger.info(f"   👥 Buyers: {buyer_count} | 💹 Buy ratio: {buy_ratio:.0%} | ⚡ Bonding: {bonding_pct:.0f}%")
+        logger.info(f"   📊 Trades: {total_trades} ({stats['buys']} buys / {stats['sells']} sells)")
+        logger.info(f"   🎯 Routing to ActiveTokenTracker for conviction scoring...")
+        logger.info("=" * 60)
+
+        # Route to active tracker
+        if self.active_tracker:
+            try:
+                await self.active_tracker.start_tracking(token_address, source='organic_scanner')
+                logger.info(f"   ✅ ${symbol} now being tracked (organic discovery)")
+            except Exception as e:
+                logger.error(f"   ❌ Failed to start tracking ${symbol}: {e}")
+        else:
+            # Fallback: send via callback
+            token_data = await self._extract_token_data(data)
+            token_data['source'] = 'organic_scanner'
+            await self.on_signal_callback(token_data, 'ORGANIC_DISCOVERY')
+
     async def _handle_graduation(self, data: Dict):
         """Handle graduation"""
         token_address = data.get('mint')
@@ -461,6 +601,49 @@ class PumpMonitorV2:
             }
         return None
     
+    def get_rolling_sol_volume(self, token_address: str, window_seconds: int = 300) -> dict:
+        """
+        Get rolling SOL volume for a token in current and previous windows.
+        Used for pre-graduation volume momentum scoring (DexScreener has no pre-grad data).
+
+        Args:
+            token_address: Token mint address
+            window_seconds: Size of each rolling window (default 300s = 5 min)
+
+        Returns:
+            dict with 'current_window' (SOL in last 5m), 'previous_window' (SOL in 5-10m ago),
+            'velocity_ratio' (current/previous), 'total_trades' (trade count in current window)
+        """
+        history = self.sol_volume_history.get(token_address, [])
+        if not history:
+            return {'current_window': 0, 'previous_window': 0, 'velocity_ratio': 0, 'total_trades': 0}
+
+        now = datetime.now()
+        current_cutoff = now - timedelta(seconds=window_seconds)
+        previous_cutoff = now - timedelta(seconds=window_seconds * 2)
+
+        current_window = 0.0
+        previous_window = 0.0
+        current_trades = 0
+
+        for ts, sol_amt in history:
+            if ts > current_cutoff:
+                current_window += sol_amt
+                current_trades += 1
+            elif ts > previous_cutoff:
+                previous_window += sol_amt
+
+        # Calculate velocity ratio (current / previous)
+        # If no previous window data, use 0 (new token, not enough history)
+        velocity_ratio = current_window / previous_window if previous_window > 0 else 0
+
+        return {
+            'current_window': current_window,
+            'previous_window': previous_window,
+            'velocity_ratio': velocity_ratio,
+            'total_trades': current_trades
+        }
+
     def get_buyer_tracking_duration(self, token_address: str) -> float:
         """
         Get how long we've been tracking buyers for a token (in minutes)
@@ -491,8 +674,37 @@ class PumpMonitorV2:
             tokens_to_remove = list(self.tracked_tokens.keys())[:500]
             for token in tokens_to_remove:
                 self.tracked_tokens.pop(token, None)
-                # NEW: Also cleanup buyer tracking data
+                # Also cleanup buyer tracking data
                 self.unique_buyers.pop(token, None)
                 self.buyer_tracking_start.pop(token, None)
-            
+                self.trade_stats.pop(token, None)
+
             logger.info(f"🧹 Cleaned up {len(tokens_to_remove)} old tokens")
+
+        # Cleanup SOL volume history (trim entries older than 15 min per token)
+        vol_tokens_to_clean = []
+        for token, history in self.sol_volume_history.items():
+            if history:
+                cutoff = datetime.now() - timedelta(minutes=15)
+                trimmed = [(ts, amt) for ts, amt in history if ts > cutoff]
+                if trimmed:
+                    self.sol_volume_history[token] = trimmed
+                else:
+                    vol_tokens_to_clean.append(token)
+        for token in vol_tokens_to_clean:
+            self.sol_volume_history.pop(token, None)
+        if len(self.sol_volume_history) > 2000:
+            keys_to_remove = list(self.sol_volume_history.keys())[:1000]
+            for k in keys_to_remove:
+                self.sol_volume_history.pop(k, None)
+
+        # Cleanup organic scanner data (keep sets bounded)
+        if len(self.organic_promoted) > 500:
+            self.organic_promoted = set(list(self.organic_promoted)[-200:])
+        if len(self.organic_rejected) > 2000:
+            self.organic_rejected = set(list(self.organic_rejected)[-500:])
+        if len(self.trade_stats) > 2000:
+            # Remove oldest entries
+            keys_to_remove = list(self.trade_stats.keys())[:1000]
+            for k in keys_to_remove:
+                self.trade_stats.pop(k, None)

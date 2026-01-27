@@ -51,8 +51,8 @@ TELEGRAM_PHONE = os.getenv('TELEGRAM_PHONE')  # Your phone number (optional, for
 
 # STRICT MODE: Only track tokens bought by KOLs (saves massive API credits)
 # When True: Only tracks tokens from /webhook/smart-wallet (KOL buys)
-# When False: Also processes PumpPortal graduations (burns credits fast!)
-STRICT_KOL_ONLY_MODE = True  # ← SET TO TRUE TO SAVE CREDITS!
+# When False: Also processes PumpPortal organic discoveries
+STRICT_KOL_ONLY_MODE = False  # ← Disabled: now using organic scanner for discovery
 
 # Disable PumpPortal entirely (saves CPU/memory)
 # When True: Skip PumpPortal WebSocket entirely (Helius webhooks only)
@@ -68,15 +68,13 @@ DISABLE_POLLING_BELOW_THRESHOLD = True
 # =============================================================================
 
 # Signal thresholds based on graduation status
-# UPDATE 2026-01-26 (GROK RECOMMENDATIONS):
-# - Removed Twitter (0-15 pts) and LunarCrush (0-20 pts) due to budget constraints
-# - Raised pre-grad threshold from 35 to 45 (catch mid-cycle pumps like SHRIMP)
-# - Raised post-grad threshold to 75 (safer phase, avoid tops)
-# - Enhanced volume/momentum/velocity scoring (more graduated, less binary)
-# - Enabled narratives for better early detection (+0-25 pts)
-# - Stricter rug penalties to reduce rug calls
-MIN_CONVICTION_SCORE = 50  # Raised from 45 - cut low-conviction noise (45-49 signals were mostly losses)
-POST_GRAD_THRESHOLD = 75   # Raised from 40 - much stricter for graduated tokens
+# UPDATE 2026-01-27 (ON-CHAIN-FIRST SCORING):
+# - Removed KOL smart wallet scoring (was 0-40 pts) - organic scanner replaces KOL-first discovery
+# - Added buyer velocity scoring (0-25 pts) and bonding curve speed (0-15 pts)
+# - Increased unique buyers (0-20), volume (0-15), reduced narrative (0-10), telegram (0-10)
+# - Lowered post-grad threshold from 75 to 65 (no KOL boost available)
+MIN_CONVICTION_SCORE = 50  # Pre-grad threshold (unchanged)
+POST_GRAD_THRESHOLD = 65   # Lowered from 75 - no KOL boost, pure on-chain scoring
 
 # Base score threshold for distribution checks
 # Only check distribution if base score >= this value
@@ -84,28 +82,29 @@ DISTRIBUTION_CHECK_THRESHOLD = 50
 
 # =============================================================================
 # SCORING WEIGHTS (Total: 0-100 points possible)
+# UPDATE 2026-01-27: On-chain-first scoring (KOL scoring disabled)
 # =============================================================================
 
 # Combined WEIGHTS dictionary (required by conviction engine)
 WEIGHTS = {
-    # Smart Wallet Activity (max 40 points)
-    'smart_wallet_elite': 15,      # Elite wallet bought (+15 per wallet)
-    'smart_wallet_kol': 10,         # Top KOL bought (+10 per wallet)
-    
-    # Narrative Detection (max 25 points)
-    'narrative_hot': 20,            # Hot/trending narrative
-    'narrative_fresh': 10,          # Fresh narrative (< 48h)
-    'narrative_multiple': 5,        # Multiple narratives
-    
+    # Smart Wallet Activity - DISABLED (kept at 0 for structure, can re-enable)
+    'smart_wallet_elite': 0,        # Elite wallet bought (disabled)
+    'smart_wallet_kol': 0,          # Top KOL bought (disabled)
+
+    # Narrative Detection (max 10 points - reduced from 25)
+    'narrative_hot': 10,            # Hot/trending narrative
+    'narrative_fresh': 5,           # Fresh narrative (< 48h)
+    'narrative_multiple': 3,        # Multiple narratives
+
     # Holder Distribution (max 15 points)
     'holders_high': 15,             # 100+ holders
-    'holders_medium': 10,           # 50-99 holders  
+    'holders_medium': 10,           # 50-99 holders
     'holders_low': 5,               # 30-49 holders
-    
-    # Volume Velocity (max 10 points)
-    'volume_spike': 10,             # Strong volume spike
-    'volume_increasing': 5,         # Steady increase
-    
+
+    # Volume Velocity (max 15 points - increased from 10)
+    'volume_spike': 15,             # Strong volume spike
+    'volume_increasing': 10,        # Steady increase
+
     # Price Momentum (max 10 points)
     'momentum_strong': 10,          # Strong upward momentum
     'momentum_moderate': 5,         # Moderate momentum
@@ -115,12 +114,67 @@ WEIGHTS = {
 # DETAILED SCORING WEIGHTS (for specific calculations)
 # =============================================================================
 
-# Smart Wallet Activity (0-40 points)
+# Smart Wallet Activity (DISABLED - kept for structure, can re-enable)
 SMART_WALLET_WEIGHTS = {
-    'per_kol': 10,           # 10 points per KOL wallet that bought
-    'max_score': 40,         # Cap at 4 KOLs (40 points max)
-    'multi_kol_bonus': 15,   # Extra bonus if 2+ KOLs buy within 5 min
+    'per_kol': 0,            # Disabled (was 10)
+    'max_score': 0,          # Disabled (was 40)
+    'multi_kol_bonus': 0,    # Disabled (was 15)
     'kol_time_window': 300   # 5 minutes for multi-KOL bonus
+}
+
+# =============================================================================
+# NEW: BUYER VELOCITY SCORING (0-25 points) - Replaces KOL scoring
+# Measures how fast unique buyers are accumulating
+# =============================================================================
+BUYER_VELOCITY_WEIGHTS = {
+    'explosive': 25,         # 100+ buyers in 5 min (viral organic demand)
+    'very_fast': 20,         # 50-99 buyers in 5 min
+    'fast': 15,              # 25-49 buyers in 5 min
+    'moderate': 10,          # 15-24 buyers in 5 min
+    'slow': 5,               # 5-14 buyers in 5 min
+    'minimal': 0,            # <5 buyers in 5 min
+    'window_seconds': 300,   # 5-minute window for velocity calculation
+}
+
+# =============================================================================
+# NEW: BONDING CURVE SPEED SCORING (0-15 points)
+# How fast the bonding curve is filling (organic demand indicator)
+# =============================================================================
+BONDING_SPEED_WEIGHTS = {
+    'rocket': 15,            # >5%/min bonding velocity (explosive demand)
+    'fast': 12,              # 2-5%/min bonding velocity
+    'steady': 8,             # 1-2%/min bonding velocity
+    'slow': 4,               # 0.5-1%/min bonding velocity
+    'crawl': 0,              # <0.5%/min (weak demand)
+}
+
+# =============================================================================
+# NEW: ORGANIC SCANNER CONFIG
+# Filters for PumpPortal new tokens to identify organic activity
+# =============================================================================
+ORGANIC_SCANNER = {
+    'enabled': True,
+    'min_unique_buyers': 38,       # Lowered from 50 - catch mid-cycle tokens earlier
+    'min_buy_ratio': 0.60,         # Lowered from 0.65 - allow slightly more balanced activity
+    'max_bundle_ratio': 0.20,      # Max 20% of buys from same block (anti-bundle)
+    'watch_window_seconds': 300,   # Watch tokens for 5 min before deciding
+    'min_bonding_pct': 25,         # Lowered from 30 - catch earlier momentum
+    'max_bonding_pct': 90,         # Raised from 85 - allow near-graduation catches
+    'max_tracked_candidates': 100, # Max tokens to watch simultaneously
+    'cooldown_seconds': 60,        # Wait 60s between scanner evaluations
+    'velocity_bypass_multiplier': 2.0,  # If buyer velocity >2x in 5min, bypass buyer count
+}
+
+# =============================================================================
+# NEW: GRADUATION SPEED BONUS (Post-grad only)
+# Rewards fast graduations (strong demand) and penalizes slow ones
+# =============================================================================
+GRADUATION_SPEED_BONUS = {
+    'fast_grad_minutes': 15,       # Graduated in <15 min = strong demand
+    'fast_grad_bonus': 15,         # +15 pts for fast graduation
+    'slow_grad_minutes': 30,       # Graduated in >30 min = weak demand
+    'slow_grad_penalty': -10,      # -10 pts for slow graduation with low growth
+    'slow_grad_min_buyers': 100,   # Below this buyer count = "low growth"
 }
 
 # Phase 3: Smart Polling Intervals (adaptive based on stage)
@@ -140,11 +194,22 @@ HOLDER_FETCH_GATES = {
     'always_fetch_post_grad': True  # Always check holders post-graduation
 }
 
-# Volume Velocity (0-10 points) - GROK ENHANCED: More graduated
+# Volume Velocity (0-15 points) - ON-CHAIN: Increased from 10 max
+# POST-GRAD: Uses DexScreener volume/mcap ratio
 VOLUME_WEIGHTS = {
-    'spiking': 10,          # Volume 2x+ expected rate
-    'growing': 7,           # Volume 1.25x+ expected rate (raised from 5)
-    'steady': 3             # Volume >1x expected rate (new tier)
+    'spiking': 15,          # Volume 2x+ expected rate (raised from 10)
+    'growing': 10,          # Volume 1.25x+ expected rate (raised from 7)
+    'steady': 5             # Volume >1x expected rate (raised from 3)
+}
+
+# PRE-GRAD: Uses PumpPortal WebSocket rolling SOL volume (FREE)
+# DexScreener has no data for pre-graduation tokens, so we track SOL
+# volume from real-time trade events and calculate 5-min velocity ratios
+PRE_GRAD_VOLUME_WEIGHTS = {
+    'spiking': 15,          # velocity_ratio > 3.0 OR current_window > 50 SOL
+    'growing': 10,          # velocity_ratio > 1.5 OR current_window > 20 SOL
+    'steady': 5,            # velocity_ratio > 1.0 OR current_window > 5 SOL
+    'window_seconds': 300,  # 5-minute rolling windows
 }
 
 # Price Momentum (0-10 points) - GROK ENHANCED: More graduated
@@ -154,15 +219,14 @@ MOMENTUM_WEIGHTS = {
     'moderate': 3           # +10% in 5 minutes (new tier)
 }
 
-# Distribution Scoring (0-15 points)
+# Distribution Scoring (0-20 points) - ON-CHAIN: Increased from 15 max
 # Pre-graduation: Based on unique buyers (FREE)
-# LOWERED: Catch early KOL plays before they get crowded
 UNIQUE_BUYER_WEIGHTS = {
-    'exceptional': 15,  # 50+ unique buyers (strong organic interest)
-    'high': 12,         # 30-49 unique buyers
-    'medium': 8,        # 15-29 unique buyers
-    'low': 5,           # 5-14 unique buyers (early stage)
-    'minimal': 0        # <5 unique buyers (too early/risky)
+    'exceptional': 20,  # 100+ unique buyers (very strong organic, raised from 15)
+    'high': 15,         # 50-99 unique buyers (raised from 12)
+    'medium': 10,       # 25-49 unique buyers (raised from 8)
+    'low': 5,           # 10-24 unique buyers
+    'minimal': 0        # <10 unique buyers (too early/risky)
 }
 
 # Post-graduation: Based on real holders (10 credits)
@@ -174,14 +238,14 @@ HOLDER_WEIGHTS = {
 
 # Twitter and LunarCrush scoring removed (no budget) - see lines 418-419
 
-# Telegram Social Confirmation Scoring (FREE - 0-15 points)
-# Only applies to tokens already tracked by KOLs (social confirmation)
+# Telegram Social Confirmation Scoring (FREE - 0-10 points) - Reduced from 15
+# Applies to tracked tokens as social confirmation
 TELEGRAM_CONFIRMATION_WEIGHTS = {
-    'high_intensity': 15,   # 6+ mentions OR 3+ groups
-    'medium_intensity': 10, # 3-5 mentions OR growing buzz
-    'low_intensity': 5,     # 1-2 mentions
+    'high_intensity': 10,   # 6+ mentions OR 3+ groups (reduced from 15)
+    'medium_intensity': 7,  # 3-5 mentions OR growing buzz (reduced from 10)
+    'low_intensity': 3,     # 1-2 mentions (reduced from 5)
     'age_decay': 0.5,       # 50% reduction if call >2 hours old
-    'max_social_total': 25  # Cap total social score (Twitter + Telegram)
+    'max_social_total': 15  # Cap total social score (reduced from 25)
 }
 
 # Telegram Call-Triggered Tracking (Optional)
@@ -478,76 +542,152 @@ ENABLE_BUILTIN_TELEGRAM_MONITOR = True  # Built-in Telegram monitor - ENABLED!
 # Hot narratives to watch for (updated for 2026 meta)
 # Format: dict with narrative names as keys
 HOT_NARRATIVES = {
-    # AI / Agents (HOTTEST in 2026)
+    # AI / Agents (HOTTEST in 2026) - capped at 10 max
     'ai_agent': {
         'name': 'AI Agent',
         'keywords': ['ai', 'agent', 'autonomous', 'neural', 'gpt', 'bot', 'llm', 'cognition'],
-        'weight': 25,  # Maximum weight
+        'weight': 10,  # Reduced from 25 (narrative max is now 10)
         'active': True
     },
-    
+
     # DeSci (Growing trend)
     'desci': {
         'name': 'DeSci',
         'keywords': ['desci', 'science', 'research', 'biotech', 'lab', 'molecule', 'data'],
-        'weight': 22,
+        'weight': 10,  # Reduced from 22
         'active': True
     },
-    
+
     # RWA (Real World Assets - 2026 focus)
     'rwa': {
         'name': 'RWA',
         'keywords': ['rwa', 'real world', 'asset', 'tokenized', 'treasury', 'bond'],
-        'weight': 20,
+        'weight': 8,   # Reduced from 20
         'active': True
     },
-    
+
     # Privacy / ZK (Solana ZK compression)
     'privacy': {
         'name': 'Privacy',
         'keywords': ['privacy', 'zk', 'zero knowledge', 'anonymous', 'private', 'stealth'],
-        'weight': 18,
+        'weight': 8,   # Reduced from 18
         'active': True
     },
-    
+
     # DeFi (Always relevant)
     'defi': {
         'name': 'DeFi',
         'keywords': ['defi', 'yield', 'stake', 'farm', 'swap', 'liquidity', 'dex'],
-        'weight': 15,
+        'weight': 7,   # Reduced from 15
         'active': True
     },
-    
+
     # Mobile / Saga (Solana mobile push)
     'mobile': {
         'name': 'Mobile',
         'keywords': ['mobile', 'saga', 'phone', 'seeker', 'dapp'],
-        'weight': 15,
+        'weight': 7,   # Reduced from 15
         'active': True
     },
-    
+
     # GameFi
     'gamefi': {
         'name': 'GameFi',
         'keywords': ['game', 'play', 'nft', 'metaverse', 'gaming', 'p2e'],
-        'weight': 12,
+        'weight': 6,   # Reduced from 12
         'active': True
     },
-    
+
     # Meme (Classic)
     'meme': {
         'name': 'Meme',
         'keywords': ['meme', 'pepe', 'doge', 'shiba', 'wojak', 'frog', 'cat', 'dog'],
-        'weight': 10,
+        'weight': 5,   # Reduced from 10
         'active': True
     }
 }
 
-# Narrative combo bonuses (when multiple narratives match)
+# Narrative combo bonuses (when multiple narratives match) - Reduced proportionally
 NARRATIVE_COMBOS = {
-    ('ai_agent', 'desci'): +10,      # AI + DeSci = powerful combo
-    ('ai_agent', 'defi'): +8,        # AI + DeFi = yield farming agents
-    ('rwa', 'defi'): +8,             # RWA + DeFi = tokenized yields
+    ('ai_agent', 'desci'): +5,       # AI + DeSci = powerful combo (reduced from 10)
+    ('ai_agent', 'defi'): +3,        # AI + DeFi = yield farming agents (reduced from 8)
+    ('rwa', 'defi'): +3,             # RWA + DeFi = tokenized yields (reduced from 8)
+}
+
+# =============================================================================
+# HELIUS ENHANCED FEATURES (Credit-efficient blockchain intelligence)
+# =============================================================================
+
+# Helius Pump.fun Program Webhook (organic discovery backbone)
+# Monitors all Pump.fun program events for sub-second token creation detection
+# Replaces flaky PumpPortal WS for initial discovery, PumpPortal still used for trades
+HELIUS_PUMP_WEBHOOK = {
+    'enabled': True,
+    'program_id': '6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P',  # Pump.fun program
+    'webhook_type': 'enhanced',                # Enhanced = parsed data (costs credits)
+    'transaction_types': ['ANY'],              # Catch all pump.fun txs (filter in handler)
+    'endpoint_path': '/webhook/pump-program',  # Our FastAPI endpoint
+    'auto_register': True,                     # Register webhook on startup
+}
+
+# Dev Sell Detection via Helius (rug prevention)
+# Monitor creator wallet for large sells pre-graduation
+# This is the #1 rug killer - early dev dumps happen before graduation
+HELIUS_DEV_SELL_DETECTION = {
+    'enabled': True,
+    'sell_threshold_pct': 20,      # Flag if dev sells >20% of supply
+    'early_window_minutes': 30,    # Only check in first 30 min
+    'penalty_points': -30,         # Heavy penalty for dev selling
+    'hard_block_pct': 50,          # Block signal if dev sold >50% supply
+    'gate_mid_score': 40,          # Only check if mid_score >= 40 (save credits)
+    'credit_cost': 5,              # ~5 credits per getSignaturesForAddress call
+}
+
+# Mint/Freeze Authority Check (rug protection)
+# Verify if mint authority is revoked (safe) or still active (risky)
+# Pump.fun tokens should have mint authority revoked after creation
+HELIUS_AUTHORITY_CHECK = {
+    'enabled': True,
+    'check_mint_authority': True,   # Check if mint authority is revoked
+    'check_freeze_authority': True, # Check if freeze authority is revoked
+    'mint_active_penalty': -15,     # Penalty if mint authority still active
+    'freeze_active_penalty': -20,   # Penalty if freeze authority still active (can freeze your tokens)
+    'gate_mid_score': 30,           # Only check if mid_score >= 30
+    'credit_cost': 1,               # ~1 credit per getAccountInfo call
+}
+
+# Parsed Transaction History (velocity & momentum enrichment)
+# Use Helius getSignaturesForAddress for more accurate buyer velocity
+# than PumpPortal trade events (Helius parses better, catches same-block bundles)
+HELIUS_TX_HISTORY = {
+    'enabled': True,
+    'gate_mid_score': 50,          # Only fetch if mid_score >= 50 (expensive)
+    'max_signatures': 100,         # Fetch last 100 txs
+    'credit_cost': 5,              # ~5 credits per call
+}
+
+# =============================================================================
+# HELIUS BACKFILL (Historical ML Training Data via searchAssets)
+# Uses Helius DAS API to find pump.fun graduates for Ralph's ML pipeline
+# =============================================================================
+
+HELIUS_BACKFILL = {
+    'enabled': True,
+    'use_search_assets': True,         # Primary: DAS searchAssets API (~1 credit/page)
+    'use_program_scan': True,          # Fallback: Scan program TX history (~5-10 credits)
+    'search_pages': 5,                 # Pages to fetch from searchAssets (200 tokens/page)
+    'program_scan_tx_limit': 500,      # Max program TXs to scan in fallback mode
+    'max_tokens_per_run': 200,         # Cap tokens per backfill run
+    'min_mcap_graduated': 50000,       # Min MCAP to consider ($50K = real graduation)
+    'max_mcap': 500_000_000,           # Max MCAP ($500M = mega cap, still useful data)
+    'min_liquidity': 10000,            # Min liquidity ($10K = real pool)
+    'min_volume_24h': 10000,           # Min 24h volume ($10K = real activity)
+    'require_raydium_pair': True,      # Only tokens with Raydium DEX pair (graduated)
+    'enrich_with_helius': True,        # Add authority + holder data from Helius
+    'helius_enrich_gate_score': 0,     # Enrich all tokens (backfill = comprehensive data)
+    'dexscreener_rate_limit': 0.4,     # Seconds between DexScreener calls
+    'helius_rate_limit': 0.3,          # Seconds between Helius calls
+    'estimated_credits_per_run': 500,  # ~500 credits per backfill run
 }
 
 # =============================================================================
@@ -558,15 +698,21 @@ CREDIT_COSTS = {
     'webhook': 1,
     'holder_check': 10,
     'account_info': 1,
-    'metadata': 10
+    'metadata': 10,
+    'tx_history': 5,
+    'pump_webhook_event': 1,       # Enhanced webhook events
 }
 
 # Expected daily usage with optimizations
 EXPECTED_DAILY_CREDITS = {
     'webhooks': 20000,      # 20 KOL wallets × ~1000 txs each
+    'pump_program': 5000,   # Pump.fun program events (~500-1000/day filtered)
     'holder_checks': 3000,  # ~300 post-grad checks × 10 credits
+    'authority_checks': 500,  # ~500 tokens × 1 credit each
+    'dev_sell_checks': 1000,  # ~200 tokens × 5 credits each
+    'backfill': 500,        # Weekly backfill run (~500 credits per run)
     'other': 2000,          # Misc RPC calls
-    'total': 25000          # ~750k/month (well under 1M free tier)
+    'total': 32000          # ~960k/month (under 1M free tier)
 }
 
 # =============================================================================

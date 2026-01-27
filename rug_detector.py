@@ -1,11 +1,13 @@
 """
 Rug Detector - Anti-scam filters with smart overrides
 NOW USES: Helius transaction data for accurate bundle detection
+ENHANCED: Mint/freeze authority checks + dev sell detection via Helius
 """
 from typing import Dict, List, Optional, Set
 from datetime import datetime, timedelta
 from loguru import logger
 from collections import defaultdict
+import config
 
 # Import Helius bundle detector for accurate detection
 try:
@@ -426,4 +428,130 @@ class RugDetector:
             'bundle_override': bundle_result['override_applied'],
             'should_check_holders': check_holders,
             'holder_check_threshold': 65 if bonding_pct < 100 else 60
+        }
+
+    # ================================================================
+    # MINT/FREEZE AUTHORITY CHECK (Helius Enhanced)
+    # ================================================================
+
+    async def check_token_authority(
+        self,
+        token_address: str,
+        helius_fetcher,
+        mid_score: int = 0,
+    ) -> Dict:
+        """
+        Check if token has active mint or freeze authority (rug risk).
+
+        Gated: Only runs if mid_score >= configured threshold.
+        Cost: ~1 Helius credit per check.
+
+        Returns:
+            Dict with penalty, risk_flags, details
+        """
+        auth_cfg = config.HELIUS_AUTHORITY_CHECK
+
+        if not auth_cfg.get('enabled', True):
+            return {'penalty': 0, 'risk_flags': [], 'checked': False}
+
+        gate_score = auth_cfg.get('gate_mid_score', 30)
+        if mid_score < gate_score:
+            logger.debug(f"   ⏭️  Authority check skipped: mid_score {mid_score} < {gate_score}")
+            return {'penalty': 0, 'risk_flags': [], 'checked': False, 'gated': True}
+
+        result = await helius_fetcher.check_token_authority(token_address)
+
+        if not result.get('success'):
+            logger.debug(f"   ⚠️  Authority check failed: {result.get('error', 'unknown')}")
+            return {'penalty': 0, 'risk_flags': [], 'checked': False}
+
+        penalty = result.get('penalty', 0)
+        risk_flags = result.get('risk_flags', [])
+
+        if risk_flags:
+            logger.warning(f"   🚨 AUTHORITY RISK: {', '.join(risk_flags)} → {penalty} pts")
+            if 'MINT_ACTIVE' in risk_flags:
+                logger.warning(f"      Mint authority active: {result.get('mint_authority', 'unknown')[:16]}...")
+            if 'FREEZE_ACTIVE' in risk_flags:
+                logger.warning(f"      Freeze authority active: {result.get('freeze_authority', 'unknown')[:16]}...")
+        else:
+            logger.info(f"   ✅ Authority check passed (mint revoked, freeze revoked)")
+
+        return {
+            'penalty': penalty,
+            'risk_flags': risk_flags,
+            'mint_revoked': result.get('mint_revoked', True),
+            'freeze_revoked': result.get('freeze_revoked', True),
+            'checked': True,
+        }
+
+    # ================================================================
+    # DEV SELL DETECTION (Helius Enhanced)
+    # ================================================================
+
+    async def check_dev_sells(
+        self,
+        token_address: str,
+        creator_wallet: str,
+        helius_fetcher,
+        mid_score: int = 0,
+        token_age_minutes: float = 0,
+    ) -> Dict:
+        """
+        Check if the token creator is selling (rug signal).
+        The #1 rug killer: dev dumps happen before graduation.
+
+        Gated: Only runs if mid_score >= threshold AND token < 30 min old.
+        Cost: ~5 Helius credits per check.
+
+        Returns:
+            Dict with penalty, sell_pct, hard_block, etc.
+        """
+        dev_cfg = config.HELIUS_DEV_SELL_DETECTION
+
+        if not dev_cfg.get('enabled', True):
+            return {'penalty': 0, 'sell_detected': False, 'checked': False}
+
+        gate_score = dev_cfg.get('gate_mid_score', 40)
+        if mid_score < gate_score:
+            logger.debug(f"   ⏭️  Dev sell check skipped: mid_score {mid_score} < {gate_score}")
+            return {'penalty': 0, 'sell_detected': False, 'checked': False, 'gated': True}
+
+        early_window = dev_cfg.get('early_window_minutes', 30)
+        if token_age_minutes > early_window:
+            logger.debug(f"   ⏭️  Dev sell check skipped: token age {token_age_minutes:.0f}m > {early_window}m window")
+            return {'penalty': 0, 'sell_detected': False, 'checked': False, 'outside_window': True}
+
+        if not creator_wallet:
+            logger.debug(f"   ⏭️  Dev sell check skipped: no creator wallet known")
+            return {'penalty': 0, 'sell_detected': False, 'checked': False}
+
+        result = await helius_fetcher.check_creator_sells(creator_wallet, token_address)
+
+        if not result.get('success'):
+            logger.debug(f"   ⚠️  Dev sell check failed: {result.get('error', 'unknown')}")
+            return {'penalty': 0, 'sell_detected': False, 'checked': False}
+
+        sell_pct = result.get('sell_pct', 0)
+        penalty = result.get('penalty', 0)
+        hard_block = result.get('hard_block', False)
+
+        if hard_block:
+            logger.error(f"   🚨 DEV DUMPED {sell_pct:.1f}% of supply → HARD BLOCK")
+        elif sell_pct > 0:
+            threshold = dev_cfg.get('sell_threshold_pct', 20)
+            if sell_pct >= threshold:
+                logger.warning(f"   ⚠️  Dev sold {sell_pct:.1f}% of supply → {penalty} pts")
+            else:
+                logger.info(f"   ℹ️  Dev sold {sell_pct:.1f}% (below {threshold}% threshold, no penalty)")
+        else:
+            logger.info(f"   ✅ Dev sell check passed (no sells detected)")
+
+        return {
+            'penalty': penalty,
+            'sell_detected': result.get('sell_detected', False),
+            'sell_pct': sell_pct,
+            'sell_count': result.get('sell_count', 0),
+            'hard_block': hard_block,
+            'checked': True,
         }
