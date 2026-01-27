@@ -11,9 +11,10 @@ import config
 try:
     from trackers.realtime_narrative_detector import get_narrative_detector
     REALTIME_AVAILABLE = True
-except ImportError:
+    logger.info("✅ Realtime narrative detector loaded (RSS + BERTopic)")
+except ImportError as e:
     REALTIME_AVAILABLE = False
-    logger.warning("⚠️  Realtime narrative detector not available (missing dependencies)")
+    logger.warning(f"⚠️  Realtime narrative detector not available: {e}")
 
 
 class NarrativeDetector:
