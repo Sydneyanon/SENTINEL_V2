@@ -20,18 +20,18 @@ class ConvictionEngine:
     Analyzes tokens and calculates conviction scores (0-100)
 
     Scoring breakdown (ON-CHAIN-FIRST - KOL scoring disabled):
-    - Buyer Velocity: 0-25 points (NEW - replaces KOL 0-40)
+    - Buyer Velocity: 0-30 points (strongest predictor, raised from 25)
     - Unique Buyers: 0-20 points (increased from 0-15)
     - Buy/Sell Ratio: 0-20 points (percentage-based)
     - Volume Velocity: 0-15 points (increased from 0-10)
-    - Bonding Curve Speed: 0-15 points (NEW)
+    - Bonding Curve Speed: 0-20 points (15 base + 5 bonus at 50%+ bonding)
     - Price Momentum: 0-10 points
-    - Narrative Detection: 0-10 points (reduced from 0-25)
+    - Narrative Detection: 0-15 points (RSS+BERTopic matching)
     - Telegram Calls: 0-10 points (reduced from 0-15)
     - Bundle Penalty: -5 to -40 points (with overrides)
     - Holder Concentration: -15 to -40 points
     - ML Prediction: -30 to +20 points
-    Total: 0-125+ points (can exceed with bonuses)
+    Total: 0-140+ points (can exceed with bonuses)
 
     NOTE: Smart wallet (KOL) scoring structure preserved but disabled.
           Set config.SMART_WALLET_WEIGHTS['max_score'] > 0 to re-enable.
@@ -101,14 +101,14 @@ class ConvictionEngine:
             print(f"📊 Status: {'🌱 PRE-GRADUATION (pump.fun)' if is_pre_grad else '🎓 POST-GRADUATION (Raydium)'}")
             print(f"⚡ Bonding Curve: {bonding_pct:.1f}%")
             print()
-            print("🎯 ON-CHAIN-FIRST SCORING SYSTEM (0-100+ scale):")
-            print("   ├─ 🏃 Buyer Velocity (0-25 pts)")
+            print("🎯 ON-CHAIN-FIRST SCORING SYSTEM (0-140+ scale):")
+            print("   ├─ 🏃 Buyer Velocity (0-30 pts)")
             print("   ├─ 👥 Unique Buyers (0-20 pts)")
             print("   ├─ 💹 Buy/Sell Ratio (0-20 pts)")
             print("   ├─ 📊 Volume Velocity (0-15 pts)")
-            print("   ├─ ⚡ Bonding Curve Speed (0-15 pts)")
+            print("   ├─ ⚡ Bonding Curve Speed (0-20 pts)")
             print("   ├─ 🚀 Price Momentum (0-10 pts)")
-            print("   ├─ 🎯 Narrative Match (0-10 pts)")
+            print("   ├─ 🎯 Narrative Match (0-15 pts)")
             print("   ├─ 📱 Telegram Calls (0-10 pts)")
             print("   └─ 🚨 Rug Detection Penalties (-40 to 0)")
             print()
@@ -167,7 +167,7 @@ class ConvictionEngine:
                     token_name,
                     token_data.get('description', '')
                 )
-                base_scores['narrative'] = min(narrative_data.get('score', 0), 10)  # Cap at 10 (on-chain-first)
+                base_scores['narrative'] = min(narrative_data.get('score', 0), 15)  # Cap at 15 (RSS+BERTopic clusters)
                 if base_scores['narrative'] > 0:
                     # Show which system matched (RSS+BERTopic realtime vs static)
                     realtime_score = narrative_data.get('realtime_score', 0)
@@ -912,6 +912,34 @@ class ConvictionEngine:
                     if config.TIMING_RULES['mcap_cap']['log_skipped']:
                         logger.warning(f"   🚫 MCAP CAP: ${mcap:.0f} > ${max_mcap} (too late, skipping signal)")
 
+            # MATURITY GATE: Skip if token too young or MCAP too low (avoid sniped rugs)
+            maturity_gate_triggered = False
+            maturity_gate_reason = ''
+            maturity_cfg = config.TIMING_RULES.get('signal_maturity_gate', {})
+            if passed and maturity_cfg.get('enabled', False):
+                min_mcap = (maturity_cfg.get('min_mcap_pre_grad', 0) if is_pre_grad
+                           else maturity_cfg.get('min_mcap_post_grad', 0))
+                min_age_min = (maturity_cfg.get('min_age_minutes_pre_grad', 0) if is_pre_grad
+                              else maturity_cfg.get('min_age_minutes_post_grad', 0))
+
+                # Check minimum MCAP
+                if min_mcap > 0 and mcap < min_mcap:
+                    passed = False
+                    maturity_gate_triggered = True
+                    maturity_gate_reason = f"MCAP ${mcap:.0f} < ${min_mcap} minimum"
+
+                # Check minimum age
+                if min_age_min > 0 and token_created_at:
+                    age_minutes = (datetime.utcnow() - token_created_at).total_seconds() / 60
+                    if age_minutes < min_age_min:
+                        passed = False
+                        maturity_gate_triggered = True
+                        maturity_gate_reason += ('; ' if maturity_gate_reason else '') + \
+                            f"Age {age_minutes:.0f}m < {min_age_min}m minimum"
+
+                if maturity_gate_triggered and maturity_cfg.get('log_skipped', True):
+                    logger.warning(f"   🚫 MATURITY GATE: {maturity_gate_reason} (too early, needs distribution time)")
+
             logger.info("=" * 60)
             logger.info(f"   🎯 FINAL CONVICTION: {final_score}/100")
             logger.info(f"   📊 Threshold: {threshold} ({'PRE-GRAD' if is_pre_grad else 'POST-GRAD'})")
@@ -919,6 +947,8 @@ class ConvictionEngine:
                 logger.info(f"   ⚡ Early trigger activated!")
             if mcap_cap_triggered:
                 logger.info(f"   🚫 MCAP cap triggered - signal blocked")
+            if maturity_gate_triggered:
+                logger.info(f"   🚫 Maturity gate triggered - {maturity_gate_reason}")
             logger.info(f"   {'✅ SIGNAL!' if passed else '⏭️  Skip'}")
             logger.info("=" * 60)
 
@@ -927,14 +957,16 @@ class ConvictionEngine:
                 gap_to_threshold = threshold - final_score
                 min_gap = config.SIGNAL_LOGGING.get('min_gap_to_log', 5)
 
-                # Log if within X points of threshold or if MCAP cap triggered
-                if gap_to_threshold <= min_gap or mcap_cap_triggered:
+                # Log if within X points of threshold or if gate triggered
+                if gap_to_threshold <= min_gap or mcap_cap_triggered or maturity_gate_triggered:
                     logger.warning("\n" + "!" * 60)
                     logger.warning("   ⚠️  WHY NO SIGNAL - Breakdown:")
                     logger.warning(f"   📉 Gap to threshold: {gap_to_threshold:.1f} points")
 
                     if mcap_cap_triggered:
                         logger.warning(f"   🚫 MCAP too high: ${mcap:.0f} > ${max_mcap}")
+                    if maturity_gate_triggered:
+                        logger.warning(f"   🚫 Maturity gate: {maturity_gate_reason}")
 
                     # Show weakest scoring components (on-chain-first)
                     breakdown_items = [
@@ -991,6 +1023,8 @@ class ConvictionEngine:
                             recommendations.append("High rug risk - avoid")
                         if mcap_cap_triggered:
                             recommendations.append("Entered too late (MCAP too high)")
+                        if maturity_gate_triggered:
+                            recommendations.append(f"Too early: {maturity_gate_reason}")
 
                         if recommendations:
                             logger.warning("   💡 Recommendations:")
@@ -1009,6 +1043,8 @@ class ConvictionEngine:
                 'is_pre_grad': is_pre_grad,
                 'early_trigger_applied': early_trigger_applied,  # GROK: Early trigger flag
                 'mcap_cap_triggered': mcap_cap_triggered,        # GROK: MCAP cap flag
+                'maturity_gate_triggered': maturity_gate_triggered,  # Maturity gate flag
+                'maturity_gate_reason': maturity_gate_reason,
                 'token_address': token_address,  # FIXED: Include token address for links
                 'token_data': token_data,  # FIXED: Include full token data
                 'breakdown': {
@@ -1581,7 +1617,12 @@ class ConvictionEngine:
 
         # Score based on velocity thresholds
         if bonding_velocity >= 5.0:
-            return weights['rocket']   # 15 pts
+            score = weights['rocket']   # 15 pts
+            # BONUS: Fast fill at 50%+ bonding = very strong interest signal
+            if bonding_pct >= 50:
+                score += 5
+                logger.info(f"      ⚡ Bonding speed bonus: +5 pts (>{bonding_velocity:.1f}%/min at {bonding_pct:.0f}% bonding)")
+            return score
         elif bonding_velocity >= 2.0:
             return weights['fast']     # 12 pts
         elif bonding_velocity >= 1.0:

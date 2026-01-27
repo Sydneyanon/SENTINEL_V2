@@ -71,9 +71,9 @@ DISABLE_POLLING_BELOW_THRESHOLD = True
 # UPDATE 2026-01-27 (ON-CHAIN-FIRST SCORING):
 # - Removed KOL smart wallet scoring (was 0-40 pts) - organic scanner replaces KOL-first discovery
 # - Added buyer velocity scoring (0-25 pts) and bonding curve speed (0-15 pts)
-# - Increased unique buyers (0-20), volume (0-15), reduced narrative (0-10), telegram (0-10)
+# - Increased unique buyers (0-20), volume (0-15), narrative (0-15 with RSS+BERTopic), telegram (0-10)
 # - Lowered post-grad threshold from 75 to 65 (no KOL boost available)
-MIN_CONVICTION_SCORE = 50  # Pre-grad threshold (unchanged)
+MIN_CONVICTION_SCORE = 60  # Pre-grad threshold (raised from 50 - cut low-quality 5-10K rug calls)
 POST_GRAD_THRESHOLD = 65   # Lowered from 75 - no KOL boost, pure on-chain scoring
 
 # Base score threshold for distribution checks
@@ -91,10 +91,10 @@ WEIGHTS = {
     'smart_wallet_elite': 0,        # Elite wallet bought (disabled)
     'smart_wallet_kol': 0,          # Top KOL bought (disabled)
 
-    # Narrative Detection (max 10 points - reduced from 25)
-    'narrative_hot': 10,            # Hot/trending narrative
-    'narrative_fresh': 5,           # Fresh narrative (< 48h)
-    'narrative_multiple': 3,        # Multiple narratives
+    # Narrative Detection (max 15 points - raised from 10 for RSS+BERTopic matching)
+    'narrative_hot': 15,            # Hot/trending narrative (RSS+BERTopic cluster match)
+    'narrative_fresh': 8,           # Fresh narrative (< 48h)
+    'narrative_multiple': 5,        # Multiple narratives
 
     # Holder Distribution (max 15 points)
     'holders_high': 15,             # 100+ holders
@@ -127,8 +127,8 @@ SMART_WALLET_WEIGHTS = {
 # Measures how fast unique buyers are accumulating
 # =============================================================================
 BUYER_VELOCITY_WEIGHTS = {
-    'explosive': 25,         # 100+ buyers in 5 min (viral organic demand)
-    'very_fast': 20,         # 50-99 buyers in 5 min
+    'explosive': 30,         # 100+ buyers in 5 min (viral organic demand) - raised from 25, strongest predictor
+    'very_fast': 22,         # 50-99 buyers in 5 min (raised from 20)
     'fast': 15,              # 25-49 buyers in 5 min
     'moderate': 10,          # 15-24 buyers in 5 min
     'slow': 5,               # 5-14 buyers in 5 min
@@ -154,15 +154,15 @@ BONDING_SPEED_WEIGHTS = {
 # =============================================================================
 ORGANIC_SCANNER = {
     'enabled': True,
-    'min_unique_buyers': 38,       # Lowered from 50 - catch mid-cycle tokens earlier
-    'min_buy_ratio': 0.60,         # Lowered from 0.65 - allow slightly more balanced activity
+    'min_unique_buyers': 60,       # Raised from 38 - higher bar filters out sniped rugs
+    'min_buy_ratio': 0.70,         # Raised from 0.60 - need strong buy dominance
     'max_bundle_ratio': 0.20,      # Max 20% of buys from same block (anti-bundle)
     'watch_window_seconds': 300,   # Watch tokens for 5 min before deciding
-    'min_bonding_pct': 25,         # Lowered from 30 - catch earlier momentum
-    'max_bonding_pct': 90,         # Raised from 85 - allow near-graduation catches
+    'min_bonding_pct': 40,         # Raised from 25 - avoid very early low-conviction entries
+    'max_bonding_pct': 85,         # Lowered from 90 - avoid near-graduation FOMO
     'max_tracked_candidates': 100, # Max tokens to watch simultaneously
     'cooldown_seconds': 60,        # Wait 60s between scanner evaluations
-    'velocity_bypass_multiplier': 2.0,  # If buyer velocity >2x in 5min, bypass buyer count
+    'velocity_bypass_multiplier': 2.5,  # Raised from 2.0 - need stronger FOMO signal to bypass buyer count
 }
 
 # =============================================================================
@@ -368,12 +368,24 @@ TIMING_RULES = {
         'log_skipped': True           # Log skipped signals for analysis
     },
 
+    'signal_maturity_gate': {
+        'enabled': True,              # Gate signals on minimum maturity
+        'min_mcap_pre_grad': 15000,   # Pre-grad: skip if MCAP < $15K (avoid sniped rugs)
+        'min_age_minutes_pre_grad': 15,  # Pre-grad: skip if age < 15 min (distribution time)
+        'min_mcap_post_grad': 0,      # Post-grad: no min MCAP (already graduated)
+        'min_age_minutes_post_grad': 0,  # Post-grad: no min age
+        'log_skipped': True           # Log skipped signals
+    },
+
     'post_call_monitoring': {
         'enabled': True,              # Monitor price after signal
-        'exit_alert_threshold': -15,  # Alert if price drops -15% in 5min
-        'monitoring_duration': 300,   # Monitor for 5 minutes (300 seconds)
+        'exit_alert_threshold': -15,  # Alert if price drops -15%
+        'monitoring_duration': 600,   # Monitor for 10 minutes (raised from 300s/5min)
         'check_interval': 30,         # Check every 30 seconds
-        'send_telegram_alert': True   # Send exit alert to Telegram
+        'send_telegram_alert': True,  # Send exit alert to Telegram
+        'buyer_fade_enabled': True,   # Also check buyer velocity fade
+        'buyer_fade_threshold': 5,    # Fade alert if < 5 new buyers in window
+        'buyer_fade_window_seconds': 120,  # 2-minute window for buyer check
     }
 }
 
@@ -542,11 +554,11 @@ ENABLE_BUILTIN_TELEGRAM_MONITOR = True  # Built-in Telegram monitor - ENABLED!
 # Hot narratives to watch for (updated for 2026 meta)
 # Format: dict with narrative names as keys
 HOT_NARRATIVES = {
-    # AI / Agents (HOTTEST in 2026) - capped at 10 max
+    # AI / Agents (HOTTEST in 2026) - narrative cap raised to 15
     'ai_agent': {
         'name': 'AI Agent',
         'keywords': ['ai', 'agent', 'autonomous', 'neural', 'gpt', 'bot', 'llm', 'cognition'],
-        'weight': 10,  # Reduced from 25 (narrative max is now 10)
+        'weight': 15,  # Raised from 10 - hottest narrative, max points
         'active': True
     },
 
@@ -554,7 +566,7 @@ HOT_NARRATIVES = {
     'desci': {
         'name': 'DeSci',
         'keywords': ['desci', 'science', 'research', 'biotech', 'lab', 'molecule', 'data'],
-        'weight': 10,  # Reduced from 22
+        'weight': 12,  # Raised from 10 - strong 2026 narrative
         'active': True
     },
 
@@ -562,7 +574,7 @@ HOT_NARRATIVES = {
     'rwa': {
         'name': 'RWA',
         'keywords': ['rwa', 'real world', 'asset', 'tokenized', 'treasury', 'bond'],
-        'weight': 8,   # Reduced from 20
+        'weight': 10,  # Raised from 8
         'active': True
     },
 
@@ -570,7 +582,7 @@ HOT_NARRATIVES = {
     'privacy': {
         'name': 'Privacy',
         'keywords': ['privacy', 'zk', 'zero knowledge', 'anonymous', 'private', 'stealth'],
-        'weight': 8,   # Reduced from 18
+        'weight': 10,  # Raised from 8
         'active': True
     },
 
@@ -578,7 +590,7 @@ HOT_NARRATIVES = {
     'defi': {
         'name': 'DeFi',
         'keywords': ['defi', 'yield', 'stake', 'farm', 'swap', 'liquidity', 'dex'],
-        'weight': 7,   # Reduced from 15
+        'weight': 8,   # Raised from 7
         'active': True
     },
 
@@ -586,7 +598,7 @@ HOT_NARRATIVES = {
     'mobile': {
         'name': 'Mobile',
         'keywords': ['mobile', 'saga', 'phone', 'seeker', 'dapp'],
-        'weight': 7,   # Reduced from 15
+        'weight': 8,   # Raised from 7
         'active': True
     },
 
@@ -594,7 +606,7 @@ HOT_NARRATIVES = {
     'gamefi': {
         'name': 'GameFi',
         'keywords': ['game', 'play', 'nft', 'metaverse', 'gaming', 'p2e'],
-        'weight': 6,   # Reduced from 12
+        'weight': 7,   # Raised from 6
         'active': True
     },
 
@@ -602,16 +614,16 @@ HOT_NARRATIVES = {
     'meme': {
         'name': 'Meme',
         'keywords': ['meme', 'pepe', 'doge', 'shiba', 'wojak', 'frog', 'cat', 'dog'],
-        'weight': 5,   # Reduced from 10
+        'weight': 5,   # Unchanged - meme is default, not a narrative edge
         'active': True
     }
 }
 
-# Narrative combo bonuses (when multiple narratives match) - Reduced proportionally
+# Narrative combo bonuses (when multiple narratives match) - Raised for narrative importance
 NARRATIVE_COMBOS = {
-    ('ai_agent', 'desci'): +5,       # AI + DeSci = powerful combo (reduced from 10)
-    ('ai_agent', 'defi'): +3,        # AI + DeFi = yield farming agents (reduced from 8)
-    ('rwa', 'defi'): +3,             # RWA + DeFi = tokenized yields (reduced from 8)
+    ('ai_agent', 'desci'): +7,       # AI + DeSci = powerful combo (raised from 5)
+    ('ai_agent', 'defi'): +5,        # AI + DeFi = yield farming agents (raised from 3)
+    ('rwa', 'defi'): +5,             # RWA + DeFi = tokenized yields (raised from 3)
 }
 
 # =============================================================================

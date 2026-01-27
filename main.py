@@ -31,6 +31,7 @@ from scoring.conviction_engine import ConvictionEngine
 from publishers.telegram import TelegramPublisher
 from active_token_tracker import ActiveTokenTracker
 from helius_fetcher import HeliusDataFetcher
+from post_call_monitor import get_post_call_monitor  # Post-signal fade detection
 from wallet_enrichment import initialize_smart_wallets  # ← NEW: Auto-discover wallet metadata
 from startup_diagnostics import run_diagnostics, check_telegram_session  # ← Diagnostics for database & OPT-041
 
@@ -495,6 +496,15 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(start_pumpportal_task())
         logger.info("✅ PumpPortal monitor task created")
     
+    # Initialize post-call monitor (fade detection after signals)
+    post_call_monitor = get_post_call_monitor(
+        dexscreener_fetcher=helius_fetcher,
+        telegram_poster=telegram_publisher,
+        pump_monitor=pumpportal_monitor
+    )
+    active_tracker.post_call_monitor = post_call_monitor
+    logger.info("✅ Post-call monitor initialized (10min fade detection)")
+
     # Register Helius Pump.fun program webhook (for organic discovery)
     if config.HELIUS_PUMP_WEBHOOK.get('enabled', False) and config.HELIUS_PUMP_WEBHOOK.get('auto_register', False):
         logger.info("🔗 Registering Helius Pump.fun program webhook...")

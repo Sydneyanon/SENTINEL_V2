@@ -50,6 +50,9 @@ class ActiveTokenTracker:
         # Pause control (toggled via /pause and /resume admin commands)
         self.signal_posting_paused = False
 
+        # Post-call monitor (set by main.py after init)
+        self.post_call_monitor = None
+
         # Metrics
         self.tokens_tracked_total = 0
         self.signals_sent_total = 0
@@ -765,6 +768,18 @@ class ActiveTokenTracker:
                         logger.warning(f"⚠️ Failed to save signal metadata: {e}")
 
                 logger.info(f"✅ Signal sent for ${symbol}")
+
+                # Start post-call monitoring (fade detection)
+                if self.post_call_monitor:
+                    try:
+                        await self.post_call_monitor.start_monitoring(
+                            token_address=token_address,
+                            signal_price=state.token_data.get('price_usd', 0),
+                            token_symbol=symbol,
+                            signal_score=score
+                        )
+                    except Exception as e:
+                        logger.warning(f"⚠️ Failed to start post-call monitoring: {e}")
             else:
                 # OPT-051: Log posting failure to database
                 logger.error(f"❌ Signal passed but failed to post to Telegram: ${symbol} ({score}/100)")
