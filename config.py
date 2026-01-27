@@ -673,21 +673,22 @@ HELIUS_TX_HISTORY = {
 
 HELIUS_BACKFILL = {
     'enabled': True,
-    'use_search_assets': True,         # Primary: DAS searchAssets API (~1 credit/page)
-    'use_program_scan': True,          # Fallback: Scan program TX history (~5-10 credits)
-    'search_pages': 5,                 # Pages to fetch from searchAssets (200 tokens/page)
-    'program_scan_tx_limit': 500,      # Max program TXs to scan in fallback mode
-    'max_tokens_per_run': 200,         # Cap tokens per backfill run
-    'min_mcap_graduated': 50000,       # Min MCAP to consider ($50K = real graduation)
-    'max_mcap': 500_000_000,           # Max MCAP ($500M = mega cap, still useful data)
-    'min_liquidity': 10000,            # Min liquidity ($10K = real pool)
-    'min_volume_24h': 10000,           # Min 24h volume ($10K = real activity)
-    'require_raydium_pair': True,      # Only tokens with Raydium DEX pair (graduated)
-    'enrich_with_helius': True,        # Add authority + holder data from Helius
-    'helius_enrich_gate_score': 0,     # Enrich all tokens (backfill = comprehensive data)
-    'dexscreener_rate_limit': 0.4,     # Seconds between DexScreener calls
-    'helius_rate_limit': 0.3,          # Seconds between Helius calls
-    'estimated_credits_per_run': 500,  # ~500 credits per backfill run
+    'use_dexscreener_discovery': True,  # Primary: DexScreener endpoints (FREE, guaranteed pairs)
+    'use_search_assets': True,          # Secondary: DAS searchAssets API (~1 credit/page)
+    'use_program_scan': True,           # Tertiary: Scan program TX history (~5-10 credits)
+    'search_pages': 5,                  # Pages to fetch from searchAssets (200 tokens/page)
+    'program_scan_tx_limit': 500,       # Max program TXs to scan in fallback mode
+    'max_tokens_per_run': 200,          # Cap tokens per backfill run
+    'min_mcap_graduated': 5000,         # Min MCAP ($5K - catch early graduates + dumps)
+    'max_mcap': 500_000_000,            # Max MCAP ($500M = mega cap, still useful data)
+    'min_liquidity': 1000,              # Min liquidity ($1K - include small pools for ML diversity)
+    'min_volume_24h': 100,              # Min 24h volume ($100 - include quiet tokens for ML diversity)
+    'require_raydium_pair': True,       # Only tokens with Raydium DEX pair (graduated)
+    'enrich_with_helius': True,         # Add authority + holder data from Helius
+    'helius_enrich_gate_score': 0,      # Enrich all tokens (backfill = comprehensive data)
+    'dexscreener_rate_limit': 0.4,      # Seconds between DexScreener calls
+    'helius_rate_limit': 0.3,           # Seconds between Helius calls
+    'estimated_credits_per_run': 500,   # ~500 credits per backfill run
 }
 
 # =============================================================================

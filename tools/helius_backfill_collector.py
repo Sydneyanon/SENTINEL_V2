@@ -58,6 +58,7 @@ class HeliusBackfillCollector:
             'graduated': 0,
             'enriched': 0,
             'skipped_existing': 0,
+            'skipped_no_dex': 0,
             'skipped_filters': 0,
             'credits_used_estimate': 0,
         }
@@ -80,33 +81,135 @@ class HeliusBackfillCollector:
             logger.error(f"   Error loading existing data: {e}")
             return {'tokens': [], 'total_tokens': 0}
 
+    async def discover_from_dexscreener(self) -> List[str]:
+        """
+        Discover Solana tokens from DexScreener endpoints (FREE, no credits).
+
+        Uses multiple DexScreener APIs to find tokens that definitely have
+        trading pairs (solving the problem where searchAssets finds un-graduated
+        pump.fun tokens that aren't on any DEX yet).
+
+        Sources:
+        - token-boosts/latest/v1: Recently boosted tokens
+        - token-profiles/latest/v1: Recently updated profiles
+        - search?q=pump.fun: Pump.fun token search results
+        - latest/dex/pairs/solana: Recent Solana pairs
+
+        Returns:
+            List of Solana token mint addresses
+        """
+        mints = set()
+
+        endpoints = [
+            ("boosted tokens", "https://api.dexscreener.com/token-boosts/latest/v1"),
+            ("token profiles", "https://api.dexscreener.com/token-profiles/latest/v1"),
+        ]
+
+        async with aiohttp.ClientSession() as session:
+            # Fetch boosted + profiles endpoints
+            for label, url in endpoints:
+                try:
+                    async with session.get(
+                        url, timeout=aiohttp.ClientTimeout(total=15)
+                    ) as resp:
+                        if resp.status != 200:
+                            logger.debug(f"   DexScreener {label}: HTTP {resp.status}")
+                            continue
+                        data = await resp.json()
+                        for item in data:
+                            if item.get('chainId') == 'solana':
+                                addr = item.get('tokenAddress', '')
+                                if addr:
+                                    mints.add(addr)
+                        logger.info(f"   {label}: {len(mints)} Solana tokens so far")
+                except Exception as e:
+                    logger.debug(f"   DexScreener {label} error: {e}")
+                await asyncio.sleep(0.5)
+
+            # Search for pump.fun tokens
+            try:
+                search_url = "https://api.dexscreener.com/latest/dex/search?q=pump.fun"
+                async with session.get(
+                    search_url, timeout=aiohttp.ClientTimeout(total=15)
+                ) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        for pair in data.get('pairs', []):
+                            if pair.get('chainId') == 'solana':
+                                addr = pair.get('baseToken', {}).get('address', '')
+                                if addr:
+                                    mints.add(addr)
+                        logger.info(f"   pump.fun search: {len(mints)} Solana tokens so far")
+            except Exception as e:
+                logger.debug(f"   DexScreener search error: {e}")
+            await asyncio.sleep(0.5)
+
+            # Recent Solana pairs
+            try:
+                pairs_url = "https://api.dexscreener.com/latest/dex/pairs/solana"
+                async with session.get(
+                    pairs_url, timeout=aiohttp.ClientTimeout(total=15)
+                ) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        for pair in data.get('pairs', []):
+                            addr = pair.get('baseToken', {}).get('address', '')
+                            if addr:
+                                mints.add(addr)
+                        logger.info(f"   recent pairs: {len(mints)} Solana tokens so far")
+            except Exception as e:
+                logger.debug(f"   DexScreener pairs error: {e}")
+
+        logger.info(f"   DexScreener discovery total: {len(mints)} unique Solana tokens")
+        return list(mints)
+
     async def discover_tokens(self) -> List[str]:
         """
-        Discover pump.fun token mints using Helius APIs.
+        Discover pump.fun token mints using Helius APIs + DexScreener endpoints.
 
-        Uses searchAssets as primary discovery, program TX scanning as fallback.
+        Pipeline:
+        1. DexScreener discovery (FREE) - finds tokens WITH trading pairs
+        2. Helius searchAssets (DAS) - broader on-chain discovery
+        3. Helius program TX scanning - finds recent program activity
+
         Deduplicates against existing dataset.
 
         Returns:
             List of new token mint addresses to process
         """
         all_mints = set()
+        step = 1
+        total_steps = sum([
+            self.backfill_cfg.get('use_dexscreener_discovery', True),
+            self.backfill_cfg.get('use_search_assets', True),
+            self.backfill_cfg.get('use_program_scan', True),
+        ])
 
-        # Primary: DAS searchAssets
+        # Primary: DexScreener endpoints (FREE - guaranteed to have pairs)
+        if self.backfill_cfg.get('use_dexscreener_discovery', True):
+            logger.info(f"\n   [{step}/{total_steps}] Discovering tokens via DexScreener endpoints (FREE)...")
+            dex_mints = await self.discover_from_dexscreener()
+            all_mints.update(dex_mints)
+            logger.info(f"   DexScreener found: {len(dex_mints)} mints")
+            step += 1
+
+        # Secondary: DAS searchAssets (finds pump.fun program tokens)
         if self.backfill_cfg.get('use_search_assets', True):
-            logger.info("\n   [1/2] Discovering tokens via Helius DAS searchAssets...")
+            logger.info(f"\n   [{step}/{total_steps}] Discovering tokens via Helius DAS searchAssets...")
             pages = self.backfill_cfg.get('search_pages', 5)
             search_mints = await self.helius.search_pump_graduates(
                 limit_per_page=200,
                 pages=pages
             )
+            new_from_search = len(set(search_mints) - all_mints)
             all_mints.update(search_mints)
             self.stats['credits_used_estimate'] += pages  # ~1 credit per page
-            logger.info(f"   searchAssets found: {len(search_mints)} mints")
+            logger.info(f"   searchAssets found: {len(search_mints)} mints ({new_from_search} new)")
+            step += 1
 
-        # Fallback: Program TX scanning
+        # Tertiary: Program TX scanning
         if self.backfill_cfg.get('use_program_scan', True):
-            logger.info("\n   [2/2] Discovering tokens via program TX scanning...")
+            logger.info(f"\n   [{step}/{total_steps}] Discovering tokens via program TX scanning...")
             tx_limit = self.backfill_cfg.get('program_scan_tx_limit', 500)
             program_mints = await self.helius.scan_program_graduates(tx_limit=tx_limit)
             new_from_scan = len(set(program_mints) - all_mints)
@@ -148,28 +251,32 @@ class HeliusBackfillCollector:
             dex_data = await self.helius.get_dexscreener_data(token_address)
 
             if not dex_data:
+                self.stats['skipped_no_dex'] += 1
                 return None
 
             market_cap = dex_data.get('market_cap', 0)
             liquidity = dex_data.get('liquidity', 0)
             volume_24h = dex_data.get('volume_24h', 0)
 
-            # Apply filters
-            min_mcap = self.backfill_cfg.get('min_mcap_graduated', 50000)
+            # Apply filters (relaxed for ML training diversity)
+            min_mcap = self.backfill_cfg.get('min_mcap_graduated', 5000)
             max_mcap = self.backfill_cfg.get('max_mcap', 500_000_000)
-            min_liq = self.backfill_cfg.get('min_liquidity', 10000)
-            min_vol = self.backfill_cfg.get('min_volume_24h', 10000)
+            min_liq = self.backfill_cfg.get('min_liquidity', 1000)
+            min_vol = self.backfill_cfg.get('min_volume_24h', 100)
 
             if market_cap < min_mcap or market_cap > max_mcap:
                 self.stats['skipped_filters'] += 1
+                logger.debug(f"   Filter: {token_address[:8]} MCAP ${market_cap:,.0f} outside range")
                 return None
 
             if liquidity < min_liq:
                 self.stats['skipped_filters'] += 1
+                logger.debug(f"   Filter: {token_address[:8]} liquidity ${liquidity:,.0f} < ${min_liq:,}")
                 return None
 
             if volume_24h < min_vol:
                 self.stats['skipped_filters'] += 1
+                logger.debug(f"   Filter: {token_address[:8]} volume ${volume_24h:,.0f} < ${min_vol:,}")
                 return None
 
             # Build comprehensive token record
@@ -406,12 +513,13 @@ class HeliusBackfillCollector:
         logger.info("HELIUS BACKFILL COLLECTOR - ML Training Dataset Builder")
         logger.info("=" * 80)
         logger.info(f"   Date: {datetime.utcnow().date()}")
-        logger.info(f"   Config: searchAssets={self.backfill_cfg.get('use_search_assets')}, "
+        logger.info(f"   Config: dexDiscovery={self.backfill_cfg.get('use_dexscreener_discovery', True)}, "
+                     f"searchAssets={self.backfill_cfg.get('use_search_assets')}, "
                      f"programScan={self.backfill_cfg.get('use_program_scan')}")
-        logger.info(f"   Filters: MCAP ${self.backfill_cfg.get('min_mcap_graduated', 50000):,}-"
+        logger.info(f"   Filters: MCAP ${self.backfill_cfg.get('min_mcap_graduated', 5000):,}-"
                      f"${self.backfill_cfg.get('max_mcap', 500_000_000):,}, "
-                     f"Liq ${self.backfill_cfg.get('min_liquidity', 10000):,}+, "
-                     f"Vol ${self.backfill_cfg.get('min_volume_24h', 10000):,}+")
+                     f"Liq ${self.backfill_cfg.get('min_liquidity', 1000):,}+, "
+                     f"Vol ${self.backfill_cfg.get('min_volume_24h', 100):,}+")
         logger.info("")
 
         if max_tokens:
@@ -499,6 +607,7 @@ class HeliusBackfillCollector:
         logger.info(f"\n   Discovery:")
         logger.info(f"      Tokens discovered:    {self.stats['discovered']}")
         logger.info(f"      Already in dataset:    {self.stats['skipped_existing']}")
+        logger.info(f"      No DexScreener pair:   {self.stats['skipped_no_dex']}")
         logger.info(f"      Failed filters:        {self.stats['skipped_filters']}")
         logger.info(f"      Successfully enriched: {self.stats['enriched']}")
 
