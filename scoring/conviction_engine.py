@@ -708,7 +708,17 @@ class ConvictionEngine:
             # 2. Token age < 30 seconds (too fresh, wait for real activity)
             # REDUCED from 2min to 30sec: KOLs buy within 0-60sec, we were too late!
             # Still filters out instant rugs but allows early entry
-            token_created_at = token_data.get('created_at')
+            token_created_at = None
+            created_ts = token_data.get('created_timestamp') or token_data.get('pair_created_at', 0)
+            if created_ts and created_ts > 0:
+                try:
+                    # Handle both seconds and milliseconds timestamps
+                    if created_ts > 1e12:
+                        created_ts = created_ts / 1000  # ms to seconds
+                    token_created_at = datetime.utcfromtimestamp(created_ts)
+                except (ValueError, OSError):
+                    token_created_at = None
+
             if token_created_at:
                 token_age_seconds = (datetime.utcnow() - token_created_at).total_seconds()
                 if token_age_seconds < 30:  # 30 seconds (was 2 minutes)

@@ -505,11 +505,10 @@ async def lifespan(app: FastAPI):
     active_tracker.post_call_monitor = post_call_monitor
     logger.info("✅ Post-call monitor initialized (10min fade detection)")
 
-    # Register Helius Pump.fun program webhook (for organic discovery)
+    # Helius Pump.fun program webhook
     if config.HELIUS_PUMP_WEBHOOK.get('enabled', False) and config.HELIUS_PUMP_WEBHOOK.get('auto_register', False):
         logger.info("🔗 Registering Helius Pump.fun program webhook...")
         try:
-            # Build webhook URL from Railway public domain
             railway_url = os.getenv('RAILWAY_PUBLIC_DOMAIN', '')
             if railway_url:
                 if not railway_url.startswith('http'):
@@ -519,12 +518,33 @@ async def lifespan(app: FastAPI):
                 if webhook_id:
                     logger.info(f"✅ Pump.fun webhook active: {webhook_id}")
                 else:
-                    logger.warning("⚠️ Failed to register Pump.fun webhook - organic discovery via PumpPortal WS only")
+                    logger.warning("⚠️ Failed to register Pump.fun webhook")
             else:
-                logger.warning("⚠️ RAILWAY_PUBLIC_DOMAIN not set - skipping Helius webhook registration")
-                logger.info("   Pump.fun monitoring via PumpPortal WebSocket only")
+                logger.warning("⚠️ RAILWAY_PUBLIC_DOMAIN not set - skipping webhook")
         except Exception as e:
             logger.error(f"❌ Pump webhook registration failed: {e}")
+    else:
+        # CLEANUP: Delete any existing pump webhooks to stop credit burn
+        logger.info("🧹 Pump.fun webhook DISABLED - cleaning up existing webhooks to stop credit burn...")
+        try:
+            existing = await helius_fetcher.get_webhooks()
+            pump_program_id = config.HELIUS_PUMP_WEBHOOK.get('program_id', '')
+            deleted = 0
+            for wh in existing:
+                accounts = wh.get('accountAddresses', [])
+                if pump_program_id in accounts:
+                    wh_id = wh.get('webhookID', '')
+                    if wh_id:
+                        await helius_fetcher.delete_webhook(wh_id)
+                        deleted += 1
+                        logger.info(f"   🗑️ Deleted pump webhook: {wh_id}")
+            if deleted:
+                logger.info(f"✅ Cleaned up {deleted} pump webhook(s) - credits saved!")
+            else:
+                logger.info("   No pump webhooks found to clean up")
+            logger.info("   📡 Organic discovery via PumpPortal WebSocket (FREE)")
+        except Exception as e:
+            logger.warning(f"⚠️ Webhook cleanup failed: {e} - manually delete via Helius dashboard")
 
     # Start holder polling task (NEW!)
     logger.info("🔄 Starting token polling task...")
