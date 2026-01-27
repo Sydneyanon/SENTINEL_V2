@@ -64,12 +64,13 @@ class AdminBot:
             self.app.add_handler(CommandHandler("ml", self._cmd_ml_retrain, filters=admin_filter))
             self.app.add_handler(CommandHandler("pause", self._cmd_pause, filters=admin_filter))
             self.app.add_handler(CommandHandler("resume", self._cmd_resume, filters=admin_filter))
+            self.app.add_handler(CommandHandler("winrate", self._cmd_winrate, filters=admin_filter))
 
             # Block all other users (unauthorized access attempts)
             self.app.add_handler(MessageHandler(~admin_filter, self._handle_unauthorized))
 
             logger.info(f"✅ Admin bot initialized")
-            logger.info(f"   Commands registered: /help /stats /active /performance /health /cache /missed /whales /config /dataset /collect /ml /pause /resume")
+            logger.info(f"   Commands registered: /help /stats /active /performance /winrate /health /cache /missed /whales /config /dataset /collect /ml /pause /resume")
             logger.info(f"   Security: Only user {self.admin_user_id} can use commands")
             if self.admin_channel_id:
                 logger.info(f"   Response mode: Admin channel ({self.admin_channel_id})")
@@ -173,6 +174,7 @@ class AdminBot:
 <b>Performance:</b>
 /stats - Overall system statistics
 /performance - Recent signal performance
+/winrate - KOL vs On-Chain win rate comparison
 /missed - Tracked tokens not signaled (potential missed runners)
 
 <b>Monitoring:</b>
@@ -958,3 +960,132 @@ class AdminBot:
         except Exception as e:
             logger.error(f"❌ ML retraining failed: {e}")
             await self._send_response(update, context, f"❌ ML retraining failed: {str(e)}")
+
+    async def _cmd_winrate(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Compare win rates: KOL-based era vs On-Chain-first era"""
+        try:
+            if not self.database or not self.database.pool:
+                await self._send_response(update, context, "❌ Database not available")
+                return
+
+            # On-chain-first scoring deployed ~2026-01-27 06:17 UTC (PR #131 merge)
+            TRANSITION = '2026-01-27 06:17:00+00'
+
+            async with self.database.pool.acquire() as conn:
+                # --- ERA COMPARISON ---
+                era_stats = await conn.fetch("""
+                    SELECT
+                        CASE WHEN created_at < $1::timestamptz THEN 'KOL' ELSE 'ON-CHAIN' END as era,
+                        COUNT(*) as total,
+                        SUM(CASE WHEN outcome IN ('2x','5x','10x','50x','100x') THEN 1 ELSE 0 END) as wins,
+                        SUM(CASE WHEN outcome = 'rug' THEN 1 ELSE 0 END) as rugs,
+                        SUM(CASE WHEN outcome = 'loss' THEN 1 ELSE 0 END) as losses,
+                        SUM(CASE WHEN outcome IS NULL THEN 1 ELSE 0 END) as pending,
+                        ROUND(AVG(CASE WHEN max_roi IS NOT NULL THEN max_roi END)::numeric, 2) as avg_roi,
+                        ROUND(MAX(CASE WHEN max_roi IS NOT NULL THEN max_roi END)::numeric, 1) as best_roi,
+                        ROUND(AVG(conviction_score)::numeric, 0) as avg_score
+                    FROM signals
+                    WHERE signal_posted = TRUE
+                    GROUP BY era
+                    ORDER BY era
+                """, TRANSITION)
+
+                # --- BY SIGNAL SOURCE ---
+                source_stats = await conn.fetch("""
+                    SELECT
+                        COALESCE(signal_source, 'unknown') as source,
+                        COUNT(*) as total,
+                        SUM(CASE WHEN outcome IN ('2x','5x','10x','50x','100x') THEN 1 ELSE 0 END) as wins,
+                        SUM(CASE WHEN outcome = 'rug' THEN 1 ELSE 0 END) as rugs,
+                        SUM(CASE WHEN outcome IS NULL THEN 1 ELSE 0 END) as pending,
+                        ROUND(AVG(CASE WHEN max_roi IS NOT NULL THEN max_roi END)::numeric, 2) as avg_roi
+                    FROM signals
+                    WHERE signal_posted = TRUE
+                    GROUP BY source
+                    ORDER BY total DESC
+                """)
+
+                # --- DAILY TREND (last 7 days) ---
+                daily = await conn.fetch("""
+                    SELECT
+                        DATE(created_at) as day,
+                        COUNT(*) as total,
+                        SUM(CASE WHEN outcome IN ('2x','5x','10x','50x','100x') THEN 1 ELSE 0 END) as wins,
+                        SUM(CASE WHEN outcome = 'rug' THEN 1 ELSE 0 END) as rugs,
+                        SUM(CASE WHEN outcome IS NULL THEN 1 ELSE 0 END) as pending
+                    FROM signals
+                    WHERE signal_posted = TRUE
+                      AND created_at >= NOW() - INTERVAL '7 days'
+                    GROUP BY day
+                    ORDER BY day DESC
+                """)
+
+                # --- OUTCOME DISTRIBUTION (all time) ---
+                outcomes = await conn.fetch("""
+                    SELECT
+                        COALESCE(outcome, 'pending') as outcome,
+                        COUNT(*) as cnt
+                    FROM signals
+                    WHERE signal_posted = TRUE
+                    GROUP BY outcome
+                    ORDER BY cnt DESC
+                """)
+
+            # Build response
+            r = "📊 <b>WIN RATE: KOL vs ON-CHAIN</b>\n\n"
+
+            # Era comparison
+            for row in era_stats:
+                era = row['era']
+                decided = row['total'] - row['pending']
+                wr = (row['wins'] / decided * 100) if decided > 0 else 0
+                rr = (row['rugs'] / decided * 100) if decided > 0 else 0
+                emoji = "🟢" if wr >= 40 else "🟡" if wr >= 25 else "🔴"
+
+                r += f"<b>{'👔 KOL ERA' if era == 'KOL' else '⛓ ON-CHAIN ERA'}</b>\n"
+                r += f"{emoji} Win Rate: <b>{wr:.0f}%</b> ({row['wins']}W / {row['losses']}L / {row['rugs']}R)\n"
+                r += f"   Signals: {row['total']} ({row['pending']} pending)\n"
+                r += f"   Avg ROI: {row['avg_roi'] or 0}x | Best: {row['best_roi'] or 0}x\n"
+                r += f"   Avg Score: {row['avg_score'] or 0}/100\n"
+                if row['pending'] > 0 and decided == 0:
+                    r += f"   ⏳ All signals still pending outcome\n"
+                r += "\n"
+
+            # Signal source breakdown
+            r += "<b>📡 BY SOURCE</b>\n"
+            for row in source_stats:
+                decided = row['total'] - row['pending']
+                wr = (row['wins'] / decided * 100) if decided > 0 else 0
+                src = row['source'][:15]
+                r += f"• {src}: {wr:.0f}% WR ({row['wins']}W/{row['rugs']}R of {decided}d) avg {row['avg_roi'] or 0}x\n"
+            r += "\n"
+
+            # Daily trend
+            r += "<b>📅 DAILY TREND</b>\n"
+            for row in daily:
+                decided = row['total'] - row['pending']
+                wr = (row['wins'] / decided * 100) if decided > 0 else 0
+                day_str = row['day'].strftime('%m/%d')
+                bar = "🟢" * row['wins'] + "🔴" * row['rugs']
+                marker = " ⛓" if row['day'].strftime('%Y-%m-%d') >= '2026-01-27' else ""
+                r += f"{day_str}: {wr:.0f}% ({row['total']}sig, {row['pending']}pend) {bar}{marker}\n"
+
+            # Outcome distribution
+            r += "\n<b>🎯 ALL-TIME OUTCOMES</b>\n"
+            for row in outcomes:
+                oc = row['outcome']
+                cnt = row['cnt']
+                emoji_map = {'100x': '💎', '50x': '🚀', '10x': '🔥', '5x': '✅', '2x': '🟢',
+                             'loss': '🔴', 'rug': '💀', 'pending': '⏳'}
+                em = emoji_map.get(oc, '•')
+                r += f"{em} {oc}: {cnt}\n"
+
+            r += f"\n<i>⛓ = on-chain era | Transition: Jan 27 06:17 UTC</i>"
+
+            await self._send_response(update, context, r)
+
+        except Exception as e:
+            logger.error(f"❌ Error in /winrate: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            await self._send_response(update, context, f"❌ Error: {str(e)}")
