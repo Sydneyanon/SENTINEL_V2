@@ -296,6 +296,17 @@ class Database:
                 ON group_correlations(correlation_date DESC)
             ''')
 
+            # ML Training tokens table - persists across Railway deploys
+            await conn.execute('''
+                CREATE TABLE IF NOT EXISTS ml_training_tokens (
+                    id SERIAL PRIMARY KEY,
+                    token_address TEXT UNIQUE NOT NULL,
+                    token_data JSONB NOT NULL,
+                    source TEXT DEFAULT 'backfill',
+                    created_at TIMESTAMP DEFAULT NOW()
+                )
+            ''')
+
             logger.info("✅ Database tables created/verified")
     
     async def insert_signal(self, signal_data: Dict):
@@ -1010,4 +1021,58 @@ class Database:
             """.format(days), limit)
 
             return [dict(row) for row in rows]
+
+    # ================================================================
+    # ML TRAINING DATA PERSISTENCE
+    # ================================================================
+
+    async def save_training_tokens(self, tokens: list, source: str = 'backfill'):
+        """Save ML training tokens to database (survives Railway deploys)"""
+        if not tokens:
+            return 0
+        import json as json_mod
+        async with self.pool.acquire() as conn:
+            saved = 0
+            for token in tokens:
+                addr = token.get('token_address', '')
+                if not addr:
+                    continue
+                try:
+                    await conn.execute('''
+                        INSERT INTO ml_training_tokens (token_address, token_data, source)
+                        VALUES ($1, $2::jsonb, $3)
+                        ON CONFLICT (token_address) DO UPDATE SET
+                            token_data = EXCLUDED.token_data,
+                            source = EXCLUDED.source
+                    ''', addr, json_mod.dumps(token), source)
+                    saved += 1
+                except Exception as e:
+                    logger.error(f"Error saving training token {addr[:8]}: {e}")
+            logger.info(f"💾 Saved {saved} training tokens to database ({source})")
+            return saved
+
+    async def load_training_tokens(self) -> list:
+        """Load all ML training tokens from database"""
+        import json as json_mod
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch('''
+                SELECT token_data FROM ml_training_tokens
+                ORDER BY created_at ASC
+            ''')
+            tokens = []
+            for row in rows:
+                try:
+                    data = row['token_data']
+                    if isinstance(data, str):
+                        data = json_mod.loads(data)
+                    tokens.append(data)
+                except Exception as e:
+                    logger.error(f"Error loading training token: {e}")
+            logger.info(f"📂 Loaded {len(tokens)} training tokens from database")
+            return tokens
+
+    async def get_training_token_count(self) -> int:
+        """Get count of training tokens in database"""
+        async with self.pool.acquire() as conn:
+            return await conn.fetchval('SELECT COUNT(*) FROM ml_training_tokens')
 
