@@ -674,8 +674,8 @@ HELIUS_TX_HISTORY = {
 HELIUS_BACKFILL = {
     'enabled': True,
     'use_dexscreener_discovery': True,  # Primary: DexScreener endpoints (FREE, guaranteed pairs)
-    'use_search_assets': True,          # Secondary: DAS searchAssets API (~1 credit/page)
-    'use_program_scan': True,           # Tertiary: Scan program TX history (~5-10 credits)
+    'use_search_assets': False,         # OFF: finds un-graduated tokens (pump.fun still authority)
+    'use_program_scan': False,          # OFF: mostly un-graduated tokens, wastes DexScreener lookups
     'search_pages': 5,                  # Pages to fetch from searchAssets (200 tokens/page)
     'program_scan_tx_limit': 500,       # Max program TXs to scan in fallback mode
     'max_tokens_per_run': 200,          # Cap tokens per backfill run
@@ -688,7 +688,7 @@ HELIUS_BACKFILL = {
     'helius_enrich_gate_score': 0,      # Enrich all tokens (backfill = comprehensive data)
     'dexscreener_rate_limit': 0.4,      # Seconds between DexScreener calls
     'helius_rate_limit': 0.3,           # Seconds between Helius calls
-    'estimated_credits_per_run': 500,   # ~500 credits per backfill run
+    'estimated_credits_per_run': 2200,  # ~11 credits/token (authority+holders) for enrichment only
 }
 
 # =============================================================================
