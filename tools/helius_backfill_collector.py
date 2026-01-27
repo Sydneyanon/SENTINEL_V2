@@ -48,10 +48,11 @@ class HeliusBackfillCollector:
     6. Append to historical_training_data.json
     """
 
-    def __init__(self):
+    def __init__(self, database=None):
         self.helius = HeliusDataFetcher()
         self.backfill_cfg = config.HELIUS_BACKFILL
         self.data_file = 'data/historical_training_data.json'
+        self.database = database  # Persistent storage across Railway deploys
         self.existing_addresses = set()
         self.stats = {
             'discovered': 0,
@@ -63,23 +64,39 @@ class HeliusBackfillCollector:
             'credits_used_estimate': 0,
         }
 
-    def _load_existing_data(self) -> dict:
-        """Load existing training data and build address dedup set"""
-        try:
-            with open(self.data_file, 'r') as f:
-                data = json.load(f)
-                for token in data.get('tokens', []):
-                    addr = token.get('token_address', '')
-                    if addr:
-                        self.existing_addresses.add(addr)
-                logger.info(f"   Loaded existing dataset: {data.get('total_tokens', 0)} tokens")
-                return data
-        except FileNotFoundError:
-            logger.info("   No existing dataset found, creating new one")
-            return {'tokens': [], 'total_tokens': 0}
-        except Exception as e:
-            logger.error(f"   Error loading existing data: {e}")
-            return {'tokens': [], 'total_tokens': 0}
+    async def _load_existing_data(self) -> dict:
+        """Load existing training data from DB first, fall back to file"""
+        tokens = []
+
+        # Primary: load from database (survives Railway deploys)
+        if self.database:
+            try:
+                tokens = await self.database.load_training_tokens()
+                if tokens:
+                    logger.info(f"   📂 Loaded {len(tokens)} tokens from database (persistent)")
+            except Exception as e:
+                logger.warning(f"   ⚠️ DB load failed, falling back to file: {e}")
+                tokens = []
+
+        # Fallback: load from file
+        if not tokens:
+            try:
+                with open(self.data_file, 'r') as f:
+                    data = json.load(f)
+                    tokens = data.get('tokens', [])
+                    logger.info(f"   📁 Loaded {len(tokens)} tokens from file (fallback)")
+            except FileNotFoundError:
+                logger.info("   No existing dataset found, creating new one")
+            except Exception as e:
+                logger.error(f"   Error loading existing data: {e}")
+
+        # Build dedup set
+        for token in tokens:
+            addr = token.get('token_address', '')
+            if addr:
+                self.existing_addresses.add(addr)
+
+        return {'tokens': tokens, 'total_tokens': len(tokens)}
 
     async def discover_from_dexscreener(self) -> List[str]:
         """
@@ -569,7 +586,7 @@ class HeliusBackfillCollector:
 
         # Step 1: Load existing data for deduplication
         logger.info("[Step 1/4] Loading existing dataset...")
-        existing_data = self._load_existing_data()
+        existing_data = await self._load_existing_data()
         existing_tokens = existing_data.get('tokens', [])
 
         # Step 2: Discover new token mints
@@ -626,8 +643,16 @@ class HeliusBackfillCollector:
         os.makedirs('data', exist_ok=True)
         with open(self.data_file, 'w') as f:
             json.dump(output, f, indent=2)
+        logger.info(f"   📁 Saved to {self.data_file}")
 
-        logger.info(f"   Saved to {self.data_file}")
+        # Persist ALL tokens to database (survives Railway deploys)
+        if self.database:
+            try:
+                await self.database.save_training_tokens(all_tokens, source='backfill')
+                logger.info(f"   💾 Persisted {len(all_tokens)} tokens to database")
+            except Exception as e:
+                logger.error(f"   ⚠️ DB persist failed (file save OK): {e}")
+
         self._print_summary(len(new_tokens), all_tokens)
 
     def _get_outcome_distribution(self, tokens: list) -> dict:

@@ -881,7 +881,7 @@ class AdminBot:
         try:
             from tools.helius_backfill_collector import HeliusBackfillCollector
 
-            collector = HeliusBackfillCollector()
+            collector = HeliusBackfillCollector(database=self.database)
             await collector.run()
 
             # Report results
@@ -893,13 +893,16 @@ class AdminBot:
             existing = stats.get('skipped_existing', 0)
             credits = stats.get('credits_used_estimate', 0)
 
-            # Get total dataset size
+            # Get total dataset size (from DB first, then file fallback)
             total = 0
             try:
-                import json
-                with open('data/historical_training_data.json', 'r') as f:
-                    data = json.load(f)
-                    total = data.get('total_tokens', 0)
+                if self.database:
+                    total = await self.database.get_training_token_count()
+                if total == 0:
+                    import json
+                    with open('data/historical_training_data.json', 'r') as f:
+                        data = json.load(f)
+                        total = data.get('total_tokens', 0)
             except Exception:
                 pass
 
