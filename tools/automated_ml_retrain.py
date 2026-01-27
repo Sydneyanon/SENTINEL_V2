@@ -178,7 +178,7 @@ class AutomatedMLRetrainer:
         logger.info(f"   Total trainings: {metrics['total_trainings']}")
 
     async def run(self):
-        """Run automated retraining"""
+        """Run automated retraining. Returns status dict for callers."""
         logger.info("=" * 80)
         logger.info("🤖 AUTOMATED ML RETRAINING")
         logger.info("=" * 80)
@@ -190,14 +190,21 @@ class AutomatedMLRetrainer:
 
         if not should_retrain:
             logger.info("\n✅ No retraining needed at this time")
-            return
+            # Return skip reason for callers (e.g. admin bot)
+            total = self._get_dataset_size()
+            return {
+                'action': 'skipped',
+                'reason': f'Not enough data ({total}/{self.min_tokens_for_retrain} tokens)',
+                'total_tokens': total,
+                'required': self.min_tokens_for_retrain,
+            }
 
         # Retrain model
         results = await self.retrain_model()
 
         if not results['success']:
             logger.error("\n❌ Retraining failed!")
-            return
+            return {'action': 'failed', 'reason': 'Training failed'}
 
         # Save metrics
         await self.save_training_metrics(results)
@@ -209,6 +216,21 @@ class AutomatedMLRetrainer:
         logger.info(f"   Features: {results['feature_count']}")
         logger.info(f"   Model will be used in next conviction scoring cycle")
         logger.info("")
+
+        return {
+            'action': 'trained',
+            'feature_count': results['feature_count'],
+            'model_path': results['model_path'],
+        }
+
+    def _get_dataset_size(self) -> int:
+        """Get current dataset token count"""
+        try:
+            with open(self.data_file, 'r') as f:
+                data = json.load(f)
+                return data.get('total_tokens', 0)
+        except Exception:
+            return 0
 
 
 async def main():
