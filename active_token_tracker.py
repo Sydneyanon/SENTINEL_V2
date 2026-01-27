@@ -622,6 +622,26 @@ class ActiveTokenTracker:
 
             if new_score >= MIN_CONVICTION_SCORE and not state.signal_sent:
                 logger.info(f"   ✅ PASSES threshold check!")
+
+                # PRICE RESCUE: If pre-grad token passes conviction but has $0 price,
+                # try pump.fun API as last resort before data quality gate blocks it
+                if not has_real_data and is_pre_grad and price == 0:
+                    logger.info(f"   🆘 Pre-grad token scored {new_score} but has $0 price - attempting rescue...")
+                    rescued = await self._rescue_price_data(token_address, state)
+                    if rescued:
+                        # Re-check data quality with rescued data
+                        price = state.token_data.get('price_usd', 0)
+                        mcap = state.token_data.get('market_cap', 0)
+                        liq = state.token_data.get('liquidity', 0)
+                        data_quality_checks = {
+                            'price': price > 0,
+                            'liquidity': liq >= 1000,
+                            'mcap': mcap > 0,
+                            'mcap_not_too_high': mcap <= MAX_MARKET_CAP_FILTER,
+                        }
+                        has_real_data = all(data_quality_checks.values())
+                        logger.info(f"   📊 After rescue: price=${price:.8f}, mcap=${mcap:.0f}, liq=${liq:.0f} → {'PASS' if has_real_data else 'STILL BLOCKED'}")
+
                 if has_real_data:
                     logger.info(f"   ✅ Has real data - SENDING SIGNAL")
                     logger.info(f"   📊 conviction_data['score'] = {conviction_data.get('score')}")
@@ -842,6 +862,70 @@ class ActiveTokenTracker:
     def get_state(self, token_address: str) -> Optional[TokenState]:
         """Get state of a tracked token"""
         return self.tracked_tokens.get(token_address)
+
+    async def _rescue_price_data(self, token_address: str, state) -> bool:
+        """
+        Last-resort price fetch for pre-grad tokens that pass conviction but have $0 price.
+        Calls pump.fun API directly to get bonding curve / market cap data.
+
+        Returns True if price data was rescued, False otherwise.
+        """
+        try:
+            import aiohttp
+
+            url = f"https://frontend-api-v3.pump.fun/coins/{token_address}"
+            logger.info(f"   🆘 Price rescue: fetching from pump.fun API...")
+
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as resp:
+                    if resp.status != 200:
+                        logger.warning(f"   ⚠️ Pump.fun API returned {resp.status}")
+                        return False
+
+                    data = await resp.json()
+
+                    # Extract price data from pump.fun response
+                    usd_mcap = data.get('usd_market_cap', 0)
+                    v_sol = data.get('virtual_sol_reserves', 0)
+                    v_tokens = data.get('virtual_token_reserves', 0)
+                    bonding_complete = data.get('complete', False)
+
+                    SOL_PRICE_USD = 150  # TODO: fetch live
+
+                    # Calculate price from reserves
+                    price_usd = 0
+                    if v_sol > 0 and v_tokens > 0:
+                        # virtual_sol_reserves is in lamports (divide by 1e9)
+                        sol_reserves = v_sol / 1e9
+                        token_reserves = v_tokens / 1e6  # adjust for decimals
+                        price_sol = sol_reserves / token_reserves if token_reserves > 0 else 0
+                        price_usd = price_sol * SOL_PRICE_USD
+
+                    mcap = float(usd_mcap) if usd_mcap else 0
+                    liquidity = (v_sol / 1e9) * SOL_PRICE_USD if v_sol else 0
+
+                    # Calculate bonding %
+                    bonding_pct = 0
+                    if v_sol:
+                        bonding_pct = ((v_sol / 1e9) / 85) * 100
+                        bonding_pct = min(bonding_pct, 100)
+                    if bonding_complete:
+                        bonding_pct = 100
+
+                    if price_usd > 0 or mcap > 0:
+                        state.token_data['price_usd'] = price_usd
+                        state.token_data['market_cap'] = mcap
+                        state.token_data['liquidity'] = liquidity
+                        state.token_data['bonding_curve_pct'] = bonding_pct
+                        logger.info(f"   ✅ Price rescued: ${price_usd:.8f}, mcap=${mcap:.0f}, liq=${liquidity:.0f}, bonding={bonding_pct:.1f}%")
+                        return True
+                    else:
+                        logger.warning(f"   ⚠️ Pump.fun API returned $0 price too")
+                        return False
+
+        except Exception as e:
+            logger.warning(f"   ⚠️ Price rescue failed: {e}")
+            return False
 
     def get_token_trades(self, token_address: str) -> List[Dict]:
         """
