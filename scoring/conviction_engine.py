@@ -983,7 +983,7 @@ class ConvictionEngine:
 
                     # Show weakest scoring components (on-chain-first)
                     breakdown_items = [
-                        ('Buyer Velocity', base_scores.get('buyer_velocity', 0), 25),
+                        ('Buyer Velocity', base_scores.get('buyer_velocity', 0), 30),
                         ('Unique Buyers', unique_buyers_score, 20),
                         ('Buy/Sell Ratio', base_scores.get('buy_sell_ratio', 0), 20),
                         ('Volume', base_scores['volume'], 15),
@@ -1547,7 +1547,7 @@ class ConvictionEngine:
 
     def _score_buyer_velocity(self, token_address: str) -> int:
         """
-        Score based on buyer velocity (0-25 points) - NEW: Replaces KOL scoring
+        Score based on buyer velocity (0-30 points) - NEW: Replaces KOL scoring
         Measures how fast unique buyers are accumulating in a 5-minute window.
 
         Uses PumpPortal buyer history data (FREE).

@@ -73,7 +73,7 @@ DISABLE_POLLING_BELOW_THRESHOLD = True
 # - Added buyer velocity scoring (0-25 pts) and bonding curve speed (0-15 pts)
 # - Increased unique buyers (0-20), volume (0-15), narrative (0-15 with RSS+BERTopic), telegram (0-10)
 # - Lowered post-grad threshold from 75 to 65 (no KOL boost available)
-MIN_CONVICTION_SCORE = 60  # Pre-grad threshold (raised from 50 - cut low-quality 5-10K rug calls)
+MIN_CONVICTION_SCORE = 45  # Pre-grad threshold (lowered from 60 — trial to catch mid-score runners)
 POST_GRAD_THRESHOLD = 65   # Lowered from 75 - no KOL boost, pure on-chain scoring
 
 # Base score threshold for distribution checks
@@ -154,15 +154,15 @@ BONDING_SPEED_WEIGHTS = {
 # =============================================================================
 ORGANIC_SCANNER = {
     'enabled': True,
-    'min_unique_buyers': 60,       # Raised from 38 - higher bar filters out sniped rugs
-    'min_buy_ratio': 0.70,         # Raised from 0.60 - need strong buy dominance
+    'min_unique_buyers': 30,       # Lowered from 60 — many 5-10x runners start with 30-50 early buyers
+    'min_buy_ratio': 0.55,         # Lowered from 0.70 — allows slight sell pressure if velocity is strong
     'max_bundle_ratio': 0.20,      # Max 20% of buys from same block (anti-bundle)
     'watch_window_seconds': 300,   # Watch tokens for 5 min before deciding
-    'min_bonding_pct': 40,         # Raised from 25 - avoid very early low-conviction entries
-    'max_bonding_pct': 85,         # Lowered from 90 - avoid near-graduation FOMO
+    'min_bonding_pct': 20,         # Lowered from 40 — catches very early FOMO
+    'max_bonding_pct': 90,         # Raised from 85 — allow near-graduation entries
     'max_tracked_candidates': 100, # Max tokens to watch simultaneously
     'cooldown_seconds': 60,        # Wait 60s between scanner evaluations
-    'velocity_bypass_multiplier': 2.5,  # Raised from 2.0 - need stronger FOMO signal to bypass buyer count
+    'velocity_bypass_multiplier': 2.5,  # If velocity > 2.5x in 5 min → qualify regardless of buyer count
 }
 
 # =============================================================================
@@ -370,8 +370,8 @@ TIMING_RULES = {
 
     'signal_maturity_gate': {
         'enabled': True,              # Gate signals on minimum maturity
-        'min_mcap_pre_grad': 15000,   # Pre-grad: skip if MCAP < $15K (avoid sniped rugs)
-        'min_age_minutes_pre_grad': 15,  # Pre-grad: skip if age < 15 min (distribution time)
+        'min_mcap_pre_grad': 12000,   # Pre-grad: skip if MCAP < $12K (lowered from $15K)
+        'min_age_minutes_pre_grad': 12,  # Pre-grad: skip if age < 12 min (lowered from 15)
         'min_mcap_post_grad': 0,      # Post-grad: no min MCAP (already graduated)
         'min_age_minutes_post_grad': 0,  # Post-grad: no min age
         'log_skipped': True           # Log skipped signals
