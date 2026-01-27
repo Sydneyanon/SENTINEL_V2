@@ -83,8 +83,13 @@ class PumpPortalAPI:
                 self.social_source_stats['helius'] += 1
                 return result
 
-        # All fallbacks failed
-        logger.warning(f"⚠️  All social data sources failed for {token_address[:8]}")
+        # All fallbacks failed - log detailed failure summary
+        logger.warning(f"⚠️  ALL metadata sources failed for {token_address[:8]}... | "
+                       f"Stats: pump.fun={self.social_source_stats['pumpfun']}, "
+                       f"pumpportal={self.social_source_stats['pumpportal']}, "
+                       f"coingecko={self.social_source_stats['coingecko']}, "
+                       f"helius={self.social_source_stats['helius']}, "
+                       f"failures={self.social_source_stats['none'] + 1}")
         self.social_source_stats['none'] += 1
         return None
 
@@ -174,9 +179,11 @@ class PumpPortalAPI:
             logger.error(f"❌ Pump.fun API error: {e}")
             return None
 
-    async def _fetch_from_pumpportal(self, token_address: str) -> Optional[Dict]:
+    async def _fetch_from_pumpportal(self, token_address: str, attempt: int = 1) -> Optional[Dict]:
         """
         Fallback: Fetch from PumpPortal API (may not have social data)
+
+        Retries with exponential backoff: 3 attempts, 1s → 2s → 4s delays
         """
         try:
             url = f"{self.pumpportal_base}/token/{token_address}"
@@ -212,11 +219,22 @@ class PumpPortalAPI:
                             return metadata
                         else:
                             return None
+                    elif resp.status in [429, 500, 502, 503, 504] and attempt < 3:
+                        delay = 2 ** (attempt - 1)
+                        logger.warning(f"⚠️  PumpPortal API {resp.status} - retry {attempt + 1}/3 in {delay}s")
+                        await asyncio.sleep(delay)
+                        return await self._fetch_from_pumpportal(token_address, attempt + 1)
                     else:
+                        logger.debug(f"   PumpPortal API returned {resp.status} for {token_address[:8]}")
                         return None
 
         except Exception as e:
-            logger.debug(f"   PumpPortal fallback error: {e}")
+            if attempt < 3:
+                delay = 2 ** (attempt - 1)
+                logger.debug(f"   PumpPortal fallback error (attempt {attempt}/3): {e} - retrying in {delay}s")
+                await asyncio.sleep(delay)
+                return await self._fetch_from_pumpportal(token_address, attempt + 1)
+            logger.warning(f"   PumpPortal fallback failed after 3 attempts: {e}")
             return None
 
     async def _fetch_from_coingecko(self, token_address: str) -> Optional[Dict]:

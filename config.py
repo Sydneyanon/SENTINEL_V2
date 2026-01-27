@@ -73,7 +73,7 @@ DISABLE_POLLING_BELOW_THRESHOLD = True
 # - Added buyer velocity scoring (0-25 pts) and bonding curve speed (0-15 pts)
 # - Increased unique buyers (0-20), volume (0-15), narrative (0-15 with RSS+BERTopic), telegram (0-10)
 # - Lowered post-grad threshold from 75 to 65 (no KOL boost available)
-MIN_CONVICTION_SCORE = 60  # Pre-grad threshold (raised from 50 - cut low-quality 5-10K rug calls)
+MIN_CONVICTION_SCORE = 45  # Pre-grad threshold (lowered from 60 — trial to catch mid-score runners)
 POST_GRAD_THRESHOLD = 65   # Lowered from 75 - no KOL boost, pure on-chain scoring
 
 # Base score threshold for distribution checks
@@ -127,8 +127,8 @@ SMART_WALLET_WEIGHTS = {
 # Measures how fast unique buyers are accumulating
 # =============================================================================
 BUYER_VELOCITY_WEIGHTS = {
-    'explosive': 30,         # 100+ buyers in 5 min (viral organic demand) - raised from 25, strongest predictor
-    'very_fast': 22,         # 50-99 buyers in 5 min (raised from 20)
+    'explosive': 35,         # 100+ buyers in 5 min (viral organic demand) - raised to 35, strongest predictor
+    'very_fast': 25,         # 50-99 buyers in 5 min (raised from 22)
     'fast': 15,              # 25-49 buyers in 5 min
     'moderate': 10,          # 15-24 buyers in 5 min
     'slow': 5,               # 5-14 buyers in 5 min
@@ -141,11 +141,39 @@ BUYER_VELOCITY_WEIGHTS = {
 # How fast the bonding curve is filling (organic demand indicator)
 # =============================================================================
 BONDING_SPEED_WEIGHTS = {
-    'rocket': 15,            # >5%/min bonding velocity (explosive demand)
+    'hyper': 20,             # >7%/min bonding velocity (insane demand) — +10 bonus at 40%+
+    'rocket': 15,            # >5%/min bonding velocity (explosive demand) — +5 bonus at 50%+
     'fast': 12,              # 2-5%/min bonding velocity
     'steady': 8,             # 1-2%/min bonding velocity
     'slow': 4,               # 0.5-1%/min bonding velocity
     'crawl': 0,              # <0.5%/min (weak demand)
+}
+
+# =============================================================================
+# PRICE ACCELERATION BONUS (pre-grad only)
+# Rewards rapid price increase — early FOMO indicator
+# =============================================================================
+ACCELERATION_BONUS = {
+    'enabled': True,
+    'thresholds': [
+        {'pct': 50, 'points': 25},   # +50% in ≤10 min → +25 pts
+        {'pct': 30, 'points': 15},   # +30% in ≤10 min → +15 pts
+    ],
+    'max_age_minutes': 10,            # Only apply if token age ≤10 min
+}
+
+# =============================================================================
+# EARLY PUMP ALERT — force signal at low scores if momentum criteria met
+# Overrides threshold: price +30% in <10min + buyers >40 + bonding >40%
+# =============================================================================
+EARLY_PUMP_ALERT = {
+    'enabled': True,
+    'min_price_change_pct': 30,       # +30% price change required
+    'max_age_minutes': 10,            # Within 10 minutes of creation
+    'min_unique_buyers': 40,          # At least 40 unique buyers
+    'min_bonding_pct': 40,            # At least 40% bonding
+    'min_score': 30,                  # Must have at least score 30
+    'max_score': 45,                  # Only triggers below normal threshold (45)
 }
 
 # =============================================================================
@@ -154,15 +182,15 @@ BONDING_SPEED_WEIGHTS = {
 # =============================================================================
 ORGANIC_SCANNER = {
     'enabled': True,
-    'min_unique_buyers': 60,       # Raised from 38 - higher bar filters out sniped rugs
-    'min_buy_ratio': 0.70,         # Raised from 0.60 - need strong buy dominance
+    'min_unique_buyers': 30,       # Lowered from 60 — many 5-10x runners start with 30-50 early buyers
+    'min_buy_ratio': 0.55,         # Lowered from 0.70 — allows slight sell pressure if velocity is strong
     'max_bundle_ratio': 0.20,      # Max 20% of buys from same block (anti-bundle)
     'watch_window_seconds': 300,   # Watch tokens for 5 min before deciding
-    'min_bonding_pct': 40,         # Raised from 25 - avoid very early low-conviction entries
-    'max_bonding_pct': 85,         # Lowered from 90 - avoid near-graduation FOMO
+    'min_bonding_pct': 20,         # Lowered from 40 — catches very early FOMO
+    'max_bonding_pct': 90,         # Raised from 85 — allow near-graduation entries
     'max_tracked_candidates': 100, # Max tokens to watch simultaneously
     'cooldown_seconds': 60,        # Wait 60s between scanner evaluations
-    'velocity_bypass_multiplier': 2.5,  # Raised from 2.0 - need stronger FOMO signal to bypass buyer count
+    'velocity_bypass_multiplier': 2.5,  # If velocity > 2.5x in 5 min → qualify regardless of buyer count
 }
 
 # =============================================================================
@@ -370,8 +398,8 @@ TIMING_RULES = {
 
     'signal_maturity_gate': {
         'enabled': True,              # Gate signals on minimum maturity
-        'min_mcap_pre_grad': 15000,   # Pre-grad: skip if MCAP < $15K (avoid sniped rugs)
-        'min_age_minutes_pre_grad': 15,  # Pre-grad: skip if age < 15 min (distribution time)
+        'min_mcap_pre_grad': 12000,   # Pre-grad: skip if MCAP < $12K (lowered from $15K)
+        'min_age_minutes_pre_grad': 12,  # Pre-grad: skip if age < 12 min (lowered from 15)
         'min_mcap_post_grad': 0,      # Post-grad: no min MCAP (already graduated)
         'min_age_minutes_post_grad': 0,  # Post-grad: no min age
         'log_skipped': True           # Log skipped signals
