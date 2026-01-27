@@ -38,16 +38,24 @@ RUN pip3 install --no-cache-dir torch --index-url https://download.pytorch.org/w
 RUN pip3 install --no-cache-dir --prefer-binary hdbscan
 
 # Stage 4: transformers + sentence-transformers (needs torch)
-RUN pip3 install --no-cache-dir --prefer-binary transformers sentence-transformers
+# Pin sentence-transformers <3.0 — v3.x backend module fails with CPU-only torch
+RUN pip3 install --no-cache-dir --prefer-binary "transformers" "sentence-transformers>=2.2.2,<3.0.0"
 
 # Stage 5: BERTopic (needs hdbscan + sentence-transformers)
 RUN pip3 install --no-cache-dir --prefer-binary bertopic>=0.15.0
 
-# Stage 6: All remaining dependencies
-RUN pip3 install --no-cache-dir --prefer-binary -r requirements.txt
+# Stage 6: All remaining dependencies (torch already installed CPU-only, don't overwrite)
+RUN pip3 install --no-cache-dir --prefer-binary -r requirements.txt \
+    && pip3 show torch | grep -E "^(Name|Version|Location)" \
+    && pip3 show sentence-transformers | grep -E "^(Name|Version)"
 
 # Verify ML imports work (fail build early if broken)
-RUN python3 -c "import hdbscan; from bertopic import BERTopic; from sentence_transformers import SentenceTransformer; print('ML imports OK')"
+RUN python3 -c "\
+import torch; print(f'torch {torch.__version__} (CUDA: {torch.cuda.is_available()})'); \
+import hdbscan; print('hdbscan OK'); \
+from sentence_transformers import SentenceTransformer; print('sentence-transformers OK'); \
+from bertopic import BERTopic; print('bertopic OK'); \
+print('All ML imports OK')"
 
 # Copy application code
 COPY . /app/
