@@ -3,6 +3,8 @@ Admin Telegram Bot - Handle admin commands for monitoring and control
 """
 import asyncio
 import aiohttp
+import json
+import os
 from datetime import datetime, timedelta
 from typing import Optional
 from loguru import logger
@@ -54,6 +56,7 @@ class AdminBot:
             self.app.add_handler(CommandHandler("performance", self._cmd_performance, filters=admin_filter))
             self.app.add_handler(CommandHandler("health", self._cmd_health, filters=admin_filter))
             self.app.add_handler(CommandHandler("cache", self._cmd_cache, filters=admin_filter))
+            self.app.add_handler(CommandHandler("dataset", self._cmd_dataset, filters=admin_filter))
             self.app.add_handler(CommandHandler("collect", self._cmd_collect, filters=admin_filter))
             self.app.add_handler(CommandHandler("ml", self._cmd_ml_retrain, filters=admin_filter))
 
@@ -61,7 +64,7 @@ class AdminBot:
             self.app.add_handler(MessageHandler(~admin_filter, self._handle_unauthorized))
 
             logger.info(f"✅ Admin bot initialized")
-            logger.info(f"   Commands registered: /start /help /stats /active /performance /health /cache /collect /ml")
+            logger.info(f"   Commands registered: /start /help /stats /active /performance /health /cache /dataset /collect /ml")
             logger.info(f"   Security: Only user {self.admin_user_id} can use commands")
             if self.admin_channel_id:
                 logger.info(f"   Response mode: Admin channel ({self.admin_channel_id})")
@@ -172,6 +175,7 @@ class AdminBot:
 /cache - Telegram calls cache status
 
 <b>Data &amp; ML:</b>
+/dataset - ML training dataset stats
 /collect - Run daily token collection now
 /ml - Retrain ML model with latest data
 
@@ -536,6 +540,71 @@ class AdminBot:
             logger.error(f"❌ Error in /cache: {e}")
             await update.message.reply_text(f"❌ Error getting cache: {str(e)}")
 
+    async def _cmd_dataset(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Show ML training dataset statistics"""
+        try:
+            data_file = 'data/historical_training_data.json'
+            whale_file = 'data/successful_whale_wallets.json'
+
+            if not os.path.exists(data_file):
+                await self._send_response(update, context,
+                    "ℹ️ <b>No dataset yet.</b>\n\n"
+                    "Run /collect to start building training data.")
+                return
+
+            with open(data_file, 'r') as f:
+                data = json.load(f)
+
+            total = data.get('total_tokens', 0)
+            last_collection = data.get('last_daily_collection', 'never')
+            collected_today = data.get('tokens_collected_today', 0)
+            outcome_dist = data.get('outcome_distribution', {})
+
+            # ML readiness
+            ml_threshold = 200
+            progress_pct = min(100, (total / ml_threshold) * 100)
+            tokens_needed = max(0, ml_threshold - total)
+            bar_filled = int(progress_pct / 5)  # 20 char bar
+            bar = "█" * bar_filled + "░" * (20 - bar_filled)
+
+            response = "📊 <b>ML TRAINING DATASET</b>\n\n"
+            response += f"<b>Tokens:</b> {total}\n"
+            response += f"<b>Last collection:</b> {last_collection}\n"
+            response += f"<b>Added last run:</b> {collected_today}\n\n"
+
+            # Outcome breakdown
+            if outcome_dist:
+                response += "<b>Outcome Distribution:</b>\n"
+                for outcome, count in sorted(outcome_dist.items(), key=lambda x: x[1], reverse=True):
+                    response += f"  • {outcome}: {count}\n"
+                response += "\n"
+
+            # ML readiness bar
+            response += f"<b>ML Training Ready:</b>\n"
+            response += f"  [{bar}] {progress_pct:.0f}%\n"
+            if tokens_needed > 0:
+                response += f"  Need {tokens_needed} more tokens ({tokens_needed // 50} daily collections)\n"
+            else:
+                response += f"  ✅ Ready! Run /ml to train\n"
+
+            # Whale stats
+            if os.path.exists(whale_file):
+                try:
+                    with open(whale_file, 'r') as f:
+                        whale_data = json.load(f)
+                    whale_count = whale_data.get('total_whales', 0)
+                    response += f"\n<b>Whale Wallets:</b> {whale_count} tracked"
+                except Exception:
+                    pass
+
+            response += f"\n\n⏰ <i>{datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}</i>"
+
+            await self._send_response(update, context, response)
+
+        except Exception as e:
+            logger.error(f"❌ Error in /dataset: {e}")
+            await update.message.reply_text(f"❌ Error: {str(e)}")
+
     async def _cmd_collect(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Manually trigger daily token collection"""
         try:
@@ -588,11 +657,28 @@ class AdminBot:
         try:
             from tools.automated_ml_retrain import AutomatedMLRetrainer
             retrainer = AutomatedMLRetrainer()
-            await retrainer.run()
-            await self._send_response(update, context,
-                "✅ <b>ML retraining complete!</b>\n\n"
-                "Model updated with latest token data.\n"
-                "Check Railway logs for accuracy metrics.")
+            result = await retrainer.run()
+
+            if not result or result.get('action') == 'skipped':
+                reason = result.get('reason', 'Unknown') if result else 'No result'
+                total = result.get('total_tokens', 0) if result else 0
+                required = result.get('required', 200) if result else 200
+                await self._send_response(update, context,
+                    f"⏭️ <b>ML training skipped</b>\n\n"
+                    f"Reason: {reason}\n\n"
+                    f"Dataset: {total}/{required} tokens\n"
+                    f"Run /collect daily to build up training data.\n"
+                    f"Use /dataset to check progress.")
+            elif result.get('action') == 'failed':
+                await self._send_response(update, context,
+                    f"❌ <b>ML training failed</b>\n\n"
+                    f"Reason: {result.get('reason', 'Unknown')}\n"
+                    f"Check Railway logs for details.")
+            else:
+                await self._send_response(update, context,
+                    f"✅ <b>ML model trained!</b>\n\n"
+                    f"Features: {result.get('feature_count', '?')}\n"
+                    f"Model deployed and active for scoring.")
         except Exception as e:
             logger.error(f"❌ ML retraining failed: {e}")
             await self._send_response(update, context, f"❌ ML retraining failed: {str(e)}")
