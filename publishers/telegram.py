@@ -54,160 +54,123 @@ class TelegramPublisher:
             return False
     
     def _format_signal(self, signal_data: Dict[str, Any]) -> str:
-        """Format signal data into Telegram message"""
-        
+        """Format signal data into Telegram message (on-chain-first scoring)"""
+
         # Extract token data
         token_data = signal_data.get('token_data', {})
-        
+
         symbol = token_data.get('token_symbol', signal_data.get('symbol', 'UNKNOWN'))
         token_address = token_data.get('token_address', signal_data.get('token_address', 'N/A'))
         conviction = signal_data.get('score', signal_data.get('conviction_score', 0))
-        
+
         # Get conviction breakdown
         breakdown = signal_data.get('breakdown', {})
-        
+
         # Get metrics
         price = token_data.get('price_usd', signal_data.get('price', 0))
         mcap = token_data.get('market_cap', signal_data.get('market_cap', 0))
         liquidity = token_data.get('liquidity', signal_data.get('liquidity', 0))
         bonding = token_data.get('bonding_curve_pct', 0)
 
-        # Get buyer/holder count based on graduation status
-        # Pre-grad: use unique_buyers (from PumpPortal trades - FREE data)
-        # Post-grad: use holder_count (from Helius/DexScreener - 10 credits)
+        # Pre-grad vs post-grad display
         is_post_grad = bonding >= 100
         unique_buyers_count = token_data.get('unique_buyers', 0)
 
         if is_post_grad:
             holders = token_data.get('holder_count', signal_data.get('holders', 0))
             display_label = "Holders"
+            phase_label = "POST-GRAD"
         else:
-            # For pre-grad, show unique buyers (not holder_count which is always 0)
             holders = unique_buyers_count
-            display_label = "Buyers"  # More accurate for pre-grad
+            display_label = "Buyers"
+            phase_label = f"{bonding:.0f}% BONDED"
 
-        # Calculate age if we have created_timestamp
+        # Calculate age
         age_minutes = 0
         created_ts = token_data.get('created_timestamp')
         if created_ts:
-            age_seconds = (datetime.utcnow().timestamp() - created_ts)
-            age_minutes = age_seconds / 60
-        
-        # Get smart wallet activity
-        wallet_data = signal_data.get('smart_wallet_data', {})
-        wallets = wallet_data.get('wallets', [])
-        elite_count = wallet_data.get('elite_count', 0)
-        kol_count = wallet_data.get('top_kol_count', 0)
-        
+            age_minutes = (datetime.utcnow().timestamp() - created_ts) / 60
+
         # Get narrative data
         narrative_data = signal_data.get('narrative_data', {})
         narratives = narrative_data.get('narratives', [])
-        
+
         # Fire emojis based on conviction
         fire_count = min(conviction // 20, 5)
         fire_emojis = "🔥" * fire_count
-        
-        # Build message with HTML formatting and PROMETHEUS branding
+
+        # Build message with on-chain-first branding
         message = f"""🔥 <b>PROMETHEUS SIGNAL</b> {fire_emojis}
 
-<b>${symbol}</b>
+<b>${symbol}</b> | <b>{phase_label}</b>
 <b>Conviction: {conviction}/100</b>
 
 💰 Price: ${price:.8f}
 💎 MCap: ${mcap:,.0f}
 💧 Liquidity: ${liquidity:,.0f}
 👥 {display_label}: {holders}
-📊 Bonding: {bonding:.1f}%
 """
-        
+
         if age_minutes > 0:
             message += f"⏱️ Age: {age_minutes:.0f}m\n"
-        
+
         message += "\n"
-        
-        # Add conviction breakdown (COMPLETE)
+
+        # ON-CHAIN SCORE BREAKDOWN (new format)
         if breakdown:
-            message += "<b>📊 Score Breakdown:</b>\n"
-            if breakdown.get('smart_wallet', 0) != 0:
-                message += f"👑 Elite Wallets: +{breakdown['smart_wallet']}\n"
-            if breakdown.get('narrative', 0) != 0:
-                message += f"📈 Narratives: +{breakdown['narrative']}\n"
-            if breakdown.get('unique_buyers', 0) != 0:
-                message += f"👥 Unique Buyers: +{breakdown['unique_buyers']}\n"
-            if breakdown.get('volume', 0) != 0:
-                message += f"📊 Volume: +{breakdown['volume']}\n"
-            if breakdown.get('momentum', 0) != 0:
-                message += f"🚀 Momentum: +{breakdown['momentum']}\n"
-            if breakdown.get('twitter_buzz', 0) != 0:
-                message += f"🐦 Twitter: +{breakdown['twitter_buzz']}\n"
-            if breakdown.get('telegram_calls', 0) != 0:
-                message += f"📱 Telegram: +{breakdown['telegram_calls']}\n"
-            # Show penalties/bonuses
+            message += "<b>📊 On-Chain Score:</b>\n"
+
+            # Primary on-chain signals (positive scores only)
+            score_items = [
+                ('buyer_velocity', '🏃 Buyer Velocity', 30),
+                ('unique_buyers', '👥 Unique Buyers', 20),
+                ('buy_sell_ratio', '💹 Buy/Sell Ratio', 20),
+                ('bonding_speed', '⚡ Bonding Speed', 20),
+                ('volume', '📊 Volume', 15),
+                ('momentum', '🚀 Momentum', 10),
+                ('narrative', '🎯 Narrative', 15),
+                ('telegram_calls', '📱 TG Calls', 10),
+            ]
+
+            for key, label, max_pts in score_items:
+                val = breakdown.get(key, 0)
+                if val > 0:
+                    message += f"{label}: +{val}/{max_pts}\n"
+
+            # ML bonus (if active)
+            ml_bonus = breakdown.get('ml_bonus', 0)
+            if ml_bonus != 0:
+                message += f"🤖 ML Prediction: {ml_bonus:+d}\n"
+
+            # Penalties (negative scores)
+            penalties = []
             if breakdown.get('bundle_penalty', 0) != 0:
-                message += f"⚠️ Bundle Penalty: {breakdown['bundle_penalty']}\n"
+                penalties.append(f"Bundle: {breakdown['bundle_penalty']}")
             if breakdown.get('holder_penalty', 0) != 0:
-                message += f"⚠️ Holder Penalty: {breakdown['holder_penalty']}\n"
-            if breakdown.get('kol_bonus', 0) != 0:
-                message += f"🏆 KOL Bonus: +{breakdown['kol_bonus']}\n"
-            # Show total
+                penalties.append(f"Holders: {breakdown['holder_penalty']}")
+            if breakdown.get('authority_penalty', 0) != 0:
+                penalties.append(f"Authority: {breakdown['authority_penalty']}")
+            if breakdown.get('dev_sell_penalty', 0) != 0:
+                penalties.append(f"Dev Sells: {breakdown['dev_sell_penalty']}")
+            if breakdown.get('rugcheck_penalty', 0) != 0:
+                penalties.append(f"Rugcheck: {breakdown['rugcheck_penalty']}")
+
+            if penalties:
+                message += f"⚠️ {' | '.join(penalties)}\n"
+
             message += f"<b>═══════════════</b>\n"
             message += f"<b>TOTAL: {breakdown.get('total', conviction)}/100</b>\n"
             message += "\n"
-        
-        # Add smart wallet activity (OPT-027: Enhanced with KOL names and tier badges)
-        if wallets or elite_count > 0 or kol_count > 0:
-            message += "<b>👑 Elite Trader Activity:</b>\n"
-            if elite_count > 0:
-                message += f"🏆 {elite_count} Elite trader(s)\n"
-            if kol_count > 0:
-                message += f"👑 {kol_count} Top KOL(s)\n"
 
-            # Show top 3 wallets with enhanced tier badges
-            for wallet in wallets[:3]:
-                name = wallet.get('name', 'Unknown')
-                # Fallback for None or empty names
-                if not name or name == 'None' or name is None:
-                    name = 'KOL'
-                tier = wallet.get('tier', '')
-                win_rate = wallet.get('win_rate', 0)
-                pnl_30d = wallet.get('pnl_30d', 0)
-                mins_ago = wallet.get('minutes_ago', 0)
-
-                # OPT-027: Enhanced tier badges with god/elite/whale distinction
-                if tier == 'god':
-                    tier_badge = "👑 GOD"
-                    tier_emoji = "👑"
-                elif tier == 'elite':
-                    tier_badge = "🔥 ELITE"
-                    tier_emoji = "🔥"
-                elif tier == 'top_kol':
-                    tier_badge = "⭐ TOP KOL"
-                    tier_emoji = "⭐"
-                elif tier == 'whale':
-                    tier_badge = "🐋 WHALE"
-                    tier_emoji = "🐋"
-                else:
-                    tier_badge = "📊"
-                    tier_emoji = "📊"
-
-                # Build wallet line with tier badge, win rate, and optional PnL
-                if win_rate > 0 and pnl_30d > 0:
-                    message += f"{tier_emoji} <b>{name}</b> [{tier_badge}] - {win_rate*100:.0f}% WR, ${pnl_30d/1000:.0f}k PnL - {mins_ago:.0f}m ago\n"
-                elif win_rate > 0:
-                    message += f"{tier_emoji} <b>{name}</b> [{tier_badge}] - {win_rate*100:.0f}% WR - {mins_ago:.0f}m ago\n"
-                else:
-                    message += f"{tier_emoji} <b>{name}</b> [{tier_badge}] - {mins_ago:.0f}m ago\n"
-            message += "\n"
-        
-        # Add narrative info
+        # Narrative info
         if narratives:
-            message += "<b>📈 Narratives:</b>\n"
-            for narrative in narratives[:2]:  # Show top 2
+            message += "<b>🎯 Narratives:</b>\n"
+            for narrative in narratives[:2]:
                 name = narrative.get('name', '').upper()
                 message += f"• {name}\n"
             message += "\n"
 
-        # Add rug detection warnings (if any)
+        # Rug detection warnings
         rug_checks = signal_data.get('rug_checks', {})
         bundle_check = rug_checks.get('bundle', {})
         holder_check = rug_checks.get('holder_concentration', {})
@@ -215,19 +178,19 @@ class TelegramPublisher:
         if bundle_check.get('severity') and bundle_check['severity'] != 'none':
             severity = bundle_check['severity'].upper()
             reason = bundle_check.get('reason', '')
-            message += f"⚠️  <b>{severity} BUNDLE DETECTED</b>\n"
+            message += f"⚠️ <b>{severity} BUNDLE DETECTED</b>\n"
             if reason:
                 message += f"   {reason}\n"
             message += "\n"
 
         if holder_check.get('penalty', 0) < 0:
             reason = holder_check.get('reason', '')
-            message += f"⚠️  <b>HOLDER CONCENTRATION</b>\n"
+            message += f"⚠️ <b>HOLDER CONCENTRATION</b>\n"
             if reason:
                 message += f"   {reason}\n"
             message += "\n"
 
-        # Add links
+        # Links
         message += f"""🔗 <a href="https://dexscreener.com/solana/{token_address}">DexScreener</a>
 🔗 <a href="https://birdeye.so/token/{token_address}">Birdeye</a>
 🔗 <a href="https://pump.fun/{token_address}">Pump.fun</a>
@@ -236,7 +199,7 @@ class TelegramPublisher:
 
 ⚠️ DYOR - Not financial advice
 🔥 The fire spreads."""
-        
+
         return message
     
     def _format_signal_compact(self, signal_data: Dict[str, Any]) -> str:
@@ -256,9 +219,11 @@ class TelegramPublisher:
         if is_post_grad:
             holders = token_data.get('holder_count', signal_data.get('holders', 0))
             holder_label = "holders"
+            phase = "POST-GRAD"
         else:
             holders = token_data.get('unique_buyers', 0)
             holder_label = "buyers"
+            phase = f"{bonding:.0f}% bonded"
 
         fire_count = min(conviction // 20, 5)
         fire_emojis = "\U0001f525" * fire_count
@@ -271,50 +236,45 @@ class TelegramPublisher:
             return f"${v:.0f}"
 
         msg = f"\U0001f525 <b>PROMETHEUS SIGNAL</b> {fire_emojis}\n\n"
-        msg += f"<b>${symbol}</b> | Conviction: {conviction}/100\n\n"
+        msg += f"<b>${symbol}</b> | {phase} | {conviction}/100\n\n"
         msg += f"\U0001f4b0 ${price:.8f} | \U0001f48e MCap {fmt_k(mcap)}\n"
         msg += f"\U0001f4a7 Liq {fmt_k(liquidity)} | \U0001f465 {holders} {holder_label}\n"
-        msg += f"\U0001f4ca {bonding:.1f}% bonded"
 
         age_minutes = 0
         created_ts = token_data.get('created_timestamp')
         if created_ts:
             age_minutes = (datetime.utcnow().timestamp() - created_ts) / 60
         if age_minutes > 0:
-            msg += f" | \u23f1\ufe0f {age_minutes:.0f}m old"
-        msg += "\n"
+            msg += f"\u23f1\ufe0f {age_minutes:.0f}m old\n"
 
-        # Scores line - only non-zero
+        # On-chain score breakdown - only non-zero
         if breakdown:
             parts = []
             score_map = [
-                ('smart_wallet', '\U0001f451 Elite'), ('narrative', '\U0001f4c8 Narr'),
-                ('unique_buyers', '\U0001f465 Buy'), ('volume', '\U0001f4ca Vol'),
-                ('momentum', '\U0001f680 Mom'), ('telegram_calls', '\U0001f4f1 TG'),
+                ('buyer_velocity', '\U0001f3c3 Vel'),
+                ('unique_buyers', '\U0001f465 Buy'),
+                ('buy_sell_ratio', '\U0001f4b9 B/S'),
+                ('bonding_speed', '\u26a1 Bond'),
+                ('volume', '\U0001f4ca Vol'),
+                ('momentum', '\U0001f680 Mom'),
+                ('narrative', '\U0001f3af Narr'),
+                ('telegram_calls', '\U0001f4f1 TG'),
             ]
             for key, label in score_map:
                 v = breakdown.get(key, 0)
                 if v > 0:
                     parts.append(f"{label} +{v}")
             if parts:
-                msg += f"\n\U0001f4ca Scores: {' | '.join(parts)}\n"
+                msg += f"\n\U0001f4ca {' | '.join(parts)}\n"
 
-        # KOLs / Whales / Calls counts
-        wallet_data = signal_data.get('smart_wallet_data', {})
-        wallets = wallet_data.get('wallets', [])
-        kol_count = sum(1 for w in wallets if w.get('tier') in ('god', 'elite', 'top_kol'))
-        whale_count = sum(1 for w in wallets if w.get('tier') == 'whale')
-        call_count = signal_data.get('telegram_call_data', {}).get('mentions', 0)
-
-        counts = []
-        if kol_count > 0:
-            counts.append(f"\U0001f3c6 KOLs: {kol_count}")
-        if whale_count > 0:
-            counts.append(f"\U0001f433 Whales: {whale_count}")
-        if call_count > 0:
-            counts.append(f"\U0001f4e3 Calls: {call_count}")
-        if counts:
-            msg += f"\n{'  |  '.join(counts)}\n"
+            # Penalties (compact)
+            pen_parts = []
+            for key in ('bundle_penalty', 'holder_penalty', 'rugcheck_penalty'):
+                v = breakdown.get(key, 0)
+                if v != 0:
+                    pen_parts.append(f"{v}")
+            if pen_parts:
+                msg += f"\u26a0\ufe0f Penalties: {', '.join(pen_parts)}\n"
 
         # Links
         msg += f'\n<a href="https://dexscreener.com/solana/{token_address}">DexS</a>'
