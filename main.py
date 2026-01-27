@@ -401,8 +401,8 @@ async def lifespan(app: FastAPI):
     logger.info("🧠 Initializing conviction engine...")
     conviction_engine = ConvictionEngine(
         smart_wallet_tracker=smart_wallet_tracker,
+        narrative_detector=narrative_detector,
         database=db  # Pass database for persistent telegram call tracking
-        # narrative_detector is not needed - ConvictionEngine loads from config
     )
     logger.info("✅ Conviction engine initialized")
     
