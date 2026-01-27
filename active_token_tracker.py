@@ -47,6 +47,9 @@ class ActiveTokenTracker:
         # Unique buyer tracking (for conviction scoring)
         self.unique_buyers: Dict[str, Set[str]] = {}  # {token_address: set(buyer_wallets)}
 
+        # Pause control (toggled via /pause and /resume admin commands)
+        self.signal_posting_paused = False
+
         # Metrics
         self.tokens_tracked_total = 0
         self.signals_sent_total = 0
@@ -657,6 +660,13 @@ class ActiveTokenTracker:
             conviction_data: Conviction analysis data
         """
         try:
+            # Check if signal posting is paused by admin
+            if self.signal_posting_paused:
+                symbol = self.tracked_tokens[token_address].token_data.get('token_symbol', 'UNKNOWN')
+                score = conviction_data.get('score', 0)
+                logger.info(f"⏸️  PAUSED: ${symbol} ({score}/100) would have been signaled - posting paused by admin")
+                return
+
             state = self.tracked_tokens[token_address]
             symbol = state.token_data.get('token_symbol', 'UNKNOWN')
             score = conviction_data.get('score', 0)

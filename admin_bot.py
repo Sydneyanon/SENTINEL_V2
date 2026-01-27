@@ -56,15 +56,20 @@ class AdminBot:
             self.app.add_handler(CommandHandler("performance", self._cmd_performance, filters=admin_filter))
             self.app.add_handler(CommandHandler("health", self._cmd_health, filters=admin_filter))
             self.app.add_handler(CommandHandler("cache", self._cmd_cache, filters=admin_filter))
+            self.app.add_handler(CommandHandler("missed", self._cmd_missed, filters=admin_filter))
+            self.app.add_handler(CommandHandler("whales", self._cmd_whales, filters=admin_filter))
+            self.app.add_handler(CommandHandler("config", self._cmd_config, filters=admin_filter))
             self.app.add_handler(CommandHandler("dataset", self._cmd_dataset, filters=admin_filter))
             self.app.add_handler(CommandHandler("collect", self._cmd_collect, filters=admin_filter))
             self.app.add_handler(CommandHandler("ml", self._cmd_ml_retrain, filters=admin_filter))
+            self.app.add_handler(CommandHandler("pause", self._cmd_pause, filters=admin_filter))
+            self.app.add_handler(CommandHandler("resume", self._cmd_resume, filters=admin_filter))
 
             # Block all other users (unauthorized access attempts)
             self.app.add_handler(MessageHandler(~admin_filter, self._handle_unauthorized))
 
             logger.info(f"✅ Admin bot initialized")
-            logger.info(f"   Commands registered: /start /help /stats /active /performance /health /cache /dataset /collect /ml")
+            logger.info(f"   Commands registered: /help /stats /active /performance /health /cache /missed /whales /config /dataset /collect /ml /pause /resume")
             logger.info(f"   Security: Only user {self.admin_user_id} can use commands")
             if self.admin_channel_id:
                 logger.info(f"   Response mode: Admin channel ({self.admin_channel_id})")
@@ -168,16 +173,23 @@ class AdminBot:
 <b>Performance:</b>
 /stats - Overall system statistics
 /performance - Recent signal performance
+/missed - Tracked tokens not signaled (potential missed runners)
 
 <b>Monitoring:</b>
 /active - Currently tracked tokens
 /health - System health check
 /cache - Telegram calls cache status
+/whales - Discovered whale wallets
+/config - Live scoring config values
 
 <b>Data &amp; ML:</b>
 /dataset - ML training dataset stats
 /collect - Run daily token collection now
 /ml - Retrain ML model with latest data
+
+<b>Control:</b>
+/pause - Pause signal posting
+/resume - Resume signal posting
 
 <b>Help:</b>
 /help - Show this message
@@ -539,6 +551,230 @@ class AdminBot:
         except Exception as e:
             logger.error(f"❌ Error in /cache: {e}")
             await update.message.reply_text(f"❌ Error getting cache: {str(e)}")
+
+    async def _cmd_missed(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Show tracked tokens that weren't signaled - potential missed runners"""
+        try:
+            if not self.active_tracker:
+                await self._send_response(update, context, "❌ Active tracker not available")
+                return
+
+            missed = []
+            for addr, state in self.active_tracker.tracked_tokens.items():
+                if state.signal_sent:
+                    continue  # Already signaled, not missed
+
+                symbol = state.token_data.get('token_symbol', 'UNKNOWN')
+                score = state.conviction_score
+                entry_price = state.token_data.get('price_usd', 0)
+                mcap = state.token_data.get('market_cap', 0)
+                age_minutes = (datetime.utcnow() - state.first_tracked_at).total_seconds() / 60
+
+                # Fetch current price to see if it ran
+                current_price = await self._get_current_price(addr)
+                if current_price and entry_price and entry_price > 0:
+                    multiple = current_price / entry_price
+                else:
+                    multiple = 0
+
+                missed.append({
+                    'symbol': symbol,
+                    'score': score,
+                    'entry_price': entry_price,
+                    'current_price': current_price,
+                    'multiple': multiple,
+                    'mcap': mcap,
+                    'age': age_minutes,
+                    'address': addr,
+                })
+
+            if not missed:
+                await self._send_response(update, context,
+                    "ℹ️ No unsignaled tokens currently tracked.\n\n"
+                    "All active tokens either already got signaled or none are being tracked.")
+                return
+
+            # Sort by price multiple (biggest runners first)
+            missed.sort(key=lambda x: x['multiple'], reverse=True)
+
+            response = f"👀 <b>UNSIGNALED TOKENS ({len(missed)})</b>\n\n"
+
+            runners = [t for t in missed if t['multiple'] >= 2.0]
+            if runners:
+                response += f"🚨 <b>{len(runners)} potential missed runner(s):</b>\n\n"
+
+            for token in missed[:15]:
+                if token['multiple'] >= 5.0:
+                    emoji = "🔥"
+                elif token['multiple'] >= 2.0:
+                    emoji = "🚨"
+                elif token['multiple'] >= 1.5:
+                    emoji = "⚠️"
+                else:
+                    emoji = "⏳"
+
+                if token['multiple'] > 0:
+                    mult_str = f"{token['multiple']:.1f}x" if token['multiple'] >= 2 else f"+{(token['multiple']-1)*100:.0f}%"
+                else:
+                    mult_str = "?"
+
+                response += f"{emoji} <b>${token['symbol']}</b> — {mult_str} since tracking\n"
+                response += f"   Score: {token['score']}/100 | MCap: ${token['mcap']:,.0f}\n"
+                response += f"   Tracked: {token['age']:.0f}m ago\n"
+                response += f"   <code>{token['address'][:16]}...</code>\n\n"
+
+            if len(missed) > 15:
+                response += f"<i>...and {len(missed) - 15} more</i>\n"
+
+            response += f"\n⏰ <i>{datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}</i>"
+            await self._send_response(update, context, response)
+
+        except Exception as e:
+            logger.error(f"❌ Error in /missed: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            await update.message.reply_text(f"❌ Error: {str(e)}")
+
+    async def _cmd_whales(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Show discovered whale wallets"""
+        try:
+            whales = []
+
+            # Try database first
+            if self.database:
+                try:
+                    whales = await self.database.get_all_successful_whales(min_win_rate=0.0)
+                except Exception as e:
+                    logger.debug(f"Whale DB query failed: {e}")
+
+            # Fallback to JSON file
+            if not whales:
+                whale_file = 'data/successful_whale_wallets.json'
+                if os.path.exists(whale_file):
+                    with open(whale_file, 'r') as f:
+                        data = json.load(f)
+                    whales = data.get('whales', [])
+
+            if not whales:
+                await self._send_response(update, context,
+                    "ℹ️ <b>No whale wallets discovered yet.</b>\n\n"
+                    "Whales are discovered during /collect runs.\n"
+                    "Run daily collections to build up whale data.")
+                return
+
+            response = f"🐋 <b>WHALE WALLETS ({len(whales)})</b>\n\n"
+
+            for whale in whales[:15]:
+                addr = whale.get('wallet_address', whale.get('address', '?'))
+                win_rate = whale.get('win_rate', 0)
+                tokens = whale.get('tokens_bought_count', 0)
+                wins = whale.get('wins', 0)
+                early = whale.get('is_early_whale', False)
+
+                # Win rate color
+                if win_rate >= 0.7:
+                    emoji = "🟢"
+                elif win_rate >= 0.5:
+                    emoji = "🟡"
+                else:
+                    emoji = "🔴"
+
+                early_tag = " [EARLY]" if early else ""
+
+                response += f"{emoji} <code>{addr[:16]}...</code>{early_tag}\n"
+                response += f"   WR: {win_rate*100:.0f}% | Tokens: {tokens} | Wins: {wins}\n\n"
+
+            if len(whales) > 15:
+                response += f"<i>...and {len(whales) - 15} more</i>\n"
+
+            response += f"\n⏰ <i>{datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}</i>"
+            await self._send_response(update, context, response)
+
+        except Exception as e:
+            logger.error(f"❌ Error in /whales: {e}")
+            await update.message.reply_text(f"❌ Error: {str(e)}")
+
+    async def _cmd_config(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Show live scoring configuration"""
+        try:
+            paused = self.active_tracker.signal_posting_paused if self.active_tracker else False
+            paused_str = "⏸️ PAUSED" if paused else "▶️ Active"
+
+            response = "⚙️ <b>LIVE CONFIGURATION</b>\n\n"
+
+            response += f"<b>Signal Posting:</b> {paused_str}\n\n"
+
+            response += "<b>Conviction Thresholds:</b>\n"
+            response += f"  • Pre-grad signal: {config.MIN_CONVICTION_SCORE}/100\n"
+            response += f"  • Post-grad signal: {config.POST_GRAD_THRESHOLD}/100\n"
+            response += f"  • Distribution check: {config.DISTRIBUTION_CHECK_THRESHOLD}+\n\n"
+
+            response += "<b>Safety Filters:</b>\n"
+            response += f"  • Min holders: {config.MIN_HOLDERS}\n"
+            response += f"  • Min unique buyers: {config.MIN_UNIQUE_BUYERS}\n"
+            response += f"  • Min liquidity: ${config.MIN_LIQUIDITY:,}\n\n"
+
+            response += "<b>Polling:</b>\n"
+            response += f"  • Tiered polling: {'ON' if config.DISABLE_POLLING_BELOW_THRESHOLD else 'OFF'}\n"
+            response += f"  • Pre-grad: always 30s\n"
+            response += f"  • Post-grad (score ≥20): 30s\n"
+            response += f"  • Post-grad (score 0-19): 90s\n"
+            response += f"  • Post-grad (score <0): skipped\n\n"
+
+            response += "<b>Rug Detection:</b>\n"
+            rug = config.RUG_DETECTION
+            response += f"  • Enabled: {'YES' if rug.get('enabled') else 'NO'}\n"
+            bundle_penalties = rug.get('bundles', {}).get('penalties', {})
+            response += f"  • Bundle penalty: {bundle_penalties.get('minor', 0)}/{bundle_penalties.get('medium', 0)}/{bundle_penalties.get('massive', 0)}\n\n"
+
+            response += "<b>Features:</b>\n"
+            response += f"  • Narratives: {'ON' if getattr(config, 'ENABLE_NARRATIVES', False) else 'OFF'}\n"
+            response += f"  • Telegram posting: {'ON' if config.ENABLE_TELEGRAM else 'OFF'}\n"
+            response += f"  • PumpPortal: {'OFF' if config.DISABLE_PUMPPORTAL else 'ON'}\n"
+
+            response += f"\n⏰ <i>{datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}</i>"
+            await self._send_response(update, context, response)
+
+        except Exception as e:
+            logger.error(f"❌ Error in /config: {e}")
+            await update.message.reply_text(f"❌ Error: {str(e)}")
+
+    async def _cmd_pause(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Pause signal posting"""
+        try:
+            if not self.active_tracker:
+                await self._send_response(update, context, "❌ Active tracker not available")
+                return
+
+            self.active_tracker.signal_posting_paused = True
+            logger.info("⏸️ Signal posting PAUSED by admin")
+            await self._send_response(update, context,
+                "⏸️ <b>Signal posting PAUSED</b>\n\n"
+                "Tokens are still being tracked and scored,\n"
+                "but no signals will be posted to the channel.\n\n"
+                "Use /resume to re-enable posting.")
+
+        except Exception as e:
+            logger.error(f"❌ Error in /pause: {e}")
+            await update.message.reply_text(f"❌ Error: {str(e)}")
+
+    async def _cmd_resume(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Resume signal posting"""
+        try:
+            if not self.active_tracker:
+                await self._send_response(update, context, "❌ Active tracker not available")
+                return
+
+            self.active_tracker.signal_posting_paused = False
+            logger.info("▶️ Signal posting RESUMED by admin")
+            await self._send_response(update, context,
+                "▶️ <b>Signal posting RESUMED</b>\n\n"
+                "Signals will now be posted to the channel when\n"
+                "tokens meet conviction thresholds.")
+
+        except Exception as e:
+            logger.error(f"❌ Error in /resume: {e}")
+            await update.message.reply_text(f"❌ Error: {str(e)}")
 
     async def _cmd_dataset(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Show ML training dataset statistics"""
