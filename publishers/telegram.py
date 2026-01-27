@@ -122,10 +122,11 @@ class TelegramPublisher:
 
             # Primary on-chain signals (positive scores only)
             score_items = [
-                ('buyer_velocity', '🏃 Buyer Velocity', 30),
+                ('buyer_velocity', '🏃 Buyer Velocity', 35),
                 ('unique_buyers', '👥 Unique Buyers', 20),
                 ('buy_sell_ratio', '💹 Buy/Sell Ratio', 20),
-                ('bonding_speed', '⚡ Bonding Speed', 20),
+                ('bonding_speed', '⚡ Bonding Speed', 30),
+                ('acceleration', '🔥 Acceleration', 25),
                 ('volume', '📊 Volume', 15),
                 ('momentum', '🚀 Momentum', 10),
                 ('narrative', '🎯 Narrative', 15),
@@ -236,6 +237,8 @@ class TelegramPublisher:
             return f"${v:.0f}"
 
         msg = f"\U0001f525 <b>PROMETHEUS SIGNAL</b> {fire_emojis}\n\n"
+        if signal_data.get('early_pump_alert'):
+            msg += f"\u26a0\ufe0f <b>HIGH RISK \u2013 EARLY MOMENTUM</b> \u26a0\ufe0f\n"
         msg += f"<b>${symbol}</b> | {phase} | {conviction}/100\n\n"
         msg += f"\U0001f4b0 ${price:.8f} | \U0001f48e MCap {fmt_k(mcap)}\n"
         msg += f"\U0001f4a7 Liq {fmt_k(liquidity)} | \U0001f465 {holders} {holder_label}\n"
@@ -255,6 +258,7 @@ class TelegramPublisher:
                 ('unique_buyers', '\U0001f465 Buy'),
                 ('buy_sell_ratio', '\U0001f4b9 B/S'),
                 ('bonding_speed', '\u26a1 Bond'),
+                ('acceleration', '\U0001f525 Accel'),
                 ('volume', '\U0001f4ca Vol'),
                 ('momentum', '\U0001f680 Mom'),
                 ('narrative', '\U0001f3af Narr'),

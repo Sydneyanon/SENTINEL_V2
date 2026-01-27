@@ -183,8 +183,14 @@ class ActiveTokenTracker:
                     else:
                         initial_data = self._create_minimal_data(token_address)
             elif not self.helius_fetcher:
-                logger.warning(f"   ⚠️ No Helius fetcher initialized - using minimal fallback")
-                initial_data = self._create_minimal_data(token_address)
+                logger.warning(f"   ⚠️ No Helius fetcher - trying PumpPortal metadata only...")
+                metadata = await self._fetch_metadata_only(token_address)
+                if metadata:
+                    initial_data = self._create_minimal_data(token_address)
+                    initial_data.update(metadata)
+                    logger.info(f"   ✅ Got metadata via PumpPortal: ${metadata.get('token_symbol', 'UNKNOWN')}")
+                else:
+                    initial_data = self._create_minimal_data(token_address)
             else:
                 # Already have metadata from initial_data
                 logger.info(f"   ✅ Using provided initial_data")
@@ -242,41 +248,40 @@ class ActiveTokenTracker:
     
     async def _fetch_metadata_only(self, token_address: str) -> Optional[Dict]:
         """
-        Fetch JUST metadata (name/symbol) from Helius
-        Used as fallback when full bonding curve decode fails
+        Fetch JUST metadata (name/symbol) using PumpPortalAPI's 4-tier fallback chain:
+        1. Pump.fun Frontend API (3x retry with backoff)
+        2. PumpPortal API
+        3. CoinGecko API
+        4. Helius on-chain metadata
 
-        OPT-041: Now uses cached helius_fetcher instead of direct API call
-        Saves 1-2 Helius credits per call via 60-minute metadata cache
+        Returns dict with token_name, token_symbol, and social data.
         """
         try:
-            # OPT-041: Use helius_fetcher with caching instead of direct API call
-            if not self.helius_fetcher:
-                logger.debug("   ⚠️ No helius_fetcher available")
-                return None
-
-            metadata = await self.helius_fetcher.get_token_metadata_batch(token_address)
+            metadata = await self.pumpportal_api.get_token_metadata(token_address)
 
             if not metadata:
+                logger.warning(f"⚠️ All metadata sources failed for {token_address[:8]}...")
                 return None
 
-            # Extract name and symbol from metadata
-            off_chain = metadata.get('offChainMetadata', {}).get('metadata', {})
-            on_chain = metadata.get('onChainMetadata', {}).get('data', {})
+            name = metadata.get('token_name', 'Unknown')
+            symbol = metadata.get('token_symbol', 'UNKNOWN')
 
-            name = off_chain.get('name', on_chain.get('name', 'Unknown'))
-            symbol = off_chain.get('symbol', on_chain.get('symbol', 'UNKNOWN'))
-
-            # Clean up
+            # Clean up null bytes
             name = name.replace('\x00', '').strip()
             symbol = symbol.replace('\x00', '').strip()
 
             return {
                 'token_name': name,
-                'token_symbol': symbol
+                'token_symbol': symbol,
+                'description': metadata.get('description', ''),
+                'has_twitter': metadata.get('has_twitter', False),
+                'has_telegram': metadata.get('has_telegram', False),
+                'has_website': metadata.get('has_website', False),
+                'social_count': metadata.get('social_count', 0),
             }
 
         except Exception as e:
-            logger.debug(f"   ⚠️ Metadata fetch error: {e}")
+            logger.warning(f"⚠️ Metadata fetch error for {token_address[:8]}: {e}")
             return None
     
     async def update_token_trade(self, token_address: str, trade_data: Dict) -> None:

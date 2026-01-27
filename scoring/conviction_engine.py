@@ -160,6 +160,12 @@ class ConvictionEngine:
             else:
                 logger.debug(f"   ⚡ Bonding Speed: 0 points")
 
+            # 1d. Price Acceleration Bonus (0-25 points, pre-grad only)
+            acceleration_score = self._score_acceleration(token_data) if is_pre_grad else 0
+            base_scores['acceleration'] = acceleration_score
+            if acceleration_score > 0:
+                logger.info(f"   🔥 Acceleration: {acceleration_score} points")
+
             # 2. Narrative Detection (0-10 points) - if enabled (reduced from 25)
             narrative_data = {}  # Track for Telegram display
             if self.narrative_detector and config.ENABLE_NARRATIVES:
@@ -953,11 +959,41 @@ class ConvictionEngine:
                 if maturity_gate_triggered and maturity_cfg.get('log_skipped', True):
                     logger.warning(f"   🚫 MATURITY GATE: {maturity_gate_reason} (too early, needs distribution time)")
 
+            # EARLY PUMP ALERT: Force signal for tokens with strong momentum but below threshold
+            early_pump_alert = False
+            early_pump_cfg = config.EARLY_PUMP_ALERT
+            if (not passed and is_pre_grad and early_pump_cfg.get('enabled', False)
+                    and not emergency_blocks
+                    and not mcap_cap_triggered):
+                price_change_5m = token_data.get('price_change_5m', 0)
+                epa_min_score = early_pump_cfg.get('min_score', 30)
+                epa_max_score = early_pump_cfg.get('max_score', 45)
+
+                # Check token age
+                epa_age_ok = False
+                epa_max_age = early_pump_cfg.get('max_age_minutes', 10)
+                if token_created_at:
+                    epa_age_min = (datetime.utcnow() - token_created_at).total_seconds() / 60
+                    epa_age_ok = epa_age_min <= epa_max_age
+
+                if (epa_age_ok
+                        and price_change_5m >= early_pump_cfg.get('min_price_change_pct', 30)
+                        and unique_buyers >= early_pump_cfg.get('min_unique_buyers', 40)
+                        and bonding_pct >= early_pump_cfg.get('min_bonding_pct', 40)
+                        and epa_min_score <= final_score <= epa_max_score):
+                    early_pump_alert = True
+                    passed = True
+                    logger.warning(f"   🚨 EARLY PUMP ALERT: Forcing signal! "
+                                   f"price +{price_change_5m:.0f}%, {unique_buyers} buyers, "
+                                   f"{bonding_pct:.0f}% bonding, score {final_score}")
+
             logger.info("=" * 60)
             logger.info(f"   🎯 FINAL CONVICTION: {final_score}/100")
             logger.info(f"   📊 Threshold: {threshold} ({'PRE-GRAD' if is_pre_grad else 'POST-GRAD'})")
             if early_trigger_applied:
                 logger.info(f"   ⚡ Early trigger activated!")
+            if early_pump_alert:
+                logger.info(f"   🚨 EARLY PUMP ALERT - High Risk Early Momentum signal!")
             if mcap_cap_triggered:
                 logger.info(f"   🚫 MCAP cap triggered - signal blocked")
             if maturity_gate_triggered:
@@ -983,7 +1019,7 @@ class ConvictionEngine:
 
                     # Show weakest scoring components (on-chain-first)
                     breakdown_items = [
-                        ('Buyer Velocity', base_scores.get('buyer_velocity', 0), 30),
+                        ('Buyer Velocity', base_scores.get('buyer_velocity', 0), 35),
                         ('Unique Buyers', unique_buyers_score, 20),
                         ('Buy/Sell Ratio', base_scores.get('buy_sell_ratio', 0), 20),
                         ('Volume', base_scores['volume'], 15),
@@ -1055,6 +1091,7 @@ class ConvictionEngine:
                 'threshold': threshold,
                 'is_pre_grad': is_pre_grad,
                 'early_trigger_applied': early_trigger_applied,  # GROK: Early trigger flag
+                'early_pump_alert': early_pump_alert,            # Early Pump Alert forced signal
                 'mcap_cap_triggered': mcap_cap_triggered,        # GROK: MCAP cap flag
                 'maturity_gate_triggered': maturity_gate_triggered,  # Maturity gate flag
                 'maturity_gate_reason': maturity_gate_reason,
@@ -1063,6 +1100,7 @@ class ConvictionEngine:
                 'breakdown': {
                     'buyer_velocity': base_scores.get('buyer_velocity', 0),
                     'bonding_speed': base_scores.get('bonding_speed', 0),
+                    'acceleration': base_scores.get('acceleration', 0),
                     'graduation_speed': base_scores.get('graduation_speed', 0),
                     'smart_wallet': base_scores['smart_wallet'],
                     'narrative': base_scores['narrative'],
@@ -1547,7 +1585,7 @@ class ConvictionEngine:
 
     def _score_buyer_velocity(self, token_address: str) -> int:
         """
-        Score based on buyer velocity (0-30 points) - NEW: Replaces KOL scoring
+        Score based on buyer velocity (0-35 points) - NEW: Replaces KOL scoring
         Measures how fast unique buyers are accumulating in a 5-minute window.
 
         Uses PumpPortal buyer history data (FREE).
@@ -1630,12 +1668,19 @@ class ConvictionEngine:
                     bonding_velocity = bonding_pct / (elapsed_seconds / 60)  # %/min
 
         # Score based on velocity thresholds
-        if bonding_velocity >= 5.0:
+        if bonding_velocity >= 7.0:
+            score = weights.get('hyper', 20)  # 20 pts
+            # BONUS: Hyper fill at 40%+ bonding = insane demand
+            if bonding_pct >= 40:
+                score += 10
+                logger.info(f"      🚀 HYPER bonding speed: +10 pts ({bonding_velocity:.1f}%/min at {bonding_pct:.0f}% bonding)")
+            return score
+        elif bonding_velocity >= 5.0:
             score = weights['rocket']   # 15 pts
             # BONUS: Fast fill at 50%+ bonding = very strong interest signal
             if bonding_pct >= 50:
                 score += 5
-                logger.info(f"      ⚡ Bonding speed bonus: +5 pts (>{bonding_velocity:.1f}%/min at {bonding_pct:.0f}% bonding)")
+                logger.info(f"      ⚡ Bonding speed bonus: +5 pts ({bonding_velocity:.1f}%/min at {bonding_pct:.0f}% bonding)")
             return score
         elif bonding_velocity >= 2.0:
             return weights['fast']     # 12 pts
@@ -1645,6 +1690,51 @@ class ConvictionEngine:
             return weights['slow']     # 4 pts
         else:
             return weights['crawl']    # 0 pts
+
+    def _score_acceleration(self, token_data: Dict) -> int:
+        """
+        Score based on early price acceleration (0-25 points) - PRE-GRAD ONLY
+        Rewards rapid price increase within the first 10 minutes (early FOMO indicator).
+
+        Uses price_change_5m as proxy for recent momentum on young tokens.
+        Only applies to tokens aged ≤10 minutes.
+        """
+        accel_cfg = config.ACCELERATION_BONUS
+        if not accel_cfg.get('enabled', False):
+            return 0
+
+        # Check token age — only apply to very young tokens
+        max_age_minutes = accel_cfg.get('max_age_minutes', 10)
+        created_ts = token_data.get('created_timestamp') or token_data.get('pair_created_at', 0)
+        if not created_ts:
+            return 0
+
+        try:
+            if isinstance(created_ts, (int, float)):
+                if created_ts > 1e12:
+                    created_ts = created_ts / 1000
+                token_created_at = datetime.utcfromtimestamp(created_ts)
+            else:
+                token_created_at = created_ts
+        except Exception:
+            return 0
+
+        age_minutes = (datetime.utcnow() - token_created_at).total_seconds() / 60
+        if age_minutes > max_age_minutes:
+            return 0
+
+        # Use price_change_5m as our momentum indicator
+        price_change_5m = token_data.get('price_change_5m', 0)
+        if not price_change_5m or price_change_5m <= 0:
+            return 0
+
+        # Check thresholds (ordered highest first)
+        for tier in accel_cfg.get('thresholds', []):
+            if price_change_5m >= tier['pct']:
+                logger.info(f"      🔥 Acceleration: +{price_change_5m:.0f}% in 5m (age {age_minutes:.0f}m) → +{tier['points']} pts")
+                return tier['points']
+
+        return 0
 
     def _score_graduation_speed(self, token_address: str, token_data: Dict) -> int:
         """

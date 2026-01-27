@@ -127,8 +127,8 @@ SMART_WALLET_WEIGHTS = {
 # Measures how fast unique buyers are accumulating
 # =============================================================================
 BUYER_VELOCITY_WEIGHTS = {
-    'explosive': 30,         # 100+ buyers in 5 min (viral organic demand) - raised from 25, strongest predictor
-    'very_fast': 22,         # 50-99 buyers in 5 min (raised from 20)
+    'explosive': 35,         # 100+ buyers in 5 min (viral organic demand) - raised to 35, strongest predictor
+    'very_fast': 25,         # 50-99 buyers in 5 min (raised from 22)
     'fast': 15,              # 25-49 buyers in 5 min
     'moderate': 10,          # 15-24 buyers in 5 min
     'slow': 5,               # 5-14 buyers in 5 min
@@ -141,11 +141,39 @@ BUYER_VELOCITY_WEIGHTS = {
 # How fast the bonding curve is filling (organic demand indicator)
 # =============================================================================
 BONDING_SPEED_WEIGHTS = {
-    'rocket': 15,            # >5%/min bonding velocity (explosive demand)
+    'hyper': 20,             # >7%/min bonding velocity (insane demand) — +10 bonus at 40%+
+    'rocket': 15,            # >5%/min bonding velocity (explosive demand) — +5 bonus at 50%+
     'fast': 12,              # 2-5%/min bonding velocity
     'steady': 8,             # 1-2%/min bonding velocity
     'slow': 4,               # 0.5-1%/min bonding velocity
     'crawl': 0,              # <0.5%/min (weak demand)
+}
+
+# =============================================================================
+# PRICE ACCELERATION BONUS (pre-grad only)
+# Rewards rapid price increase — early FOMO indicator
+# =============================================================================
+ACCELERATION_BONUS = {
+    'enabled': True,
+    'thresholds': [
+        {'pct': 50, 'points': 25},   # +50% in ≤10 min → +25 pts
+        {'pct': 30, 'points': 15},   # +30% in ≤10 min → +15 pts
+    ],
+    'max_age_minutes': 10,            # Only apply if token age ≤10 min
+}
+
+# =============================================================================
+# EARLY PUMP ALERT — force signal at low scores if momentum criteria met
+# Overrides threshold: price +30% in <10min + buyers >40 + bonding >40%
+# =============================================================================
+EARLY_PUMP_ALERT = {
+    'enabled': True,
+    'min_price_change_pct': 30,       # +30% price change required
+    'max_age_minutes': 10,            # Within 10 minutes of creation
+    'min_unique_buyers': 40,          # At least 40 unique buyers
+    'min_bonding_pct': 40,            # At least 40% bonding
+    'min_score': 30,                  # Must have at least score 30
+    'max_score': 45,                  # Only triggers below normal threshold (45)
 }
 
 # =============================================================================
