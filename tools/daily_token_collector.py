@@ -347,8 +347,8 @@ class DailyTokenCollector:
                     }
 
                 self.collector.whale_wallets[whale]['tokens_bought'].append({
-                    'token': token_symbol,
-                    'address': token_address,
+                    'token_symbol': token_symbol,
+                    'token_address': token_address,
                     'early_buyer': True,  # Assume early since still holding after pump
                     'detected_after_pump': True  # Historical data collection
                 })
