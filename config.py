@@ -182,10 +182,21 @@ HOLDER_FETCH_GATES = {
 }
 
 # Volume Velocity (0-15 points) - ON-CHAIN: Increased from 10 max
+# POST-GRAD: Uses DexScreener volume/mcap ratio
 VOLUME_WEIGHTS = {
     'spiking': 15,          # Volume 2x+ expected rate (raised from 10)
     'growing': 10,          # Volume 1.25x+ expected rate (raised from 7)
     'steady': 5             # Volume >1x expected rate (raised from 3)
+}
+
+# PRE-GRAD: Uses PumpPortal WebSocket rolling SOL volume (FREE)
+# DexScreener has no data for pre-graduation tokens, so we track SOL
+# volume from real-time trade events and calculate 5-min velocity ratios
+PRE_GRAD_VOLUME_WEIGHTS = {
+    'spiking': 15,          # velocity_ratio > 3.0 OR current_window > 50 SOL
+    'growing': 10,          # velocity_ratio > 1.5 OR current_window > 20 SOL
+    'steady': 5,            # velocity_ratio > 1.0 OR current_window > 5 SOL
+    'window_seconds': 300,  # 5-minute rolling windows
 }
 
 # Price Momentum (0-10 points) - GROK ENHANCED: More graduated

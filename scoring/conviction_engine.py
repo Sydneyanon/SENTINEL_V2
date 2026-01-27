@@ -990,7 +990,69 @@ class ConvictionEngine:
             }
     
     def _score_volume_velocity(self, token_data: Dict) -> int:
-        """Score based on volume velocity (0-15 points) - ON-CHAIN: Increased from 10"""
+        """
+        Score based on volume velocity (0-15 points) - PHASE-AWARE
+
+        Pre-Graduation: Uses PumpPortal WebSocket rolling SOL volume (FREE)
+          - DexScreener has NO data for pre-grad tokens (volume_24h = 0, mcap = 0)
+          - Instead, we track real-time SOL flow from trade events
+          - Score based on: velocity ratio (current 5m / previous 5m) + absolute SOL volume
+
+        Post-Graduation: Uses DexScreener volume/mcap ratio (existing logic)
+          - volume_24h and market_cap available from DEX pools
+        """
+        bonding_pct = token_data.get('bonding_curve_pct', 0)
+        is_pre_grad = bonding_pct < 100
+
+        if is_pre_grad:
+            return self._score_pre_grad_volume(token_data)
+        else:
+            return self._score_post_grad_volume(token_data)
+
+    def _score_pre_grad_volume(self, token_data: Dict) -> int:
+        """
+        Pre-grad volume scoring using PumpPortal rolling SOL volume data.
+        DexScreener has no data for pre-graduation tokens, so we use
+        real-time SOL amounts from WebSocket trade events.
+
+        Scoring (dual criteria - either can trigger):
+        - Velocity ratio (acceleration): current 5m / previous 5m SOL volume
+        - Absolute volume (raw demand): total SOL in current 5m window
+        """
+        if not self.pump_monitor:
+            return 0
+
+        token_address = token_data.get('token_address', '')
+        if not token_address:
+            return 0
+
+        weights = config.PRE_GRAD_VOLUME_WEIGHTS
+        window_seconds = weights.get('window_seconds', 300)
+
+        vol_data = self.pump_monitor.get_rolling_sol_volume(token_address, window_seconds)
+        current = vol_data['current_window']
+        previous = vol_data['previous_window']
+        ratio = vol_data['velocity_ratio']
+
+        # Score based on velocity ratio (acceleration) OR absolute volume (raw demand)
+        if ratio > 3.0 or current > 50:
+            score = weights['spiking']   # 15 pts
+        elif ratio > 1.5 or current > 20:
+            score = weights['growing']   # 10 pts
+        elif ratio > 1.0 or current > 5:
+            score = weights['steady']    # 5 pts
+        else:
+            score = 0
+
+        if score > 0:
+            logger.info(f"      📊 Pre-grad SOL volume: {current:.1f} SOL (5m) | prev: {previous:.1f} SOL | ratio: {ratio:.1f}x → +{score} pts")
+        else:
+            logger.debug(f"      📊 Pre-grad SOL volume: {current:.1f} SOL (5m) | ratio: {ratio:.1f}x → 0 pts")
+
+        return score
+
+    def _score_post_grad_volume(self, token_data: Dict) -> int:
+        """Post-grad volume scoring using DexScreener volume/mcap ratio (existing logic)"""
         volume_24h = token_data.get('volume_24h', 0)
         mcap = token_data.get('market_cap', 1)
 

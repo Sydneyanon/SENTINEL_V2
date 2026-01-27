@@ -48,6 +48,11 @@ class PumpMonitorV2:
         # Track buy/sell per token for ratio calculation
         self.trade_stats = {}  # {token_address: {'buys': int, 'sells': int, 'blocks': {block_slot: count}}}
 
+        # ROLLING SOL VOLUME: Track SOL amounts per trade for phase-aware volume scoring
+        # Pre-grad tokens have no DexScreener data, so we calculate volume momentum
+        # from PumpPortal WebSocket trade events (each trade has solAmount)
+        self.sol_volume_history = {}  # {token_address: [(datetime, sol_amount), ...]}
+
         self.running = False
         self.connection_attempts = 0
         self.messages_received = 0
@@ -275,6 +280,11 @@ class PumpMonitorV2:
         sol_amount = data.get('solAmount', 0)
         if sol_amount:
             self.sol_raised[token_address] += float(sol_amount)
+
+            # Track SOL volume with timestamps for rolling window analysis
+            if token_address not in self.sol_volume_history:
+                self.sol_volume_history[token_address] = []
+            self.sol_volume_history[token_address].append((datetime.now(), float(sol_amount)))
 
         # Check if we hit a bonding milestone
         current_bonding_pct = int(bonding_pct)
@@ -570,6 +580,49 @@ class PumpMonitorV2:
             }
         return None
     
+    def get_rolling_sol_volume(self, token_address: str, window_seconds: int = 300) -> dict:
+        """
+        Get rolling SOL volume for a token in current and previous windows.
+        Used for pre-graduation volume momentum scoring (DexScreener has no pre-grad data).
+
+        Args:
+            token_address: Token mint address
+            window_seconds: Size of each rolling window (default 300s = 5 min)
+
+        Returns:
+            dict with 'current_window' (SOL in last 5m), 'previous_window' (SOL in 5-10m ago),
+            'velocity_ratio' (current/previous), 'total_trades' (trade count in current window)
+        """
+        history = self.sol_volume_history.get(token_address, [])
+        if not history:
+            return {'current_window': 0, 'previous_window': 0, 'velocity_ratio': 0, 'total_trades': 0}
+
+        now = datetime.now()
+        current_cutoff = now - timedelta(seconds=window_seconds)
+        previous_cutoff = now - timedelta(seconds=window_seconds * 2)
+
+        current_window = 0.0
+        previous_window = 0.0
+        current_trades = 0
+
+        for ts, sol_amt in history:
+            if ts > current_cutoff:
+                current_window += sol_amt
+                current_trades += 1
+            elif ts > previous_cutoff:
+                previous_window += sol_amt
+
+        # Calculate velocity ratio (current / previous)
+        # If no previous window data, use 0 (new token, not enough history)
+        velocity_ratio = current_window / previous_window if previous_window > 0 else 0
+
+        return {
+            'current_window': current_window,
+            'previous_window': previous_window,
+            'velocity_ratio': velocity_ratio,
+            'total_trades': current_trades
+        }
+
     def get_buyer_tracking_duration(self, token_address: str) -> float:
         """
         Get how long we've been tracking buyers for a token (in minutes)
@@ -606,6 +659,23 @@ class PumpMonitorV2:
                 self.trade_stats.pop(token, None)
 
             logger.info(f"🧹 Cleaned up {len(tokens_to_remove)} old tokens")
+
+        # Cleanup SOL volume history (trim entries older than 15 min per token)
+        vol_tokens_to_clean = []
+        for token, history in self.sol_volume_history.items():
+            if history:
+                cutoff = datetime.now() - timedelta(minutes=15)
+                trimmed = [(ts, amt) for ts, amt in history if ts > cutoff]
+                if trimmed:
+                    self.sol_volume_history[token] = trimmed
+                else:
+                    vol_tokens_to_clean.append(token)
+        for token in vol_tokens_to_clean:
+            self.sol_volume_history.pop(token, None)
+        if len(self.sol_volume_history) > 2000:
+            keys_to_remove = list(self.sol_volume_history.keys())[:1000]
+            for k in keys_to_remove:
+                self.sol_volume_history.pop(k, None)
 
         # Cleanup organic scanner data (keep sets bounded)
         if len(self.organic_promoted) > 500:
