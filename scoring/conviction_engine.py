@@ -245,40 +245,17 @@ class ConvictionEngine:
             mid_total = adjusted_base + unique_buyers_score
             logger.info(f"   💎 MID SCORE: {mid_total}/100")
 
-            # Early exit if mid score (base + bundle + unique buyers) too low
-            # LOWERED: Was 50, now 20 to allow Twitter/social checks on early tokens
-            if mid_total < 20:
-                logger.info(f"   ⏭️  Mid Score: {mid_total}/100 - Too low for further analysis")
-                return {
-                    'score': mid_total,
-                    'passed': False,
-                    'reason': 'Score too low after unique buyers',
-                    'token_address': token_address,  # FIXED: Include for logging
-                    'token_data': token_data,  # FIXED: Include token data
-                    'breakdown': {
-                        **base_scores,
-                        'bundle_penalty': bundle_result['penalty'],
-                        'unique_buyers': unique_buyers_score,
-                        'total': mid_total
-                    }
-                }
-
-            # ================================================================
-            # PHASE 3.5: SOCIAL SENTIMENT - REMOVED (No budget)
-            # ================================================================
-            # LunarCrush and Twitter scoring removed to save API costs
-            # All social scoring now comes from Telegram calls only
-
+            # Social sentiment removed (no budget)
             social_score = 0
             twitter_score = 0
             social_data = {}
             twitter_data = {}
 
-            # LunarCrush and Twitter disabled - logs removed for cleaner output
-
             # ================================================================
-            # PHASE 3.7: SOCIAL CONFIRMATION (TELEGRAM CALLS) - FREE
+            # PHASE 3.5: TELEGRAM CALLS - FREE (moved before early exit)
             # ================================================================
+            # FIX: Was Phase 3.7 AFTER early exit - $STARTUP missed because
+            # TG groups called it but early exit at mid_total < 20 skipped the check
             # Check Telegram calls as soon as KOL buys any token
             # Variable scoring based on mention intensity and recency
 
@@ -367,7 +344,7 @@ class ConvictionEngine:
             mid_total += social_confirmation_score
 
             # ================================================================
-            # PHASE 3.7.5: MULTI-CALL BONUS (persistent telegram data)
+            # PHASE 3.6: MULTI-CALL BONUS (persistent telegram data)
             # ================================================================
             # Award bonus points for repeated calls from multiple groups
             # This indicates coordinated/organic buzz across the community
@@ -411,6 +388,26 @@ class ConvictionEngine:
                     multi_call_bonus = 0
 
             mid_total += multi_call_bonus
+
+            # Early exit if mid score too low (now includes Telegram call boost)
+            # FIX: Moved after Telegram calls so called tokens don't get early-exited
+            if mid_total < 20:
+                logger.info(f"   ⏭️  Mid Score: {mid_total}/100 - Too low for further analysis")
+                return {
+                    'score': mid_total,
+                    'passed': False,
+                    'reason': 'Score too low after Telegram calls',
+                    'token_address': token_address,
+                    'token_data': token_data,
+                    'breakdown': {
+                        **base_scores,
+                        'bundle_penalty': bundle_result['penalty'],
+                        'unique_buyers': unique_buyers_score,
+                        'telegram_calls': social_confirmation_score,
+                        'multi_call_bonus': multi_call_bonus,
+                        'total': mid_total
+                    }
+                }
 
             # ================================================================
             # PHASE 3.8: SOCIAL VERIFICATION - FREE
