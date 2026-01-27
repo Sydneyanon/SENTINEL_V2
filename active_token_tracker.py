@@ -53,6 +53,10 @@ class ActiveTokenTracker:
         # Post-call monitor (set by main.py after init)
         self.post_call_monitor = None
 
+        # Duplicate name detection - block repeat-name rugs
+        self.recent_signal_names: Dict[str, datetime] = {}  # {name_lower: signal_timestamp}
+        self.duplicate_name_cooldown_minutes = 60  # Block same name for 60 min
+
         # Metrics
         self.tokens_tracked_total = 0
         self.signals_sent_total = 0
@@ -586,9 +590,11 @@ class ActiveTokenTracker:
             
             # Check if we should send signal
             from config import MIN_CONVICTION_SCORE, MAX_MARKET_CAP_FILTER
-            
+
+            # USE conviction engine's 'passed' flag — it includes maturity gate, MCAP cap, etc.
+            conviction_passed = conviction_data.get('passed', False)
+
             # Strict validation - don't send signal if token data is incomplete
-            # RELAXED: Allow UNKNOWN symbols (Helius often doesn't have metadata for new tokens)
             symbol = state.token_data.get('token_symbol', 'UNKNOWN')
             name = state.token_data.get('token_name', 'Unknown')
             price = state.token_data.get('price_usd', 0)
@@ -596,31 +602,31 @@ class ActiveTokenTracker:
             liq = state.token_data.get('liquidity', 0)
 
             # OPT-036: Strict data quality checks
-            # Block signals with missing critical data to prevent posting garbage
             bonding_pct = state.token_data.get('bonding_curve_pct', 0)
             is_pre_grad = bonding_pct < 100
 
-            # Critical data requirements
             data_quality_checks = {
                 'price': price > 0,
-                'liquidity': liq >= 1000,  # Min $1k liquidity
+                'liquidity': liq >= 1000,
                 'mcap': mcap > 0,
-                'mcap_not_too_high': mcap <= MAX_MARKET_CAP_FILTER,  # Not already mooned
+                'mcap_not_too_high': mcap <= MAX_MARKET_CAP_FILTER,
             }
 
-            # Holder count check (exempt pre-grad tokens since they're still building)
             if not is_pre_grad:
                 holder_count = state.token_data.get('holder_count', 0)
                 data_quality_checks['holders'] = holder_count > 0
 
             has_real_data = all(data_quality_checks.values())
-            
+
             # DIAGNOSTIC: Log every threshold check
             logger.info(f"🔍 THRESHOLD CHECK for {symbol}:")
-            logger.info(f"   new_score={new_score}, threshold={MIN_CONVICTION_SCORE}, signal_sent={state.signal_sent}")
-            logger.info(f"   Passes: {new_score >= MIN_CONVICTION_SCORE and not state.signal_sent}")
+            logger.info(f"   new_score={new_score}, conviction_passed={conviction_passed}, signal_sent={state.signal_sent}")
+            if not conviction_passed and new_score >= MIN_CONVICTION_SCORE:
+                reason = conviction_data.get('maturity_gate_reason', '') or 'MCAP cap or other gate'
+                logger.info(f"   ⚠️ Score passes but conviction engine blocked: {reason}")
+            logger.info(f"   Sends signal: {conviction_passed and not state.signal_sent}")
 
-            if new_score >= MIN_CONVICTION_SCORE and not state.signal_sent:
+            if conviction_passed and not state.signal_sent:
                 logger.info(f"   ✅ PASSES threshold check!")
 
                 # PRICE RESCUE: If pre-grad token passes conviction but has $0 price,
@@ -643,10 +649,40 @@ class ActiveTokenTracker:
                         logger.info(f"   📊 After rescue: price=${price:.8f}, mcap=${mcap:.0f}, liq=${liq:.0f} → {'PASS' if has_real_data else 'STILL BLOCKED'}")
 
                 if has_real_data:
-                    logger.info(f"   ✅ Has real data - SENDING SIGNAL")
-                    logger.info(f"   📊 conviction_data['score'] = {conviction_data.get('score')}")
-                    logger.info(f"   📊 conviction_data['breakdown']['total'] = {conviction_data.get('breakdown', {}).get('total')}")
-                    await self._send_signal(token_address, conviction_data)
+                    # DUPLICATE NAME CHECK: Block repeat-name rugs
+                    name_lower = name.lower().strip() if name else ''
+                    symbol_lower = symbol.lower().strip() if symbol else ''
+                    is_duplicate = False
+
+                    if name_lower and name_lower not in ['unknown', '']:
+                        last_signal = self.recent_signal_names.get(name_lower)
+                        if last_signal:
+                            minutes_ago = (datetime.utcnow() - last_signal).total_seconds() / 60
+                            if minutes_ago < self.duplicate_name_cooldown_minutes:
+                                is_duplicate = True
+                                logger.warning(f"🚫 DUPLICATE NAME: ${symbol} '{name}' was signaled {minutes_ago:.0f}m ago - likely copycat rug")
+
+                    if not is_duplicate and symbol_lower and symbol_lower not in ['unknown', '']:
+                        last_signal = self.recent_signal_names.get(f"sym:{symbol_lower}")
+                        if last_signal:
+                            minutes_ago = (datetime.utcnow() - last_signal).total_seconds() / 60
+                            if minutes_ago < self.duplicate_name_cooldown_minutes:
+                                is_duplicate = True
+                                logger.warning(f"🚫 DUPLICATE SYMBOL: ${symbol} was signaled {minutes_ago:.0f}m ago - likely copycat rug")
+
+                    if is_duplicate:
+                        self.signals_blocked_data_quality += 1
+                        logger.warning(f"   📊 Total blocked (duplicate name): {self.signals_blocked_data_quality}")
+                    else:
+                        logger.info(f"   ✅ Has real data - SENDING SIGNAL")
+                        logger.info(f"   📊 conviction_data['score'] = {conviction_data.get('score')}")
+                        logger.info(f"   📊 conviction_data['breakdown']['total'] = {conviction_data.get('breakdown', {}).get('total')}")
+                        # Record name/symbol for duplicate detection
+                        if name_lower and name_lower not in ['unknown', '']:
+                            self.recent_signal_names[name_lower] = datetime.utcnow()
+                        if symbol_lower and symbol_lower not in ['unknown', '']:
+                            self.recent_signal_names[f"sym:{symbol_lower}"] = datetime.utcnow()
+                        await self._send_signal(token_address, conviction_data)
                 else:
                     # OPT-036: Log exactly what quality checks failed
                     failed_checks = []
@@ -976,6 +1012,14 @@ class ActiveTokenTracker:
 
         if tokens_to_remove:
             logger.info(f"🧹 Cleaned up {len(tokens_to_remove)} tokens, {self.get_active_count()} remain")
+
+        # Clean up old duplicate name entries (older than cooldown)
+        stale_names = [
+            name for name, ts in self.recent_signal_names.items()
+            if (datetime.utcnow() - ts).total_seconds() / 60 > self.duplicate_name_cooldown_minutes
+        ]
+        for name in stale_names:
+            del self.recent_signal_names[name]
     
     def get_stats(self) -> Dict:
         """Get tracker statistics including social coverage metrics"""
