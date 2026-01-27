@@ -452,15 +452,24 @@ class ActiveTokenTracker:
 
             state = self.tracked_tokens[token_address]
 
-            # CREDIT OPTIMIZATION: Skip polling low-conviction tokens
-            # LOWERED: Was 50, now 40 to match lowered signal thresholds (55)
-            if config.DISABLE_POLLING_BELOW_THRESHOLD:
-                if state.conviction_score < 40 and not state.signal_sent:
-                    logger.debug(f"⏭️  Skipping poll for {state.token_data.get('token_symbol', 'UNKNOWN')} (conviction={state.conviction_score} < 40)")
-                    return
+            # CREDIT OPTIMIZATION: Tiered polling for low-conviction tokens
+            # FIX: Previously hard-skipped tokens < 40 conviction, causing missed runners
+            # like $STARTUP (+695%) that started low but pumped before re-analysis
+            bonding_pct = state.token_data.get('bonding_curve_pct', 0)
+            is_pre_grad = bonding_pct < 100
 
-            # Simple fixed interval (30s)
-            poll_interval = 30
+            if config.DISABLE_POLLING_BELOW_THRESHOLD and not state.signal_sent:
+                if state.conviction_score < 0 and not is_pre_grad:
+                    # Only skip truly negative-score POST-GRAD tokens
+                    logger.debug(f"⏭️  Skipping poll for {state.token_data.get('token_symbol', 'UNKNOWN')} (conviction={state.conviction_score} < 0, post-grad)")
+                    return
+                # Pre-grad tokens: NEVER skip - they move too fast
+
+            # Tiered polling interval based on conviction
+            if state.conviction_score >= 20 or is_pre_grad:
+                poll_interval = 30  # Normal: 30s for decent scores or any pre-grad
+            else:
+                poll_interval = 90  # Slow: 90s for low-conviction post-grad (save credits)
 
             # Check if it's time to poll
             now = datetime.utcnow()
@@ -824,7 +833,7 @@ class ActiveTokenTracker:
         import config
 
         cutoff = datetime.utcnow() - timedelta(hours=max_age_hours)
-        low_conviction_cutoff = datetime.utcnow() - timedelta(minutes=30)  # Remove low-conviction after 30 min
+        low_conviction_cutoff = datetime.utcnow() - timedelta(hours=2)  # Extended: 30min → 2h (was evicting runners)
 
         tokens_to_remove = []
 
@@ -832,14 +841,15 @@ class ActiveTokenTracker:
             # Remove if:
             # 1. Signal already sent AND been tracking for > 1 hour
             # 2. Been tracking for > max_age_hours with no signal
-            # 3. CREDIT OPTIMIZATION: Low conviction (< 30) for > 30 minutes
+            # 3. CREDIT OPTIMIZATION: Negative conviction for > 2 hours (truly dead tokens only)
+            #    FIX: Was <30 after 30min - this evicted $STARTUP before it could pump
 
             if state.signal_sent and (datetime.utcnow() - state.first_tracked_at).total_seconds() > 3600:
                 tokens_to_remove.append(token_address)
             elif state.first_tracked_at < cutoff:
                 tokens_to_remove.append(token_address)
-            elif config.DISABLE_POLLING_BELOW_THRESHOLD and state.conviction_score < 30 and state.first_tracked_at < low_conviction_cutoff:
-                # Remove low-conviction tokens after 30 minutes to save credits
+            elif config.DISABLE_POLLING_BELOW_THRESHOLD and state.conviction_score < 0 and state.first_tracked_at < low_conviction_cutoff:
+                # Only remove truly negative-score tokens after 2 hours
                 tokens_to_remove.append(token_address)
 
         for token_address in tokens_to_remove:

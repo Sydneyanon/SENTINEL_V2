@@ -245,40 +245,17 @@ class ConvictionEngine:
             mid_total = adjusted_base + unique_buyers_score
             logger.info(f"   💎 MID SCORE: {mid_total}/100")
 
-            # Early exit if mid score (base + bundle + unique buyers) too low
-            # LOWERED: Was 50, now 20 to allow Twitter/social checks on early tokens
-            if mid_total < 20:
-                logger.info(f"   ⏭️  Mid Score: {mid_total}/100 - Too low for further analysis")
-                return {
-                    'score': mid_total,
-                    'passed': False,
-                    'reason': 'Score too low after unique buyers',
-                    'token_address': token_address,  # FIXED: Include for logging
-                    'token_data': token_data,  # FIXED: Include token data
-                    'breakdown': {
-                        **base_scores,
-                        'bundle_penalty': bundle_result['penalty'],
-                        'unique_buyers': unique_buyers_score,
-                        'total': mid_total
-                    }
-                }
-
-            # ================================================================
-            # PHASE 3.5: SOCIAL SENTIMENT - REMOVED (No budget)
-            # ================================================================
-            # LunarCrush and Twitter scoring removed to save API costs
-            # All social scoring now comes from Telegram calls only
-
+            # Social sentiment removed (no budget)
             social_score = 0
             twitter_score = 0
             social_data = {}
             twitter_data = {}
 
-            # LunarCrush and Twitter disabled - logs removed for cleaner output
-
             # ================================================================
-            # PHASE 3.7: SOCIAL CONFIRMATION (TELEGRAM CALLS) - FREE
+            # PHASE 3.5: TELEGRAM CALLS - FREE (moved before early exit)
             # ================================================================
+            # FIX: Was Phase 3.7 AFTER early exit - $STARTUP missed because
+            # TG groups called it but early exit at mid_total < 20 skipped the check
             # Check Telegram calls as soon as KOL buys any token
             # Variable scoring based on mention intensity and recency
 
@@ -367,7 +344,7 @@ class ConvictionEngine:
             mid_total += social_confirmation_score
 
             # ================================================================
-            # PHASE 3.7.5: MULTI-CALL BONUS (persistent telegram data)
+            # PHASE 3.6: MULTI-CALL BONUS (persistent telegram data)
             # ================================================================
             # Award bonus points for repeated calls from multiple groups
             # This indicates coordinated/organic buzz across the community
@@ -412,6 +389,26 @@ class ConvictionEngine:
 
             mid_total += multi_call_bonus
 
+            # Early exit if mid score too low (now includes Telegram call boost)
+            # FIX: Moved after Telegram calls so called tokens don't get early-exited
+            if mid_total < 20:
+                logger.info(f"   ⏭️  Mid Score: {mid_total}/100 - Too low for further analysis")
+                return {
+                    'score': mid_total,
+                    'passed': False,
+                    'reason': 'Score too low after Telegram calls',
+                    'token_address': token_address,
+                    'token_data': token_data,
+                    'breakdown': {
+                        **base_scores,
+                        'bundle_penalty': bundle_result['penalty'],
+                        'unique_buyers': unique_buyers_score,
+                        'telegram_calls': social_confirmation_score,
+                        'multi_call_bonus': multi_call_bonus,
+                        'total': mid_total
+                    }
+                }
+
             # ================================================================
             # PHASE 3.8: SOCIAL VERIFICATION - FREE
             # ================================================================
@@ -420,7 +417,7 @@ class ConvictionEngine:
             # Data comes from PumpPortal (pre-grad) or DexScreener (post-grad)
             #
             # SCORING ASYMMETRY (pre-grad socials matter less):
-            # - Pre-grad: -20 (none) to +13 (full set) — most pre-grad skip socials
+            # - Pre-grad: -10 (none) to +13 (full set) — most memecoins skip socials
             # - Post-grad: -15 (none) to +21 (full + active) — socials more meaningful once DEX listed
 
             social_verification_score = 0
@@ -429,8 +426,8 @@ class ConvictionEngine:
             # Check if social data is available (from PumpPortal or DexScreener)
             # If data not available yet for pre-grad, assume no socials (penalize unknown)
             if token_data.get('has_twitter') is None and is_pre_grad:
-                social_verification_score = -20
-                logger.warning(f"   ⚠️  PRE-GRAD: Social data not loaded yet - assuming no socials: -20 pts")
+                social_verification_score = -10
+                logger.warning(f"   ⚠️  PRE-GRAD: Social data not loaded yet - assuming no socials: -10 pts")
             elif token_data.get('has_twitter') is not None:
                 has_website = token_data.get('has_website', False)
                 has_twitter = token_data.get('has_twitter', False)
@@ -446,10 +443,11 @@ class ConvictionEngine:
                 # PRE-GRAD SCORING: -20 to +13 (more punitive for no socials)
                 if is_pre_grad:
                     if social_count == 0:
-                        # No socials pre-grad = likely low-effort rug
-                        social_verification_score = -20
+                        # No socials pre-grad = common for memecoins, light penalty
+                        # FIX: Was -20, too harsh - missed $STARTUP (+695%) runner
+                        social_verification_score = -10
                         social_verification_data['anonymous'] = True
-                        logger.warning(f"   ⚠️  PRE-GRAD: No socials: -20 pts (low-effort rug)")
+                        logger.warning(f"   ⚠️  PRE-GRAD: No socials: -10 pts (common for memecoins)")
                     elif has_telegram and not has_twitter:
                         # Only Telegram = easy to fake/spam
                         social_verification_score = 2
@@ -643,10 +641,11 @@ class ConvictionEngine:
                             logger.warning(f"      🔴 {risk.get('name', 'Unknown risk')}")
 
                 else:
-                    # RugCheck failed - penalize pre-grad (don't trust unknown risk)
+                    # RugCheck failed - light penalty for pre-grad (API may just be slow)
+                    # FIX: Was -15, too harsh - missed $STARTUP (+695%) runner
                     if is_pre_grad:
-                        rugcheck_penalty = -15
-                        logger.warning(f"   ⚠️  RugCheck API unavailable - assuming risk for pre-grad: {rugcheck_penalty} pts")
+                        rugcheck_penalty = -5
+                        logger.warning(f"   ⚠️  RugCheck API unavailable - light penalty for pre-grad: {rugcheck_penalty} pts")
                     else:
                         logger.debug(f"   ⚠️  RugCheck API unavailable: {rugcheck_result.get('error', 'Unknown error')}")
 
