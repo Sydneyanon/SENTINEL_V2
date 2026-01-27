@@ -54,12 +54,14 @@ class AdminBot:
             self.app.add_handler(CommandHandler("performance", self._cmd_performance, filters=admin_filter))
             self.app.add_handler(CommandHandler("health", self._cmd_health, filters=admin_filter))
             self.app.add_handler(CommandHandler("cache", self._cmd_cache, filters=admin_filter))
+            self.app.add_handler(CommandHandler("collect", self._cmd_collect, filters=admin_filter))
+            self.app.add_handler(CommandHandler("ml", self._cmd_ml_retrain, filters=admin_filter))
 
             # Block all other users (unauthorized access attempts)
             self.app.add_handler(MessageHandler(~admin_filter, self._handle_unauthorized))
 
             logger.info(f"✅ Admin bot initialized")
-            logger.info(f"   Commands registered: /start /help /stats /active /performance /health /cache")
+            logger.info(f"   Commands registered: /start /help /stats /active /performance /health /cache /collect /ml")
             logger.info(f"   Security: Only user {self.admin_user_id} can use commands")
             if self.admin_channel_id:
                 logger.info(f"   Response mode: Admin channel ({self.admin_channel_id})")
@@ -168,6 +170,10 @@ class AdminBot:
 /active - Currently tracked tokens
 /health - System health check
 /cache - Telegram calls cache status
+
+<b>Data &amp; ML:</b>
+/collect - Run daily token collection now
+/ml - Retrain ML model with latest data
 
 <b>Help:</b>
 /help - Show this message
@@ -529,3 +535,64 @@ class AdminBot:
         except Exception as e:
             logger.error(f"❌ Error in /cache: {e}")
             await update.message.reply_text(f"❌ Error getting cache: {str(e)}")
+
+    async def _cmd_collect(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Manually trigger daily token collection"""
+        try:
+            await self._send_response(update, context,
+                "📅 <b>Starting daily collection...</b>\n\n"
+                "This collects yesterday's top tokens from DexScreener,\n"
+                "extracts early whale wallets, and builds ML training data.\n\n"
+                "This may take a few minutes. Check Railway logs for progress.")
+
+            from automated_daily_collector import automated_daily_collector
+            if automated_daily_collector:
+                # Run in background so the bot stays responsive
+                asyncio.create_task(self._run_collect_background(update, context))
+            else:
+                await self._send_response(update, context, "❌ Daily collector not initialized")
+
+        except Exception as e:
+            logger.error(f"❌ Error in /collect: {e}")
+            await update.message.reply_text(f"❌ Error: {str(e)}")
+
+    async def _run_collect_background(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Run collection in background and report result"""
+        try:
+            from automated_daily_collector import automated_daily_collector
+            await automated_daily_collector.trigger_manual_run()
+            await self._send_response(update, context,
+                "✅ <b>Daily collection complete!</b>\n\n"
+                "Check Railway logs for details on tokens collected and whales found.")
+        except Exception as e:
+            logger.error(f"❌ Background collection failed: {e}")
+            await self._send_response(update, context, f"❌ Collection failed: {str(e)}")
+
+    async def _cmd_ml_retrain(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Manually trigger ML model retraining"""
+        try:
+            await self._send_response(update, context,
+                "🎓 <b>Starting ML retraining...</b>\n\n"
+                "This retrains the signal prediction model using\n"
+                "the latest collected token data.\n\n"
+                "This may take a few minutes. Check Railway logs for progress.")
+
+            asyncio.create_task(self._run_ml_background(update, context))
+
+        except Exception as e:
+            logger.error(f"❌ Error in /ml: {e}")
+            await update.message.reply_text(f"❌ Error: {str(e)}")
+
+    async def _run_ml_background(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Run ML retraining in background and report result"""
+        try:
+            from tools.automated_ml_retrain import AutomatedMLRetrainer
+            retrainer = AutomatedMLRetrainer()
+            await retrainer.run()
+            await self._send_response(update, context,
+                "✅ <b>ML retraining complete!</b>\n\n"
+                "Model updated with latest token data.\n"
+                "Check Railway logs for accuracy metrics.")
+        except Exception as e:
+            logger.error(f"❌ ML retraining failed: {e}")
+            await self._send_response(update, context, f"❌ ML retraining failed: {str(e)}")
