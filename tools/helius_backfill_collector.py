@@ -350,6 +350,14 @@ class HeliusBackfillCollector:
                 'freeze_authority_revoked': True,
                 'authority_risk_flags': [],
 
+                # Transaction pattern fields (Helius parsed TX enrichment)
+                'unique_buyers': 0,
+                'unique_sellers': 0,
+                'tx_buy_count': 0,
+                'tx_sell_count': 0,
+                'tx_buy_ratio': 0,
+                'large_sell_count': 0,
+
                 # Fields not available in backfill (set defaults)
                 'our_kol_count': 0,
                 'new_wallet_count': 0,
@@ -379,7 +387,12 @@ class HeliusBackfillCollector:
                 await self._enrich_holders(token_data, token_address)
                 await asyncio.sleep(self.backfill_cfg.get('helius_rate_limit', 0.3))
 
-            # Step 4: Classify outcome
+            # Step 4: Helius transaction patterns (~5 credits)
+            if self.backfill_cfg.get('enrich_with_helius', True):
+                await self._enrich_transactions(token_data, token_address)
+                await asyncio.sleep(self.backfill_cfg.get('helius_rate_limit', 0.3))
+
+            # Step 5: Classify outcome
             token_data['outcome'] = self._classify_outcome(token_data)
 
             # Calculate token age
@@ -463,6 +476,32 @@ class HeliusBackfillCollector:
 
         except Exception as e:
             logger.debug(f"   Holder enrichment error: {e}")
+
+    async def _enrich_transactions(self, token_data: Dict, token_address: str):
+        """Add transaction pattern data from Helius parsed transactions.
+
+        Key runner signals:
+        - unique_buyers: More distinct wallets buying = more organic demand
+        - buy_ratio: High buy/total ratio = sustained buying pressure
+        - large_sell_count: Insider dumps = rug signal
+        """
+        try:
+            tx_result = await self.helius.get_recent_token_transactions(
+                token_address, limit=100
+            )
+
+            if tx_result.get('success'):
+                token_data['unique_buyers'] = tx_result.get('unique_buyers', 0)
+                token_data['unique_sellers'] = tx_result.get('unique_sellers', 0)
+                token_data['tx_buy_count'] = tx_result.get('buy_count', 0)
+                token_data['tx_sell_count'] = tx_result.get('sell_count', 0)
+                token_data['tx_buy_ratio'] = round(tx_result.get('buy_ratio', 0), 4)
+                token_data['large_sell_count'] = len(tx_result.get('large_sells', []))
+
+                self.stats['credits_used_estimate'] += 5
+
+        except Exception as e:
+            logger.debug(f"   Transaction enrichment error: {e}")
 
     def _classify_outcome(self, token_data: Dict) -> str:
         """

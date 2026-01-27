@@ -148,6 +148,20 @@ class MLPipeline:
         # NEW: Pre-bonding velocity (if available)
         features['bonding_velocity'] = token.get('bonding_velocity', 0)
 
+        # On-chain transaction patterns (Helius parsed TX enrichment)
+        features['unique_buyers'] = token.get('unique_buyers', 0)
+        features['unique_sellers'] = token.get('unique_sellers', 0)
+        features['tx_buy_count'] = token.get('tx_buy_count', 0)
+        features['tx_sell_count'] = token.get('tx_sell_count', 0)
+        features['tx_buy_ratio'] = token.get('tx_buy_ratio', 0)
+        features['large_sell_count'] = token.get('large_sell_count', 0)
+
+        # Derived: buyer diversity (unique buyers / total buys = less botted)
+        features['buyer_diversity'] = (
+            features['unique_buyers'] / features['tx_buy_count']
+            if features['tx_buy_count'] > 0 else 0
+        )
+
         return features
 
     def classify_outcome(self, token: Dict) -> int:
