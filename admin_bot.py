@@ -804,9 +804,10 @@ class AdminBot:
                 data = json.load(f)
 
             total = data.get('total_tokens', 0)
-            last_collection = data.get('last_daily_collection', 'never')
-            collected_today = data.get('tokens_collected_today', 0)
+            last_collection = data.get('last_daily_collection', data.get('last_backfill', 'never'))
+            collected_today = data.get('tokens_collected_today', data.get('tokens_added_this_run', 0))
             outcome_dist = data.get('outcome_distribution', {})
+            discovery_method = data.get('discovery_method', 'dexscreener')
 
             # ML readiness
             ml_threshold = 200
@@ -815,8 +816,11 @@ class AdminBot:
             bar_filled = int(progress_pct / 5)  # 20 char bar
             bar = "█" * bar_filled + "░" * (20 - bar_filled)
 
+            source_label = "Helius + DexScreener" if 'helius' in discovery_method else "DexScreener"
+
             response = "📊 <b>ML TRAINING DATASET</b>\n\n"
             response += f"<b>Tokens:</b> {total}\n"
+            response += f"<b>Source:</b> {source_label}\n"
             response += f"<b>Last collection:</b> {last_collection}\n"
             response += f"<b>Added last run:</b> {collected_today}\n\n"
 
@@ -854,33 +858,53 @@ class AdminBot:
             await update.message.reply_text(f"❌ Error: {str(e)}")
 
     async def _cmd_collect(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Manually trigger daily token collection"""
+        """Manually trigger Helius backfill token collection"""
         try:
             await self._send_response(update, context,
-                "📅 <b>Starting daily collection...</b>\n\n"
-                "This collects yesterday's top tokens from DexScreener,\n"
-                "extracts early whale wallets, and builds ML training data.\n\n"
+                "📅 <b>Starting Helius backfill collection...</b>\n\n"
+                "Discovering pump.fun tokens via Helius searchAssets,\n"
+                "collecting 30+ ML features per token (DexScreener + Helius),\n"
+                "and building ML training data.\n\n"
                 "This may take a few minutes. Check Railway logs for progress.")
 
-            from automated_daily_collector import automated_daily_collector
-            if automated_daily_collector:
-                # Run in background so the bot stays responsive
-                asyncio.create_task(self._run_collect_background(update, context))
-            else:
-                await self._send_response(update, context, "❌ Daily collector not initialized")
+            # Run in background so the bot stays responsive
+            asyncio.create_task(self._run_collect_background(update, context))
 
         except Exception as e:
             logger.error(f"❌ Error in /collect: {e}")
             await update.message.reply_text(f"❌ Error: {str(e)}")
 
     async def _run_collect_background(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Run collection in background and report result"""
+        """Run Helius backfill collection in background and report result"""
         try:
-            from automated_daily_collector import automated_daily_collector
-            await automated_daily_collector.trigger_manual_run()
+            from tools.helius_backfill_collector import HeliusBackfillCollector
+
+            collector = HeliusBackfillCollector()
+            await collector.run()
+
+            # Report results
+            stats = collector.stats
+            enriched = stats.get('enriched', 0)
+            discovered = stats.get('discovered', 0)
+            credits = stats.get('credits_used_estimate', 0)
+
+            # Get total dataset size
+            total = 0
+            try:
+                import json
+                with open('data/historical_training_data.json', 'r') as f:
+                    data = json.load(f)
+                    total = data.get('total_tokens', 0)
+            except Exception:
+                pass
+
             await self._send_response(update, context,
-                "✅ <b>Daily collection complete!</b>\n\n"
-                "Check Railway logs for details on tokens collected and whales found.")
+                f"✅ <b>Helius backfill complete!</b>\n\n"
+                f"<b>Discovered:</b> {discovered} tokens\n"
+                f"<b>Added:</b> +{enriched} new tokens\n"
+                f"<b>Dataset total:</b> {total} tokens\n"
+                f"<b>Credits used:</b> ~{credits}\n\n"
+                f"{'✅ Ready for ML training!' if total >= 200 else f'Need {200 - total} more tokens for ML training.'}")
         except Exception as e:
             logger.error(f"❌ Background collection failed: {e}")
             await self._send_response(update, context, f"❌ Collection failed: {str(e)}")

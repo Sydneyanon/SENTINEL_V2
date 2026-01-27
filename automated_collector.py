@@ -1,11 +1,14 @@
 """
 Automated Historical Data Collector - Background Scheduler
 
-Runs the historical data collector on a schedule to continuously build ML training dataset.
+Uses Helius searchAssets + program TX scanning to discover pump.fun tokens
+and build ML training data on a weekly schedule.
 
 Features:
 - Runs weekly by default (configurable)
-- Incremental updates (doesn't re-collect existing tokens)
+- Discovers tokens via Helius DAS API (on-chain, not DexScreener discovery)
+- Incremental updates (deduplicates against existing dataset)
+- Collects 30+ ML features per token with Helius authority/holder enrichment
 - Configurable via environment variables
 - Runs in background without blocking main bot
 """
@@ -41,9 +44,10 @@ class AutomatedCollector:
             return
 
         logger.info("=" * 80)
-        logger.info("🤖 AUTOMATED HISTORICAL COLLECTOR")
+        logger.info("🤖 AUTOMATED HISTORICAL COLLECTOR (Helius Backfill)")
         logger.info("=" * 80)
         logger.info(f"   Status: ENABLED")
+        logger.info(f"   Strategy: Helius searchAssets + DexScreener enrichment")
         logger.info(f"   Schedule: Every {self.interval_hours} hours ({self.interval_hours/24:.0f} days)")
         logger.info(f"   Tokens per run: {self.tokens_per_run}")
         logger.info(f"   MCAP range: ${self.min_mcap:,} - ${self.max_mcap:,}")
@@ -121,27 +125,21 @@ class AutomatedCollector:
                 await asyncio.sleep(3600)
 
     async def _run_collector(self):
-        """Run the historical data collector"""
+        """Run the Helius backfill collector for ML training data"""
         try:
-            # Import here to avoid circular dependencies
-            from tools.historical_data_collector import HistoricalDataCollector
+            from tools.helius_backfill_collector import HeliusBackfillCollector
 
-            # Get existing tokens to avoid re-collecting
             existing_tokens = self._get_existing_tokens()
             logger.info(f"   Found {len(existing_tokens)} already collected tokens")
-            logger.info(f"   Target: Collect {self.tokens_per_run} NEW tokens")
+            logger.info(f"   Target: Collect {self.tokens_per_run} NEW tokens via Helius backfill")
 
-            # Initialize collector
-            collector = HistoricalDataCollector()
-            await collector.initialize()
+            collector = HeliusBackfillCollector()
+            await collector.run(max_tokens=self.tokens_per_run)
 
-            # Modify collector to skip existing tokens
-            collector.existing_tokens = existing_tokens
-
-            # Run collection
-            await collector.collect_all(target_count=self.tokens_per_run)
-
-            logger.info("✅ Automated collection complete")
+            stats = collector.stats
+            logger.info(f"✅ Automated Helius backfill complete: "
+                         f"+{stats.get('enriched', 0)} tokens "
+                         f"(~{stats.get('credits_used_estimate', 0)} credits)")
 
         except Exception as e:
             logger.error(f"❌ Collector error: {e}")

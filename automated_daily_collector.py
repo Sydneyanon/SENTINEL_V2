@@ -1,16 +1,18 @@
 """
 Automated Daily Token Collector - Runs at Midnight UTC
 
-Collects yesterday's top performers daily for continuous ML dataset building.
+Uses Helius searchAssets + program TX scanning to discover pump.fun tokens,
+then collects comprehensive ML features via DexScreener + Helius enrichment.
 
 Features:
-- Runs at MIDNIGHT UTC every day (perfect timing for "yesterday's winners")
-- Collects 50-100 tokens that already ran in last 24h
-- Extracts whale wallets and early buyer signals
-- Builds labeled training data with known outcomes
-- Integrates with conviction engine for real-time whale matching
+- Runs at MIDNIGHT UTC every day
+- Discovers pump.fun tokens via Helius DAS searchAssets API (on-chain)
+- Collects 30+ ML features per token (DexScreener market data + Helius authority/holders)
+- Classifies outcomes by market cap for labeled training data
+- Deduplicates against existing dataset
+- Triggers ML retraining when 200+ tokens accumulated
 
-Schedule: 00:00 UTC daily (when previous day's data is complete)
+Schedule: 00:00 UTC daily
 """
 import asyncio
 import os
@@ -46,8 +48,8 @@ class AutomatedDailyCollector:
         logger.info(f"   Status: ENABLED")
         logger.info(f"   Schedule: Daily at {self.run_time_utc.strftime('%H:%M')} UTC (midnight)")
         logger.info(f"   Tokens per day: {self.tokens_per_day}")
-        logger.info(f"   Strategy: Collect YESTERDAY'S winners with known outcomes")
-        logger.info(f"   Goal: Build labeled ML training data")
+        logger.info(f"   Strategy: Helius searchAssets + DexScreener enrichment")
+        logger.info(f"   Goal: Build labeled ML training data (on-chain discovery)")
 
         # Calculate next run time
         self.next_run = self._calculate_next_run()
@@ -127,17 +129,18 @@ class AutomatedDailyCollector:
                 await asyncio.sleep(3600)
 
     async def _run_daily_collection(self):
-        """Run the daily token collector + ML retraining pipeline"""
+        """Run Helius backfill + ML retraining pipeline"""
         try:
-            # STEP 1: Collect yesterday's top tokens
-            logger.info("📊 STEP 1: Collecting yesterday's top tokens...")
-            from tools.daily_token_collector import DailyTokenCollector
+            # STEP 1: Discover pump.fun tokens via Helius and collect ML features
+            logger.info("📊 STEP 1: Running Helius backfill (searchAssets + DexScreener)...")
+            from tools.helius_backfill_collector import HeliusBackfillCollector
 
-            # Initialize and run collector
-            collector = DailyTokenCollector()
-            await collector.collect_daily()
+            collector = HeliusBackfillCollector()
+            await collector.run(max_tokens=self.tokens_per_day)
 
-            logger.info("✅ Daily collection complete")
+            stats = collector.stats
+            logger.info(f"✅ Helius backfill complete: +{stats.get('enriched', 0)} tokens "
+                         f"(~{stats.get('credits_used_estimate', 0)} credits)")
             logger.info("")
 
             # STEP 2: ML model retraining (if enough new data)
