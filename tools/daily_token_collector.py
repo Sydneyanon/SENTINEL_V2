@@ -254,6 +254,20 @@ class DailyTokenCollector:
             logger.error("❌ No tokens collected!")
             return
 
+        # Categorize outcomes based on price change
+        for token in tokens_data:
+            pct = token.get('price_change_24h', 0)
+            if pct >= 9900:
+                token['outcome'] = '100x+'
+            elif pct >= 4900:
+                token['outcome'] = '50x'
+            elif pct >= 900:
+                token['outcome'] = '10x'
+            elif pct >= 400:
+                token['outcome'] = '5x'
+            else:
+                token['outcome'] = '2x'
+
         # Extract EARLY whale activity (who bought BEFORE it pumped)
         if self.collector.helius_rpc_url:
             logger.info("\n" + "=" * 80)

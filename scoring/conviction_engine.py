@@ -526,7 +526,7 @@ class ConvictionEngine:
             boost_detection_data = {}
 
             if not is_pre_grad:  # Only check post-grad tokens
-                is_boosted = token_data.get('is_boosted', False)
+                is_boosted = token_data.get('is_boosted', False) or token_data.get('boost_active', 0) > 0
                 volume_spike_ratio = token_data.get('volume_spike_ratio', 0)
 
                 if is_boosted:
@@ -652,13 +652,8 @@ class ConvictionEngine:
             # Apply RugCheck penalty to mid_total
             mid_total += rugcheck_penalty
 
-            # NEW: DexScreener Boost Detection (paid promotion = dump signal)
-            boost_penalty = 0
-            if token_data.get('boost_active', 0) > 0:
-                # Paid promotion detected - often precedes dumps
-                boost_penalty = -25
-                logger.warning(f"   🚨 PAID BOOST DETECTED: {boost_penalty} pts (potential pump & dump)")
-                mid_total += boost_penalty
+            # NOTE: DexScreener boost detection already handled in Phase 3.9
+            # (was duplicated here with boost_active, causing -50 double penalty)
 
             # LIQUIDITY FILTERS DISABLED - User requested removal
             # Tokens below $20k max market cap will have very little liquidity by nature
