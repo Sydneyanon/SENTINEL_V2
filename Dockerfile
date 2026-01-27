@@ -28,26 +28,26 @@ RUN pip3 install --no-cache-dir --upgrade pip setuptools wheel
 WORKDIR /app
 COPY requirements.txt /app/
 
-# Stage 1: Core numeric/ML build dependencies (order matters)
+# Stage 1: Core numeric dependencies (order matters)
 RUN pip3 install --no-cache-dir --prefer-binary numpy>=1.26.0 Cython scipy
 
-# Stage 2: hdbscan (needs numpy/scipy first, often needs compilation)
+# Stage 2: PyTorch CPU-only (no GPU on Railway - saves ~1.5GB)
+RUN pip3 install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
+
+# Stage 3: hdbscan (needs numpy/scipy)
 RUN pip3 install --no-cache-dir --prefer-binary hdbscan
 
-# Stage 3: Sentence embeddings (heavy download, ~400MB model)
-RUN pip3 install --no-cache-dir --prefer-binary sentence-transformers>=2.2.2
+# Stage 4: transformers + sentence-transformers (needs torch)
+RUN pip3 install --no-cache-dir --prefer-binary transformers sentence-transformers
 
-# Stage 4: BERTopic (needs hdbscan + sentence-transformers)
+# Stage 5: BERTopic (needs hdbscan + sentence-transformers)
 RUN pip3 install --no-cache-dir --prefer-binary bertopic>=0.15.0
 
-# Stage 5: All remaining dependencies
+# Stage 6: All remaining dependencies
 RUN pip3 install --no-cache-dir --prefer-binary -r requirements.txt
 
-# Stage 6: Pre-download sentence-transformers model (bake into image)
-RUN python3 -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')"
-
 # Verify ML imports work (fail build early if broken)
-RUN python3 -c "import hdbscan; import bertopic; import sentence_transformers; print('ML imports OK')"
+RUN python3 -c "import hdbscan; from bertopic import BERTopic; from sentence_transformers import SentenceTransformer; print('ML imports OK')"
 
 # Copy application code
 COPY . /app/
