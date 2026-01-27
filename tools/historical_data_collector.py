@@ -376,8 +376,8 @@ class HistoricalDataCollector:
 
                                                 # Track this whale
                                                 self.whale_wallets[owner]['tokens_bought'].append({
-                                                    'token': token_symbol,
-                                                    'address': token_address,
+                                                    'token_symbol': token_symbol,
+                                                    'token_address': token_address,
                                                     'usd_value': usd_value,
                                                     'balance': balance
                                                 })
@@ -389,8 +389,8 @@ class HistoricalDataCollector:
                                                 whale_addresses.append(owner)
 
                                                 self.whale_wallets[owner]['tokens_bought'].append({
-                                                    'token': token_symbol,
-                                                    'address': token_address,
+                                                    'token_symbol': token_symbol,
+                                                    'token_address': token_address,
                                                     'balance': balance
                                                 })
 
