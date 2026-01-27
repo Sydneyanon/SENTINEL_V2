@@ -718,6 +718,60 @@ class ConvictionEngine:
             # if liquidity == 0 and bonding_pct < 100:
             #     emergency_blocks.append(f"Zero liquidity on pre-grad token")
 
+            # ================================================================
+            # PHASE 3.11: MINT/FREEZE AUTHORITY CHECK (1 credit) - Helius
+            # ================================================================
+            authority_penalty = 0
+            authority_result = {}
+
+            if self.helius_fetcher and config.HELIUS_AUTHORITY_CHECK.get('enabled', False):
+                authority_result = await self.rug_detector.check_token_authority(
+                    token_address,
+                    self.helius_fetcher,
+                    mid_score=mid_total
+                )
+                authority_penalty = authority_result.get('penalty', 0)
+                mid_total += authority_penalty
+
+                # Hard block if freeze authority is active (can steal your tokens)
+                if 'FREEZE_ACTIVE' in authority_result.get('risk_flags', []):
+                    emergency_blocks.append("Freeze authority active (can freeze your tokens)")
+
+            # ================================================================
+            # PHASE 3.12: DEV SELL DETECTION (5 credits) - Helius
+            # ================================================================
+            dev_sell_penalty = 0
+            dev_sell_result = {}
+
+            if self.helius_fetcher and config.HELIUS_DEV_SELL_DETECTION.get('enabled', False):
+                # Get creator wallet from token data or PumpPortal
+                creator_wallet = token_data.get('creator_wallet', '')
+                if not creator_wallet and self.pump_monitor:
+                    # Try to get from PumpPortal trade data (first buyer is often creator)
+                    milestones = self.pump_monitor.bonding_milestones.get(token_address, {})
+                    if milestones:
+                        earliest = min(milestones.keys())
+                        # Creator wallet often available from PumpPortal data
+                        creator_wallet = token_data.get('deployer', '')
+
+                token_age_minutes = 0
+                if token_created_at:
+                    token_age_minutes = (datetime.utcnow() - token_created_at).total_seconds() / 60
+
+                if creator_wallet:
+                    dev_sell_result = await self.rug_detector.check_dev_sells(
+                        token_address,
+                        creator_wallet,
+                        self.helius_fetcher,
+                        mid_score=mid_total,
+                        token_age_minutes=token_age_minutes
+                    )
+                    dev_sell_penalty = dev_sell_result.get('penalty', 0)
+                    mid_total += dev_sell_penalty
+
+                    if dev_sell_result.get('hard_block'):
+                        emergency_blocks.append(f"Dev dumped {dev_sell_result.get('sell_pct', 0):.0f}% of supply")
+
             # OPT-055: Count emergency flags for smart gating decision
             emergency_flag_count = len(emergency_blocks)
 
@@ -908,6 +962,10 @@ class ConvictionEngine:
                     penalties = []
                     if rugcheck_penalty < 0:
                         penalties.append(f"RugCheck: {rugcheck_penalty}")
+                    if authority_penalty < 0:
+                        penalties.append(f"Authority: {authority_penalty}")
+                    if dev_sell_penalty < 0:
+                        penalties.append(f"DevSell: {dev_sell_penalty}")
                     if bundle_result['penalty'] < 0:
                         penalties.append(f"Bundle: {bundle_result['penalty']}")
                     if holder_result['penalty'] < 0:
@@ -971,6 +1029,8 @@ class ConvictionEngine:
                     'telegram_calls': social_confirmation_score,
                     'social_verification': social_verification_score,
                     'rugcheck_penalty': rugcheck_penalty,
+                    'authority_penalty': authority_penalty,
+                    'dev_sell_penalty': dev_sell_penalty,
                     'holder_penalty': holder_result['penalty'],
                     'kol_bonus': holder_result['kol_bonus'],
                     'ml_bonus': ml_result.get('ml_bonus', 0),
@@ -979,7 +1039,9 @@ class ConvictionEngine:
                 'rug_checks': {
                     'rugcheck_api': rugcheck_result,
                     'bundle': bundle_result,
-                    'holder_concentration': holder_result
+                    'holder_concentration': holder_result,
+                    'authority': authority_result,
+                    'dev_sells': dev_sell_result,
                 },
                 'social_data': social_data,
                 'twitter_data': twitter_data,

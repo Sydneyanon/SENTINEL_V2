@@ -495,6 +495,27 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(start_pumpportal_task())
         logger.info("✅ PumpPortal monitor task created")
     
+    # Register Helius Pump.fun program webhook (for organic discovery)
+    if config.HELIUS_PUMP_WEBHOOK.get('enabled', False) and config.HELIUS_PUMP_WEBHOOK.get('auto_register', False):
+        logger.info("🔗 Registering Helius Pump.fun program webhook...")
+        try:
+            # Build webhook URL from Railway public domain
+            railway_url = os.getenv('RAILWAY_PUBLIC_DOMAIN', '')
+            if railway_url:
+                if not railway_url.startswith('http'):
+                    railway_url = f"https://{railway_url}"
+                pump_webhook_url = f"{railway_url}{config.HELIUS_PUMP_WEBHOOK['endpoint_path']}"
+                webhook_id = await helius_fetcher.ensure_pump_webhook(pump_webhook_url)
+                if webhook_id:
+                    logger.info(f"✅ Pump.fun webhook active: {webhook_id}")
+                else:
+                    logger.warning("⚠️ Failed to register Pump.fun webhook - organic discovery via PumpPortal WS only")
+            else:
+                logger.warning("⚠️ RAILWAY_PUBLIC_DOMAIN not set - skipping Helius webhook registration")
+                logger.info("   Pump.fun monitoring via PumpPortal WebSocket only")
+        except Exception as e:
+            logger.error(f"❌ Pump webhook registration failed: {e}")
+
     # Start holder polling task (NEW!)
     logger.info("🔄 Starting token polling task...")
     asyncio.create_task(smart_polling_task())
@@ -690,6 +711,129 @@ async def smart_wallet_webhook(request: Request):
 
     except Exception as e:
         logger.error(f"❌ Error processing smart wallet webhook: {e}")
+        return {"status": "error", "message": str(e)}
+
+
+@app.post("/webhook/pump-program")
+async def pump_program_webhook(request: Request):
+    """
+    Helius enhanced webhook for Pump.fun program events.
+    Receives all program transactions with sub-second latency.
+
+    Event flow:
+    1. Helius detects transaction on Pump.fun program
+    2. Sends enhanced (parsed) transaction data here
+    3. We extract token mint + event type
+    4. For new token creates: add to organic scanner watch list
+    5. For trades on tracked tokens: update real-time data
+
+    This replaces flaky PumpPortal WS for discovery.
+    Cost: ~1 credit per event (very cheap vs polling).
+    """
+    try:
+        data = await request.json()
+
+        if not isinstance(data, list):
+            data = [data]
+
+        for tx in data:
+            tx_type = tx.get('type', '')
+            source = tx.get('source', '')
+            fee_payer = tx.get('feePayer', '')
+
+            # Extract token mint from the transaction
+            token_transfers = tx.get('tokenTransfers', [])
+            account_data = tx.get('accountData', [])
+            instructions = tx.get('instructions', [])
+
+            token_address = None
+
+            # Method 1: From token transfers
+            for transfer in token_transfers:
+                mint = transfer.get('mint', '')
+                if mint and mint not in {
+                    'So11111111111111111111111111111111111111112',
+                    'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
+                }:
+                    token_address = mint
+                    break
+
+            # Method 2: From instructions (for token creation events)
+            if not token_address:
+                for ix in instructions:
+                    for inner_ix in ix.get('innerInstructions', []):
+                        for inner in inner_ix if isinstance(inner_ix, list) else [inner_ix]:
+                            accounts = inner.get('accounts', []) if isinstance(inner, dict) else []
+                            # Pump.fun create instruction has mint as first account
+                            if len(accounts) >= 2:
+                                potential_mint = accounts[0]
+                                if len(potential_mint) > 30:  # Looks like a pubkey
+                                    token_address = potential_mint
+                                    break
+
+            if not token_address:
+                continue
+
+            # Route event based on type
+            if active_tracker and active_tracker.is_tracked(token_address):
+                # Already tracked token - update with Helius data (more accurate)
+                await active_tracker.update_token_trade(token_address, tx)
+            elif pumpportal_monitor and not active_tracker.is_tracked(token_address):
+                # New token from Pump.fun program - feed to organic scanner
+                # Extract basic info for the scanner
+                bonding_pct = 0  # Will be calculated by scanner from trade data
+
+                # If we have trade stats already, the organic scanner will evaluate
+                # Otherwise, just record the trade for tracking
+                if token_address not in pumpportal_monitor.trade_stats:
+                    pumpportal_monitor.trade_stats[token_address] = {
+                        'buys': 0, 'sells': 0, 'blocks': {}
+                    }
+
+                # Determine if this is a buy or sell from token transfers
+                for transfer in token_transfers:
+                    if transfer.get('mint') == token_address:
+                        to_account = transfer.get('toUserAccount', '')
+                        from_account = transfer.get('fromUserAccount', '')
+                        token_amount = float(transfer.get('tokenAmount', 0))
+
+                        if to_account == fee_payer:
+                            # Buy
+                            pumpportal_monitor.trade_stats[token_address]['buys'] += 1
+                            # Track unique buyer
+                            if token_address not in pumpportal_monitor.unique_buyers:
+                                pumpportal_monitor.unique_buyers[token_address] = set()
+                                pumpportal_monitor.buyer_tracking_start[token_address] = datetime.now()
+                            pumpportal_monitor.unique_buyers[token_address].add(fee_payer)
+
+                            # Sync to active_tracker
+                            if active_tracker:
+                                if token_address not in active_tracker.unique_buyers:
+                                    active_tracker.unique_buyers[token_address] = set()
+                                active_tracker.unique_buyers[token_address].add(fee_payer)
+
+                        elif from_account == fee_payer:
+                            # Sell
+                            pumpportal_monitor.trade_stats[token_address]['sells'] += 1
+
+                        # Track SOL volume for rolling window analysis
+                        native_transfers = tx.get('nativeTransfers', [])
+                        for nt in native_transfers:
+                            if nt.get('fromUserAccount') == fee_payer:
+                                sol_amount = float(nt.get('amount', 0)) / 1e9  # lamports to SOL
+                                if sol_amount > 0 and token_address in pumpportal_monitor.sol_volume_history:
+                                    pumpportal_monitor.sol_volume_history[token_address].append(
+                                        (datetime.now(), sol_amount)
+                                    )
+                                elif sol_amount > 0:
+                                    pumpportal_monitor.sol_volume_history[token_address] = [
+                                        (datetime.now(), sol_amount)
+                                    ]
+
+        return {"status": "success", "processed": len(data)}
+
+    except Exception as e:
+        logger.error(f"❌ Error processing pump-program webhook: {e}")
         return {"status": "error", "message": str(e)}
 
 

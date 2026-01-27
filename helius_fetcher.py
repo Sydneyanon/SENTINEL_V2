@@ -906,3 +906,371 @@ class HeliusDataFetcher:
             logger.warning(f"   ⚠️ No price data available from any source")
 
         return token_data
+
+    # ================================================================
+    # HELIUS WEBHOOK MANAGEMENT (Pump.fun Program Monitoring)
+    # ================================================================
+
+    async def register_pump_program_webhook(self, webhook_url: str) -> Optional[Dict]:
+        """
+        Register a Helius enhanced webhook for the Pump.fun program.
+        Catches all program events (token creation, trades, graduations).
+
+        Args:
+            webhook_url: Full URL of our endpoint (e.g. https://app.railway.app/webhook/pump-program)
+
+        Returns:
+            Dict with webhook_id on success, None on failure
+        """
+        try:
+            api_url = f"https://api.helius.xyz/v0/webhooks?api-key={self.api_key}"
+            webhook_cfg = config.HELIUS_PUMP_WEBHOOK
+
+            payload = {
+                "webhookURL": webhook_url,
+                "transactionTypes": webhook_cfg.get('transaction_types', ['ANY']),
+                "accountAddresses": [webhook_cfg['program_id']],
+                "webhookType": webhook_cfg.get('webhook_type', 'enhanced'),
+                "txnStatus": "success",
+            }
+
+            async with aiohttp.ClientSession() as session:
+                async with session.post(api_url, json=payload, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+                    if resp.status == 200:
+                        result = await resp.json()
+                        webhook_id = result.get('webhookID', 'unknown')
+                        logger.info(f"✅ Registered Helius Pump.fun webhook: {webhook_id}")
+                        logger.info(f"   URL: {webhook_url}")
+                        return {'webhook_id': webhook_id, 'url': webhook_url}
+                    else:
+                        error_text = await resp.text()
+                        logger.error(f"❌ Failed to register webhook (HTTP {resp.status}): {error_text}")
+                        return None
+
+        except Exception as e:
+            logger.error(f"❌ Error registering Pump.fun webhook: {e}")
+            return None
+
+    async def get_webhooks(self) -> List[Dict]:
+        """List all registered Helius webhooks (for deduplication on startup)"""
+        try:
+            api_url = f"https://api.helius.xyz/v0/webhooks?api-key={self.api_key}"
+            async with aiohttp.ClientSession() as session:
+                async with session.get(api_url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                    if resp.status == 200:
+                        return await resp.json()
+                    return []
+        except Exception as e:
+            logger.error(f"❌ Error listing webhooks: {e}")
+            return []
+
+    async def delete_webhook(self, webhook_id: str) -> bool:
+        """Delete a Helius webhook by ID"""
+        try:
+            api_url = f"https://api.helius.xyz/v0/webhooks/{webhook_id}?api-key={self.api_key}"
+            async with aiohttp.ClientSession() as session:
+                async with session.delete(api_url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                    if resp.status == 200:
+                        logger.info(f"✅ Deleted webhook: {webhook_id}")
+                        return True
+                    logger.warning(f"⚠️ Failed to delete webhook {webhook_id}: HTTP {resp.status}")
+                    return False
+        except Exception as e:
+            logger.error(f"❌ Error deleting webhook: {e}")
+            return False
+
+    async def ensure_pump_webhook(self, webhook_url: str) -> Optional[str]:
+        """
+        Ensure a Pump.fun program webhook is registered (idempotent).
+        Checks existing webhooks to avoid duplicates, re-registers if URL changed.
+
+        Returns webhook_id or None
+        """
+        try:
+            existing = await self.get_webhooks()
+            program_id = config.HELIUS_PUMP_WEBHOOK['program_id']
+
+            for wh in existing:
+                if webhook_url in wh.get('webhookURL', ''):
+                    webhook_id = wh.get('webhookID', 'unknown')
+                    logger.info(f"✅ Pump.fun webhook already registered: {webhook_id}")
+                    return webhook_id
+
+                account_addresses = wh.get('accountAddresses', [])
+                if program_id in account_addresses:
+                    old_url = wh.get('webhookURL', '')
+                    if old_url != webhook_url:
+                        webhook_id = wh.get('webhookID')
+                        logger.info(f"🔄 Found existing pump webhook with different URL, re-registering")
+                        await self.delete_webhook(webhook_id)
+                    else:
+                        return wh.get('webhookID', 'unknown')
+
+            result = await self.register_pump_program_webhook(webhook_url)
+            return result.get('webhook_id') if result else None
+
+        except Exception as e:
+            logger.error(f"❌ Error ensuring pump webhook: {e}")
+            return None
+
+    # ================================================================
+    # MINT/FREEZE AUTHORITY CHECK (Rug Protection)
+    # ================================================================
+
+    async def check_token_authority(self, token_address: str) -> Dict:
+        """
+        Check if a token's mint and freeze authorities are revoked.
+
+        Active mint authority = can mint infinite tokens (rug risk).
+        Active freeze authority = can freeze your tokens (rug risk).
+        Pump.fun tokens should have mint authority revoked after creation.
+
+        Cost: ~1 Helius credit (getAccountInfo with jsonParsed)
+
+        Returns:
+            Dict with mint_revoked, freeze_revoked, penalty, risk_flags
+        """
+        try:
+            payload = {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "getAccountInfo",
+                "params": [
+                    token_address,
+                    {"encoding": "jsonParsed"}
+                ]
+            }
+
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    self.rpc_url, json=payload,
+                    timeout=aiohttp.ClientTimeout(total=10)
+                ) as resp:
+                    if resp.status != 200:
+                        return {'success': False, 'error': f'HTTP {resp.status}'}
+
+                    data = await resp.json()
+                    value = data.get('result', {}).get('value')
+
+                    if not value:
+                        return {'success': False, 'error': 'Token account not found'}
+
+                    parsed = value.get('data', {}).get('parsed', {})
+                    info = parsed.get('info', {})
+
+                    mint_authority = info.get('mintAuthority')
+                    freeze_authority = info.get('freezeAuthority')
+
+                    mint_revoked = mint_authority is None
+                    freeze_revoked = freeze_authority is None
+
+                    risk_flags = []
+                    penalty = 0
+                    auth_cfg = config.HELIUS_AUTHORITY_CHECK
+
+                    if not mint_revoked and auth_cfg.get('check_mint_authority', True):
+                        risk_flags.append('MINT_ACTIVE')
+                        penalty += auth_cfg.get('mint_active_penalty', -15)
+
+                    if not freeze_revoked and auth_cfg.get('check_freeze_authority', True):
+                        risk_flags.append('FREEZE_ACTIVE')
+                        penalty += auth_cfg.get('freeze_active_penalty', -20)
+
+                    return {
+                        'success': True,
+                        'mint_authority': mint_authority,
+                        'freeze_authority': freeze_authority,
+                        'mint_revoked': mint_revoked,
+                        'freeze_revoked': freeze_revoked,
+                        'risk_flags': risk_flags,
+                        'penalty': penalty,
+                    }
+
+        except Exception as e:
+            logger.error(f"❌ Error checking token authority: {e}")
+            return {'success': False, 'error': str(e)}
+
+    # ================================================================
+    # DEV SELL DETECTION (Creator Wallet Monitoring)
+    # ================================================================
+
+    async def check_creator_sells(self, creator_wallet: str, token_address: str, limit: int = 50) -> Dict:
+        """
+        Check if a token's creator wallet has been selling tokens.
+        The #1 rug killer: early dev dumps happen before graduation.
+
+        Uses Helius parsed transaction API for accurate sell detection.
+
+        Cost: ~5 Helius credits per call
+
+        Args:
+            creator_wallet: Creator/deployer wallet address
+            token_address: Token mint address
+            limit: Max signatures to check
+
+        Returns:
+            Dict with sell_detected, sell_pct, penalty, etc.
+        """
+        try:
+            # Get recent tx signatures for creator wallet
+            sig_payload = {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "getSignaturesForAddress",
+                "params": [
+                    creator_wallet,
+                    {"limit": limit, "commitment": "confirmed"}
+                ]
+            }
+
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    self.rpc_url, json=sig_payload,
+                    timeout=aiohttp.ClientTimeout(total=15)
+                ) as resp:
+                    if resp.status != 200:
+                        return {'success': False, 'error': f'HTTP {resp.status}'}
+                    data = await resp.json()
+                    signatures = data.get('result', [])
+
+            if not signatures:
+                return {'success': True, 'sell_detected': False, 'signatures_checked': 0}
+
+            sig_list = [s['signature'] for s in signatures[:limit] if s.get('err') is None]
+            if not sig_list:
+                return {'success': True, 'sell_detected': False, 'signatures_checked': 0}
+
+            # Parse transactions using Helius enhanced API
+            parse_url = f"https://api.helius.xyz/v0/transactions/?api-key={self.api_key}"
+
+            total_sold = 0
+            sell_count = 0
+
+            # Parse in batches of 20
+            for i in range(0, len(sig_list), 20):
+                batch = sig_list[i:i+20]
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(
+                        parse_url, json={"transactions": batch},
+                        timeout=aiohttp.ClientTimeout(total=15)
+                    ) as resp:
+                        if resp.status != 200:
+                            continue
+                        parsed_txs = await resp.json()
+
+                for tx in parsed_txs:
+                    for transfer in tx.get('tokenTransfers', []):
+                        if transfer.get('mint') != token_address:
+                            continue
+                        from_account = transfer.get('fromUserAccount', '')
+                        token_amount = float(transfer.get('tokenAmount', 0))
+                        if from_account == creator_wallet and token_amount > 0:
+                            total_sold += token_amount
+                            sell_count += 1
+
+            sell_pct = (total_sold / TOTAL_SUPPLY) * 100 if total_sold > 0 else 0
+
+            # Calculate penalty based on config
+            dev_cfg = config.HELIUS_DEV_SELL_DETECTION
+            penalty = 0
+            hard_block = False
+
+            if sell_pct >= dev_cfg.get('hard_block_pct', 50):
+                hard_block = True
+                penalty = -999  # Force emergency stop
+            elif sell_pct >= dev_cfg.get('sell_threshold_pct', 20):
+                penalty = dev_cfg.get('penalty_points', -30)
+
+            return {
+                'success': True,
+                'sell_detected': sell_count > 0,
+                'sell_count': sell_count,
+                'total_sold': total_sold,
+                'sell_pct': sell_pct,
+                'penalty': penalty,
+                'hard_block': hard_block,
+                'signatures_checked': len(sig_list),
+            }
+
+        except Exception as e:
+            logger.error(f"❌ Error checking creator sells: {e}")
+            return {'success': False, 'error': str(e)}
+
+    # ================================================================
+    # PARSED TX HISTORY (Velocity & Momentum Enrichment)
+    # ================================================================
+
+    async def get_recent_token_transactions(self, token_address: str, limit: int = 100) -> Dict:
+        """
+        Get recent parsed transactions for a token.
+        More accurate than PumpPortal for buyer velocity and bundle detection.
+
+        Cost: ~5 credits per call - gate behind mid_score >= 50
+
+        Returns:
+            Dict with buy_count, sell_count, unique_buyers, large_sells, etc.
+        """
+        try:
+            parse_url = f"https://api.helius.xyz/v0/addresses/{token_address}/transactions?api-key={self.api_key}&limit={limit}"
+
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    parse_url, timeout=aiohttp.ClientTimeout(total=15)
+                ) as resp:
+                    if resp.status != 200:
+                        return {'success': False, 'error': f'HTTP {resp.status}'}
+                    transactions = await resp.json()
+
+            if not transactions:
+                return {'success': True, 'buy_count': 0, 'sell_count': 0}
+
+            buy_count = 0
+            sell_count = 0
+            unique_buyers = set()
+            unique_sellers = set()
+            large_sells = []
+            total_buy_volume = 0
+            total_sell_volume = 0
+
+            for tx in transactions:
+                for transfer in tx.get('tokenTransfers', []):
+                    if transfer.get('mint') != token_address:
+                        continue
+
+                    from_account = transfer.get('fromUserAccount', '')
+                    to_account = transfer.get('toUserAccount', '')
+                    token_amount = float(transfer.get('tokenAmount', 0))
+                    fee_payer = tx.get('feePayer', '')
+
+                    if to_account == fee_payer:
+                        buy_count += 1
+                        unique_buyers.add(fee_payer)
+                        total_buy_volume += token_amount
+                    elif from_account == fee_payer:
+                        sell_count += 1
+                        unique_sellers.add(fee_payer)
+                        total_sell_volume += token_amount
+                        if token_amount > TOTAL_SUPPLY * 0.01:
+                            large_sells.append({
+                                'seller': fee_payer[:8],
+                                'pct_supply': (token_amount / TOTAL_SUPPLY) * 100,
+                            })
+
+            total_txs = buy_count + sell_count
+            buy_ratio = buy_count / total_txs if total_txs > 0 else 0
+
+            return {
+                'success': True,
+                'buy_count': buy_count,
+                'sell_count': sell_count,
+                'total_txs': total_txs,
+                'buy_ratio': buy_ratio,
+                'unique_buyers': len(unique_buyers),
+                'unique_sellers': len(unique_sellers),
+                'large_sells': large_sells,
+                'tx_count': len(transactions),
+            }
+
+        except Exception as e:
+            logger.error(f"❌ Error fetching token transactions: {e}")
+            return {'success': False, 'error': str(e)}

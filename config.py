@@ -615,6 +615,58 @@ NARRATIVE_COMBOS = {
 }
 
 # =============================================================================
+# HELIUS ENHANCED FEATURES (Credit-efficient blockchain intelligence)
+# =============================================================================
+
+# Helius Pump.fun Program Webhook (organic discovery backbone)
+# Monitors all Pump.fun program events for sub-second token creation detection
+# Replaces flaky PumpPortal WS for initial discovery, PumpPortal still used for trades
+HELIUS_PUMP_WEBHOOK = {
+    'enabled': True,
+    'program_id': '6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P',  # Pump.fun program
+    'webhook_type': 'enhanced',                # Enhanced = parsed data (costs credits)
+    'transaction_types': ['ANY'],              # Catch all pump.fun txs (filter in handler)
+    'endpoint_path': '/webhook/pump-program',  # Our FastAPI endpoint
+    'auto_register': True,                     # Register webhook on startup
+}
+
+# Dev Sell Detection via Helius (rug prevention)
+# Monitor creator wallet for large sells pre-graduation
+# This is the #1 rug killer - early dev dumps happen before graduation
+HELIUS_DEV_SELL_DETECTION = {
+    'enabled': True,
+    'sell_threshold_pct': 20,      # Flag if dev sells >20% of supply
+    'early_window_minutes': 30,    # Only check in first 30 min
+    'penalty_points': -30,         # Heavy penalty for dev selling
+    'hard_block_pct': 50,          # Block signal if dev sold >50% supply
+    'gate_mid_score': 40,          # Only check if mid_score >= 40 (save credits)
+    'credit_cost': 5,              # ~5 credits per getSignaturesForAddress call
+}
+
+# Mint/Freeze Authority Check (rug protection)
+# Verify if mint authority is revoked (safe) or still active (risky)
+# Pump.fun tokens should have mint authority revoked after creation
+HELIUS_AUTHORITY_CHECK = {
+    'enabled': True,
+    'check_mint_authority': True,   # Check if mint authority is revoked
+    'check_freeze_authority': True, # Check if freeze authority is revoked
+    'mint_active_penalty': -15,     # Penalty if mint authority still active
+    'freeze_active_penalty': -20,   # Penalty if freeze authority still active (can freeze your tokens)
+    'gate_mid_score': 30,           # Only check if mid_score >= 30
+    'credit_cost': 1,               # ~1 credit per getAccountInfo call
+}
+
+# Parsed Transaction History (velocity & momentum enrichment)
+# Use Helius getSignaturesForAddress for more accurate buyer velocity
+# than PumpPortal trade events (Helius parses better, catches same-block bundles)
+HELIUS_TX_HISTORY = {
+    'enabled': True,
+    'gate_mid_score': 50,          # Only fetch if mid_score >= 50 (expensive)
+    'max_signatures': 100,         # Fetch last 100 txs
+    'credit_cost': 5,              # ~5 credits per call
+}
+
+# =============================================================================
 # CREDIT USAGE ESTIMATES (for monitoring)
 # =============================================================================
 
@@ -622,15 +674,20 @@ CREDIT_COSTS = {
     'webhook': 1,
     'holder_check': 10,
     'account_info': 1,
-    'metadata': 10
+    'metadata': 10,
+    'tx_history': 5,
+    'pump_webhook_event': 1,       # Enhanced webhook events
 }
 
 # Expected daily usage with optimizations
 EXPECTED_DAILY_CREDITS = {
     'webhooks': 20000,      # 20 KOL wallets × ~1000 txs each
+    'pump_program': 5000,   # Pump.fun program events (~500-1000/day filtered)
     'holder_checks': 3000,  # ~300 post-grad checks × 10 credits
+    'authority_checks': 500,  # ~500 tokens × 1 credit each
+    'dev_sell_checks': 1000,  # ~200 tokens × 5 credits each
     'other': 2000,          # Misc RPC calls
-    'total': 25000          # ~750k/month (well under 1M free tier)
+    'total': 31500          # ~945k/month (under 1M free tier)
 }
 
 # =============================================================================
