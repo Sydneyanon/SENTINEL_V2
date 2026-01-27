@@ -972,13 +972,13 @@ class AdminBot:
                 return
 
             # On-chain-first scoring deployed ~2026-01-27 06:17 UTC (PR #131 merge)
-            TRANSITION = '2026-01-27 06:17:00+00'
+            TRANSITION = datetime(2026, 1, 27, 6, 17, 0)
 
             async with self.database.pool.acquire() as conn:
                 # --- ERA COMPARISON ---
                 era_stats = await conn.fetch("""
                     SELECT
-                        CASE WHEN created_at < $1::timestamptz THEN 'KOL' ELSE 'ON-CHAIN' END as era,
+                        CASE WHEN created_at < $1 THEN 'KOL' ELSE 'ON-CHAIN' END as era,
                         COUNT(*) as total,
                         SUM(CASE WHEN outcome IN ('2x','5x','10x','50x','100x') THEN 1 ELSE 0 END) as wins,
                         SUM(CASE WHEN outcome = 'rug' THEN 1 ELSE 0 END) as rugs,
