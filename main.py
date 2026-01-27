@@ -748,8 +748,14 @@ async def smart_wallet_webhook(request: Request):
 async def pump_program_webhook(request: Request):
     """
     Helius enhanced webhook for Pump.fun program events.
-    Receives all program transactions with sub-second latency.
+    DISABLED: Returns immediately to save CPU. Delete webhook from Helius dashboard
+    or run: python tools/kill_webhooks.py
+    """
+    # Early exit when disabled - webhook still registered on Helius side
+    if not config.HELIUS_PUMP_WEBHOOK.get('enabled', False):
+        return {"status": "disabled"}
 
+    """
     Event flow:
     1. Helius detects transaction on Pump.fun program
     2. Sends enhanced (parsed) transaction data here
