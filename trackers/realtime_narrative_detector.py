@@ -103,7 +103,7 @@ class RealtimeNarrativeDetector:
             logger.info("🔄 Initializing BERTopic model...")
             self.topic_model = BERTopic(
                 embedding_model=self.embedder,
-                min_topic_size=3,  # Small for emerging topics (lowered from 5)
+                min_topic_size=2,  # Minimum for small article sets
                 nr_topics="auto",  # Auto-reduce similar topics
                 verbose=False  # Reduce log spam
             )
@@ -116,7 +116,6 @@ class RealtimeNarrativeDetector:
         Returns:
             List of article texts (title + summary)
         """
-        new_articles = []
         cutoff = datetime.utcnow() - timedelta(hours=24)  # Only last 24h for relevance
 
         async def _fetch_single_feed(url: str) -> List[str]:
@@ -130,15 +129,18 @@ class RealtimeNarrativeDetector:
                 )
 
                 for entry in feed.entries:
+                    # Get publish date - be lenient, don't skip dateless articles
                     pub_date = entry.get("published_parsed") or entry.get("updated_parsed")
-                    if not pub_date:
-                        continue
+                    if pub_date:
+                        try:
+                            pub_dt = datetime(*pub_date[:6])
+                            if pub_dt <= cutoff:
+                                continue
+                        except (TypeError, ValueError):
+                            pass  # Bad date format, include article anyway
 
-                    pub_dt = datetime(*pub_date[:6])
-
-                    if pub_dt <= cutoff:
-                        continue
-                    if entry.link in self.article_cache:
+                    link = getattr(entry, 'link', None) or entry.get('id', '')
+                    if link and link in self.article_cache:
                         continue
 
                     title = entry.get("title", "")
@@ -154,7 +156,8 @@ class RealtimeNarrativeDetector:
                         continue
 
                     articles.append(text)
-                    self.article_cache[entry.link] = pub_dt
+                    if link:
+                        self.article_cache[link] = datetime.utcnow()
 
             except asyncio.TimeoutError:
                 logger.warning(f"   ⏰ RSS timeout (15s): {url}")
@@ -169,6 +172,7 @@ class RealtimeNarrativeDetector:
             return_exceptions=True
         )
 
+        new_articles = []
         feeds_ok = 0
         for i, result in enumerate(results):
             if isinstance(result, Exception):
@@ -178,7 +182,7 @@ class RealtimeNarrativeDetector:
                 if result:
                     feeds_ok += 1
 
-        logger.info(f"   📰 Fetched {len(new_articles)} articles from {feeds_ok}/{len(RSS_SOURCES)} feeds")
+        logger.info(f"   📰 Fetched {len(new_articles)} articles from {feeds_ok}/{len(RSS_SOURCES)} working feeds")
         return new_articles
 
     async def update_narratives(self) -> Optional[Dict]:
@@ -200,8 +204,11 @@ class RealtimeNarrativeDetector:
             # Fetch latest articles (concurrent, 15s timeout per feed)
             articles = await self.fetch_rss_feeds()
 
-            if len(articles) < 5:
-                logger.warning(f"   ⚠️  Too few articles ({len(articles)}), skipping BERTopic (need >= 5)")
+            if len(articles) < 3:
+                if self.current_topics is None:
+                    logger.warning(f"   ⚠️ FIRST NARRATIVE UPDATE: Only {len(articles)} articles found (need 3+). RSS feeds may be failing or empty.")
+                else:
+                    logger.warning(f"   ⚠️ Too few articles ({len(articles)}), keeping previous narratives")
                 return None
 
             logger.info(f"   🔄 Running BERTopic on {len(articles)} articles...")
