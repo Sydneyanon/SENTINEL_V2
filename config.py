@@ -73,8 +73,8 @@ DISABLE_POLLING_BELOW_THRESHOLD = True
 # - Added buyer velocity scoring (0-18 pts) and bonding curve speed (0-15 pts)
 # - Unique buyers (0-10), volume (0-12), narrative (0-7 RSS+BERTopic), telegram (0-5)
 # - Lowered post-grad threshold from 75 to 65 (no KOL boost available)
-MIN_CONVICTION_SCORE = 45  # Pre-grad threshold (lowered from 60 — trial to catch mid-score runners)
-POST_GRAD_THRESHOLD = 65   # Lowered from 75 - no KOL boost, pure on-chain scoring
+MIN_CONVICTION_SCORE = 30  # Pre-grad threshold (adjusted for 100-point budget, was 45)
+POST_GRAD_THRESHOLD = 45   # Post-grad threshold (adjusted for 100-point budget, was 65)
 
 # Base score threshold for distribution checks
 # Only check distribution if base score >= this value
@@ -182,8 +182,8 @@ EARLY_PUMP_ALERT = {
     'max_age_minutes': 10,            # Within 10 minutes of creation
     'min_unique_buyers': 40,          # At least 40 unique buyers
     'min_bonding_pct': 40,            # At least 40% bonding
-    'min_score': 30,                  # Must have at least score 30
-    'max_score': 45,                  # Only triggers below normal threshold (45)
+    'min_score': 20,                  # Must have at least score 20 (100-point budget)
+    'max_score': 30,                  # Only triggers below normal threshold (30)
 }
 
 # =============================================================================
@@ -337,7 +337,7 @@ RUG_DETECTION = {
         'check': True,
         'credit_cost': 10,           # Helius credits per check
         'thresholds': {
-            'check_pre_grad': 65,    # Only check if base score >= 65 (pre-grad)
+            'check_pre_grad': 40,    # Only check if base score >= 40 (100-point budget)
             'check_post_grad': 0,    # ALWAYS check graduated tokens (mandatory rug protection)
         },
         'penalties': {
@@ -409,7 +409,7 @@ TIMING_RULES = {
         'min_mcap_pre_grad': 12000,   # Pre-grad: skip if MCAP < $12K (lowered from $15K)
         'min_age_minutes_pre_grad': 12,  # Pre-grad: skip if age < 12 min (default)
         'min_age_minutes_fast_track': 5,  # Fast-track: high conviction OR high velocity → only 5 min
-        'fast_track_min_score': 75,   # Score threshold to qualify for fast-track maturity
+        'fast_track_min_score': 55,   # Score threshold for fast-track maturity (100-point budget)
         'fast_track_min_velocity_score': 15,  # Buyer velocity score threshold (25+ buyers/5min = "fast")
         'min_age_minutes_ultra_fast': 2,  # Ultra fast-track: explosive velocity + bonding → 2 min
         'ultra_fast_min_velocity_score': 22,  # Ultra: need "very_fast" velocity (50+ buyers/5min)
@@ -708,7 +708,7 @@ HELIUS_DEV_SELL_DETECTION = {
     'early_window_minutes': 30,    # Only check in first 30 min
     'penalty_points': -30,         # Heavy penalty for dev selling
     'hard_block_pct': 50,          # Block signal if dev sold >50% supply
-    'gate_mid_score': 40,          # Only check if mid_score >= 40 (save credits)
+    'gate_mid_score': 25,          # Only check if mid_score >= 25 (100-point budget)
     'credit_cost': 5,              # ~5 credits per getSignaturesForAddress call
 }
 
@@ -730,7 +730,7 @@ HELIUS_AUTHORITY_CHECK = {
 # than PumpPortal trade events (Helius parses better, catches same-block bundles)
 HELIUS_TX_HISTORY = {
     'enabled': True,
-    'gate_mid_score': 50,          # Only fetch if mid_score >= 50 (expensive)
+    'gate_mid_score': 35,          # Only fetch if mid_score >= 35 (100-point budget)
     'max_signatures': 100,         # Fetch last 100 txs
     'credit_cost': 5,              # ~5 credits per call
 }
