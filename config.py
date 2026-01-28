@@ -584,6 +584,7 @@ LOG_FILE = "prometheus.log"
 # =============================================================================
 
 ENABLE_NARRATIVES = True    # GROK: Enabled for early detection (+0-25 pts)
+ENABLE_STATIC_NARRATIVES = False  # Static keyword matching - DISABLED (too noisy, not useful)
 ENABLE_REALTIME_NARRATIVES = True  # RSS + BERTopic for emerging narratives (no API cost)
 NARRATIVE_UPDATE_INTERVAL = 900  # Update narratives every 15 minutes (900s)
 ENABLE_PERFORMANCE_TRACKING = True
