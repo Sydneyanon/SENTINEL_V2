@@ -67,6 +67,12 @@ class AdminBot:
             self.app.add_handler(CommandHandler("winrate", self._cmd_winrate, filters=admin_filter))
             self.app.add_handler(CommandHandler("testbanner", self._cmd_testbanner, filters=admin_filter))
 
+            # Handle media uploads from admin (for banner file_id capture)
+            self.app.add_handler(MessageHandler(
+                admin_filter & (filters.VIDEO | filters.ANIMATION | filters.Document.VIDEO),
+                self._handle_media_upload
+            ))
+
             # Block all other users (unauthorized access attempts)
             self.app.add_handler(MessageHandler(~admin_filter, self._handle_unauthorized))
 
@@ -1182,3 +1188,38 @@ class AdminBot:
             import traceback
             logger.error(traceback.format_exc())
             await self._send_response(update, context, f"❌ Error: {str(e)}")
+
+    async def _handle_media_upload(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Capture file_id when admin sends a video/animation (for banner setup)"""
+        try:
+            msg = update.message
+            file_id = None
+            media_type = None
+
+            if msg.animation:
+                file_id = msg.animation.file_id
+                media_type = "animation"
+            elif msg.video:
+                file_id = msg.video.file_id
+                media_type = "video"
+            elif msg.document and msg.document.mime_type and msg.document.mime_type.startswith('video/'):
+                file_id = msg.document.file_id
+                media_type = "document (video)"
+
+            if not file_id:
+                return
+
+            logger.info(f"🎬 Admin uploaded {media_type}, file_id: {file_id}")
+
+            await msg.reply_text(
+                f"🎬 <b>Banner File ID Captured!</b>\n\n"
+                f"Type: <code>{media_type}</code>\n"
+                f"File ID:\n<code>{file_id}</code>\n\n"
+                f"Set this in Railway env vars:\n"
+                f"<code>TELEGRAM_BANNER_FILE_ID={file_id}</code>\n\n"
+                f"Then redeploy, or use /testbanner to verify.",
+                parse_mode=ParseMode.HTML
+            )
+
+        except Exception as e:
+            logger.error(f"❌ Error handling media upload: {e}")
