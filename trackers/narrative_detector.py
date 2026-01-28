@@ -47,7 +47,7 @@ class NarrativeDetector:
             # Start background loop
             import asyncio
             asyncio.create_task(self.realtime_detector.narrative_loop())
-            logger.info(f"   ✅ Real-time narrative loop started")
+            logger.info(f"   ✅ Real-time narrative loop started (RSS + BERTopic)")
         elif self.use_realtime and not REALTIME_AVAILABLE:
             logger.warning(f"   ⚠️  Real-time narratives enabled but dependencies missing!")
             logger.warning(f"      Install: pip install feedparser bertopic sentence-transformers")

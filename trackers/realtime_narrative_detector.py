@@ -15,7 +15,6 @@ import asyncio
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 from loguru import logger
-from tenacity import retry, stop_after_attempt, wait_exponential
 import feedparser
 from bertopic import BERTopic
 from sentence_transformers import SentenceTransformer
@@ -99,68 +98,84 @@ class RealtimeNarrativeDetector:
             logger.info("🔄 Initializing BERTopic model...")
             self.topic_model = BERTopic(
                 embedding_model=self.embedder,
-                min_topic_size=3,  # Small for emerging topics (lowered from 5)
+                min_topic_size=2,  # Minimum for small article sets
                 nr_topics="auto",  # Auto-reduce similar topics
                 verbose=False  # Reduce log spam
             )
             logger.info("✅ BERTopic model initialized")
 
-    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
     async def fetch_rss_feeds(self) -> List[str]:
         """
-        Fetch articles from all RSS sources
+        Fetch articles from all RSS sources concurrently
 
         Returns:
             List of article texts (title + summary)
         """
-        new_articles = []
         cutoff = datetime.utcnow() - timedelta(hours=24)  # Only last 24h for relevance
 
-        for url in RSS_SOURCES:
+        async def fetch_single_feed(url: str) -> List[str]:
+            """Fetch a single RSS feed with timeout"""
+            articles = []
             try:
-                logger.debug(f"   📡 Fetching RSS: {url}")
-
-                # feedparser is blocking, run in executor
                 loop = asyncio.get_event_loop()
-                feed = await loop.run_in_executor(None, feedparser.parse, url)
+                feed = await asyncio.wait_for(
+                    loop.run_in_executor(None, feedparser.parse, url),
+                    timeout=15  # 15 second timeout per feed
+                )
 
                 for entry in feed.entries:
-                    # Get publish date
+                    # Get publish date - be lenient, don't skip dateless articles
                     pub_date = entry.get("published_parsed") or entry.get("updated_parsed")
-                    if not pub_date:
-                        continue
+                    if pub_date:
+                        try:
+                            pub_dt = datetime(*pub_date[:6])
+                            if pub_dt <= cutoff:
+                                continue
+                        except (TypeError, ValueError):
+                            pass  # Bad date format, include article anyway
 
-                    pub_dt = datetime(*pub_date[:6])
-
-                    # Skip old or duplicate articles
-                    if pub_dt <= cutoff:
-                        continue
-                    if entry.link in self.article_cache:
+                    link = getattr(entry, 'link', None) or entry.get('id', '')
+                    if link and link in self.article_cache:
                         continue
 
                     # Extract text (title + summary/content)
                     title = entry.get("title", "")
                     summary = entry.get("summary", "")
 
-                    # Try content if no summary
                     if not summary:
                         content_list = entry.get("content", [])
                         if content_list:
                             summary = content_list[0].get("value", "")
 
                     text = f"{title} {summary}".strip()
-                    if len(text) < 20:  # Skip very short articles
+                    if len(text) < 20:
                         continue
 
-                    new_articles.append(text)
-                    self.article_cache[entry.link] = pub_dt
-                    logger.debug(f"      ✅ New article: {title[:50]}...")
+                    articles.append(text)
+                    if link:
+                        self.article_cache[link] = datetime.utcnow()
 
+                return articles
+
+            except asyncio.TimeoutError:
+                logger.debug(f"   ⏱️  RSS feed timed out: {url}")
+                return []
             except Exception as e:
-                logger.warning(f"   ⚠️  Failed to fetch {url}: {e}")
-                continue
+                logger.debug(f"   ⚠️  RSS feed failed: {url} ({e})")
+                return []
 
-        logger.info(f"   📰 Fetched {len(new_articles)} new articles from {len(RSS_SOURCES)} sources")
+        # Fetch all feeds concurrently
+        logger.info(f"   📡 Fetching {len(RSS_SOURCES)} RSS feeds concurrently...")
+        results = await asyncio.gather(*[fetch_single_feed(url) for url in RSS_SOURCES])
+
+        new_articles = []
+        feeds_ok = 0
+        for result in results:
+            if result:
+                feeds_ok += 1
+                new_articles.extend(result)
+
+        logger.info(f"   📰 Fetched {len(new_articles)} articles from {feeds_ok}/{len(RSS_SOURCES)} working feeds")
         return new_articles
 
     async def update_narratives(self) -> Optional[Dict]:
@@ -177,8 +192,11 @@ class RealtimeNarrativeDetector:
             # Fetch latest articles
             articles = await self.fetch_rss_feeds()
 
-            if len(articles) < 5:
-                logger.warning(f"   ⚠️  Too few articles ({len(articles)}), skipping update")
+            if len(articles) < 3:
+                if self.current_topics is None:
+                    logger.warning(f"   ⚠️ FIRST NARRATIVE UPDATE: Only {len(articles)} articles found (need 3+). RSS feeds may be failing or empty.")
+                else:
+                    logger.warning(f"   ⚠️ Too few articles ({len(articles)}), keeping previous narratives")
                 return None
 
             logger.info(f"   🔄 Running BERTopic on {len(articles)} articles...")
@@ -421,11 +439,14 @@ class RealtimeNarrativeDetector:
         Runs in background as asyncio task
         """
         self.is_running = True
+        self._loop_count = 0
         logger.info(f"🔄 Starting narrative update loop (every {self.update_interval}s)")
+        logger.info(f"   📡 RSS sources configured: {len(RSS_SOURCES)}")
 
         while self.is_running:
             try:
-                logger.info("\n📰 Updating narratives from RSS feeds...")
+                self._loop_count += 1
+                logger.info(f"\n📰 [Narrative Loop #{self._loop_count}] Updating from RSS feeds...")
                 await self.update_narratives()
 
                 # Log trending narratives with momentum
