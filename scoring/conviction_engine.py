@@ -941,21 +941,46 @@ class ConvictionEngine:
                 min_age_min = (maturity_cfg.get('min_age_minutes_pre_grad', 0) if is_pre_grad
                               else maturity_cfg.get('min_age_minutes_post_grad', 0))
 
-                # FAST-TRACK: High conviction tokens get reduced maturity wait
-                fast_track_score = maturity_cfg.get('fast_track_min_score', 75)
-                fast_track_age = maturity_cfg.get('min_age_minutes_fast_track', 5)
-                if is_pre_grad and final_score >= fast_track_score and fast_track_age > 0:
-                    min_age_min = fast_track_age
-                    logger.info(f"   ⚡ FAST-TRACK: Score {final_score} >= {fast_track_score}, maturity reduced to {fast_track_age}m")
+                # HARD BLOCK: No signal before minimum age regardless of score
+                hard_block_age = maturity_cfg.get('hard_block_age_minutes', 5)
+                if token_created_at:
+                    age_minutes = (datetime.utcnow() - token_created_at).total_seconds() / 60
+                    if age_minutes < hard_block_age:
+                        passed = False
+                        maturity_gate_triggered = True
+                        maturity_gate_reason = f"Age {age_minutes:.0f}m < {hard_block_age}m hard minimum (no signal this early)"
+                        if maturity_cfg.get('log_skipped', True):
+                            logger.warning(f"   🚫 MATURITY HARD BLOCK: {maturity_gate_reason}")
+                        # Skip all further maturity checks - hard block overrides everything
 
-                # Check minimum MCAP
-                if min_mcap > 0 and mcap < min_mcap:
-                    passed = False
-                    maturity_gate_triggered = True
-                    maturity_gate_reason = f"MCAP ${mcap:.0f} < ${min_mcap} minimum"
+                # FAST-TRACK: High conviction OR high velocity → reduced maturity wait
+                if not maturity_gate_triggered and is_pre_grad:
+                    fast_track_score = maturity_cfg.get('fast_track_min_score', 75)
+                    fast_track_velocity = maturity_cfg.get('fast_track_min_velocity_score', 15)
+                    fast_track_age = maturity_cfg.get('min_age_minutes_fast_track', 5)
+                    velocity_score = base_scores.get('buyer_velocity', 0)
 
-                # Check minimum age
-                if min_age_min > 0 and token_created_at:
+                    score_qualifies = final_score >= fast_track_score
+                    velocity_qualifies = velocity_score >= fast_track_velocity
+
+                    if (score_qualifies or velocity_qualifies) and fast_track_age > 0:
+                        min_age_min = fast_track_age
+                        reason_parts = []
+                        if score_qualifies:
+                            reason_parts.append(f"score {final_score} >= {fast_track_score}")
+                        if velocity_qualifies:
+                            reason_parts.append(f"velocity {velocity_score} >= {fast_track_velocity}")
+                        logger.info(f"   ⚡ FAST-TRACK: {' + '.join(reason_parts)}, maturity reduced to {fast_track_age}m")
+
+                # Check minimum MCAP (skip if hard block already triggered)
+                if not maturity_gate_triggered:
+                    if min_mcap > 0 and mcap < min_mcap:
+                        passed = False
+                        maturity_gate_triggered = True
+                        maturity_gate_reason = f"MCAP ${mcap:.0f} < ${min_mcap} minimum"
+
+                # Check minimum age (skip if hard block already triggered)
+                if not maturity_gate_triggered and min_age_min > 0 and token_created_at:
                     age_minutes = (datetime.utcnow() - token_created_at).total_seconds() / 60
                     if age_minutes < min_age_min:
                         passed = False
@@ -994,23 +1019,48 @@ class ConvictionEngine:
                                    f"price +{price_change_5m:.0f}%, {unique_buyers} buyers, "
                                    f"{bonding_pct:.0f}% bonding, score {final_score}")
 
-            # DUMP DETECTION: Block signals on tokens that already pumped & dumped
+            # DUMP DETECTION: Dynamic retrace tiers (Grok calibration)
+            # >60% retrace → hard block | 40-60% → score penalty | <40% → no penalty
             dump_detected = False
+            dump_penalty = 0
             dump_reason = ''
             dump_cfg = config.TIMING_RULES.get('dump_detection', {})
-            if passed and dump_cfg.get('enabled', False):
+            if dump_cfg.get('enabled', False):
                 peak_mcap = token_data.get('peak_mcap', 0)
                 min_peak = dump_cfg.get('min_peak_mcap', 30000)
-                max_retrace_pct = dump_cfg.get('max_retrace_pct', 50)
 
                 if peak_mcap >= min_peak and mcap > 0:
                     retrace_pct = ((peak_mcap - mcap) / peak_mcap) * 100
-                    if retrace_pct >= max_retrace_pct:
-                        passed = False
+                    hard_block_pct = dump_cfg.get('hard_block_retrace_pct', 60)
+                    penalty_pct = dump_cfg.get('penalty_retrace_pct', 40)
+                    penalty_min = dump_cfg.get('penalty_min', -20)
+                    penalty_max = dump_cfg.get('penalty_max', -30)
+
+                    if retrace_pct >= hard_block_pct:
+                        # Deep dump (>60%) → hard block
+                        if passed:
+                            passed = False
                         dump_detected = True
-                        dump_reason = f"MCAP ${mcap:.0f} is {retrace_pct:.0f}% below peak ${peak_mcap:.0f} (pump already happened)"
+                        dump_reason = f"HARD BLOCK: MCAP ${mcap:.0f} is {retrace_pct:.0f}% below peak ${peak_mcap:.0f} (deep dump)"
                         if dump_cfg.get('log_skipped', True):
                             logger.warning(f"   🚫 DUMP DETECTED: {dump_reason}")
+                    elif retrace_pct >= penalty_pct:
+                        # Partial retrace (40-60%) → score penalty (scales linearly)
+                        # At 40% retrace → penalty_min (-20), at 60% → penalty_max (-30)
+                        range_pct = hard_block_pct - penalty_pct  # 20
+                        progress = (retrace_pct - penalty_pct) / range_pct  # 0.0 to 1.0
+                        dump_penalty = int(penalty_min + (penalty_max - penalty_min) * progress)
+                        final_score += dump_penalty
+                        dump_reason = f"PENALTY: MCAP ${mcap:.0f} is {retrace_pct:.0f}% below peak ${peak_mcap:.0f} ({dump_penalty} pts)"
+                        logger.warning(f"   ⚠️ DUMP PENALTY: {dump_reason}")
+                        # Re-check if score still passes threshold after penalty
+                        if final_score < threshold and not early_trigger_applied:
+                            passed = False
+                            dump_detected = True
+                    else:
+                        # <40% retrace → no penalty (normal volatility)
+                        if retrace_pct > 10:
+                            logger.debug(f"   📊 Retrace {retrace_pct:.0f}% from peak ${peak_mcap:.0f} (within tolerance)")
 
             logger.info("=" * 60)
             logger.info(f"   🎯 FINAL CONVICTION: {final_score}/100")
@@ -1025,6 +1075,8 @@ class ConvictionEngine:
                 logger.info(f"   🚫 Maturity gate triggered - {maturity_gate_reason}")
             if dump_detected:
                 logger.info(f"   🚫 Dump detected - {dump_reason}")
+            if dump_penalty < 0:
+                logger.info(f"   ⚠️ Dump penalty applied: {dump_penalty} pts")
             logger.info(f"   {'✅ SIGNAL!' if passed else '⏭️  Skip'}")
             logger.info("=" * 60)
 
@@ -1045,6 +1097,8 @@ class ConvictionEngine:
                         logger.warning(f"   🚫 Maturity gate: {maturity_gate_reason}")
                     if dump_detected:
                         logger.warning(f"   🚫 Dump detected: {dump_reason}")
+                    if dump_penalty < 0:
+                        logger.warning(f"   ⚠️ Dump penalty: {dump_penalty} pts (retrace from peak)")
 
                     # Show weakest scoring components (on-chain-first)
                     breakdown_items = [
@@ -1154,6 +1208,7 @@ class ConvictionEngine:
                     'holder_penalty': holder_result['penalty'],
                     'kol_bonus': holder_result['kol_bonus'],
                     'ml_bonus': ml_result.get('ml_bonus', 0),
+                    'dump_penalty': dump_penalty,
                     'total': final_score
                 },
                 'rug_checks': {
@@ -1306,12 +1361,11 @@ class ConvictionEngine:
     
     def _score_price_momentum(self, token_data: Dict) -> int:
         """
-        Score based on price momentum (-10 to +10 points base + multi-timeframe bonus)
-        GROK ENHANCED: More graduated scoring (3/7/10 instead of 0/5/10)
-        DUMP FIX: Negative scores when price is actively falling
+        Score based on price momentum (-25 to +10 points base + multi-timeframe bonus)
+        GROK CALIBRATED: 2-3x stronger downside penalties, phase-aware
 
-        - Pre-grad: Uses 5m price change (-10 to +10 pts)
-        - Post-grad: Uses 5m price change + multi-timeframe bonus (1h/6h/24h, +5 pts each)
+        - Pre-grad: Uses 5m price change (-25 to +10 pts) — dumps are usually fatal
+        - Post-grad: Uses 5m price change (-15 to +10 pts) — post-Raydium volatility is normal
         """
         bonding_pct = token_data.get('bonding_curve_pct', 0)
         is_pre_grad = bonding_pct < 100
@@ -1327,15 +1381,18 @@ class ConvictionEngine:
             base_score = config.MOMENTUM_WEIGHTS.get('moderate', 3)  # 3 pts
         elif price_change_5m >= 0:  # Flat/slightly positive
             base_score = 0
-        elif price_change_5m >= -20:  # -20% to 0% (mild decline)
-            base_score = -3
-            logger.warning(f"   📉 NEGATIVE MOMENTUM: {price_change_5m:.1f}% in 5m (-3 pts)")
+        elif price_change_5m >= -10:  # -10% to 0% (mild decline)
+            base_score = -5
+            logger.warning(f"   📉 DECLINING: {price_change_5m:.1f}% in 5m (-5 pts)")
+        elif price_change_5m >= -20:  # -20% to -10% (selling pressure)
+            base_score = -5 if not is_pre_grad else -12
+            logger.warning(f"   📉 DUMPING: {price_change_5m:.1f}% in 5m ({base_score} pts {'[pre-grad]' if is_pre_grad else '[post-grad]'})")
         elif price_change_5m >= -40:  # -40% to -20% (active dump)
-            base_score = -7
-            logger.warning(f"   📉 DUMPING: {price_change_5m:.1f}% in 5m (-7 pts)")
+            base_score = -12 if not is_pre_grad else -20
+            logger.warning(f"   📉 HEAVY DUMP: {price_change_5m:.1f}% in 5m ({base_score} pts {'[pre-grad]' if is_pre_grad else '[post-grad]'})")
         else:  # -40%+ (crash)
-            base_score = -10
-            logger.warning(f"   📉 CRASHING: {price_change_5m:.1f}% in 5m (-10 pts)")
+            base_score = -15 if not is_pre_grad else -25
+            logger.warning(f"   📉 CRASHING: {price_change_5m:.1f}% in 5m ({base_score} pts {'[pre-grad]' if is_pre_grad else '[post-grad]'})")
 
         # POST-GRAD ONLY: Multi-timeframe momentum bonus
         if not is_pre_grad:
