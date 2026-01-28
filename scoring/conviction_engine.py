@@ -941,6 +941,13 @@ class ConvictionEngine:
                 min_age_min = (maturity_cfg.get('min_age_minutes_pre_grad', 0) if is_pre_grad
                               else maturity_cfg.get('min_age_minutes_post_grad', 0))
 
+                # FAST-TRACK: High conviction tokens get reduced maturity wait
+                fast_track_score = maturity_cfg.get('fast_track_min_score', 75)
+                fast_track_age = maturity_cfg.get('min_age_minutes_fast_track', 5)
+                if is_pre_grad and final_score >= fast_track_score and fast_track_age > 0:
+                    min_age_min = fast_track_age
+                    logger.info(f"   ⚡ FAST-TRACK: Score {final_score} >= {fast_track_score}, maturity reduced to {fast_track_age}m")
+
                 # Check minimum MCAP
                 if min_mcap > 0 and mcap < min_mcap:
                     passed = False
@@ -987,6 +994,24 @@ class ConvictionEngine:
                                    f"price +{price_change_5m:.0f}%, {unique_buyers} buyers, "
                                    f"{bonding_pct:.0f}% bonding, score {final_score}")
 
+            # DUMP DETECTION: Block signals on tokens that already pumped & dumped
+            dump_detected = False
+            dump_reason = ''
+            dump_cfg = config.TIMING_RULES.get('dump_detection', {})
+            if passed and dump_cfg.get('enabled', False):
+                peak_mcap = token_data.get('peak_mcap', 0)
+                min_peak = dump_cfg.get('min_peak_mcap', 30000)
+                max_retrace_pct = dump_cfg.get('max_retrace_pct', 50)
+
+                if peak_mcap >= min_peak and mcap > 0:
+                    retrace_pct = ((peak_mcap - mcap) / peak_mcap) * 100
+                    if retrace_pct >= max_retrace_pct:
+                        passed = False
+                        dump_detected = True
+                        dump_reason = f"MCAP ${mcap:.0f} is {retrace_pct:.0f}% below peak ${peak_mcap:.0f} (pump already happened)"
+                        if dump_cfg.get('log_skipped', True):
+                            logger.warning(f"   🚫 DUMP DETECTED: {dump_reason}")
+
             logger.info("=" * 60)
             logger.info(f"   🎯 FINAL CONVICTION: {final_score}/100")
             logger.info(f"   📊 Threshold: {threshold} ({'PRE-GRAD' if is_pre_grad else 'POST-GRAD'})")
@@ -998,6 +1023,8 @@ class ConvictionEngine:
                 logger.info(f"   🚫 MCAP cap triggered - signal blocked")
             if maturity_gate_triggered:
                 logger.info(f"   🚫 Maturity gate triggered - {maturity_gate_reason}")
+            if dump_detected:
+                logger.info(f"   🚫 Dump detected - {dump_reason}")
             logger.info(f"   {'✅ SIGNAL!' if passed else '⏭️  Skip'}")
             logger.info("=" * 60)
 
@@ -1007,7 +1034,7 @@ class ConvictionEngine:
                 min_gap = config.SIGNAL_LOGGING.get('min_gap_to_log', 5)
 
                 # Log if within X points of threshold or if gate triggered
-                if gap_to_threshold <= min_gap or mcap_cap_triggered or maturity_gate_triggered:
+                if gap_to_threshold <= min_gap or mcap_cap_triggered or maturity_gate_triggered or dump_detected:
                     logger.warning("\n" + "!" * 60)
                     logger.warning("   ⚠️  WHY NO SIGNAL - Breakdown:")
                     logger.warning(f"   📉 Gap to threshold: {gap_to_threshold:.1f} points")
@@ -1016,6 +1043,8 @@ class ConvictionEngine:
                         logger.warning(f"   🚫 MCAP too high: ${mcap:.0f} > ${max_mcap}")
                     if maturity_gate_triggered:
                         logger.warning(f"   🚫 Maturity gate: {maturity_gate_reason}")
+                    if dump_detected:
+                        logger.warning(f"   🚫 Dump detected: {dump_reason}")
 
                     # Show weakest scoring components (on-chain-first)
                     breakdown_items = [
@@ -1074,6 +1103,8 @@ class ConvictionEngine:
                             recommendations.append("Entered too late (MCAP too high)")
                         if maturity_gate_triggered:
                             recommendations.append(f"Too early: {maturity_gate_reason}")
+                        if dump_detected:
+                            recommendations.append(f"Pump already happened: {dump_reason}")
 
                         if recommendations:
                             logger.warning("   💡 Recommendations:")
@@ -1095,6 +1126,8 @@ class ConvictionEngine:
                 'mcap_cap_triggered': mcap_cap_triggered,        # GROK: MCAP cap flag
                 'maturity_gate_triggered': maturity_gate_triggered,  # Maturity gate flag
                 'maturity_gate_reason': maturity_gate_reason,
+                'dump_detected': dump_detected,                        # Dump detection flag
+                'dump_reason': dump_reason,
                 'token_address': token_address,  # FIXED: Include token address for links
                 'token_data': token_data,  # FIXED: Include full token data
                 'breakdown': {
@@ -1273,10 +1306,11 @@ class ConvictionEngine:
     
     def _score_price_momentum(self, token_data: Dict) -> int:
         """
-        Score based on price momentum (0-10 points base + multi-timeframe bonus)
+        Score based on price momentum (-10 to +10 points base + multi-timeframe bonus)
         GROK ENHANCED: More graduated scoring (3/7/10 instead of 0/5/10)
+        DUMP FIX: Negative scores when price is actively falling
 
-        - Pre-grad: Uses 5m price change (0-10 pts)
+        - Pre-grad: Uses 5m price change (-10 to +10 pts)
         - Post-grad: Uses 5m price change + multi-timeframe bonus (1h/6h/24h, +5 pts each)
         """
         bonding_pct = token_data.get('bonding_curve_pct', 0)
@@ -1291,8 +1325,17 @@ class ConvictionEngine:
             base_score = config.MOMENTUM_WEIGHTS['strong']  # 7 pts
         elif price_change_5m >= 10:  # +10% in 5 min (moderate)
             base_score = config.MOMENTUM_WEIGHTS.get('moderate', 3)  # 3 pts
-        else:
+        elif price_change_5m >= 0:  # Flat/slightly positive
             base_score = 0
+        elif price_change_5m >= -20:  # -20% to 0% (mild decline)
+            base_score = -3
+            logger.warning(f"   📉 NEGATIVE MOMENTUM: {price_change_5m:.1f}% in 5m (-3 pts)")
+        elif price_change_5m >= -40:  # -40% to -20% (active dump)
+            base_score = -7
+            logger.warning(f"   📉 DUMPING: {price_change_5m:.1f}% in 5m (-7 pts)")
+        else:  # -40%+ (crash)
+            base_score = -10
+            logger.warning(f"   📉 CRASHING: {price_change_5m:.1f}% in 5m (-10 pts)")
 
         # POST-GRAD ONLY: Multi-timeframe momentum bonus
         if not is_pre_grad:

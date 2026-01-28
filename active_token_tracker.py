@@ -25,6 +25,7 @@ class TokenState:
     last_holder_count: int
     source: str = 'kol_buy'  # 'kol_buy' or 'telegram_call'
     last_analyzed: datetime = None  # Prevent spam re-analysis
+    peak_mcap: float = 0.0  # Track highest MCAP seen (for dump detection)
 
 
 class ActiveTokenTracker:
@@ -526,6 +527,12 @@ class ActiveTokenTracker:
                 holders = token_data.get('holder_count', 0)
                 logger.debug(f"   ✅ Updated: price=${price:.8f}, holders={holders}")
 
+                # Track peak MCAP for dump detection
+                current_mcap = token_data.get('market_cap', 0) or 0
+                if current_mcap > state.peak_mcap:
+                    state.peak_mcap = current_mcap
+                    logger.debug(f"   📈 New peak MCAP: ${current_mcap:.0f}")
+
                 # Re-analyze with fresh data
                 await self._reanalyze_token(token_address)
 
@@ -559,6 +566,12 @@ class ActiveTokenTracker:
             # Add unique_buyers count to token_data (for display in Telegram)
             unique_buyers_count = len(self.unique_buyers.get(token_address, set()))
             state.token_data['unique_buyers'] = unique_buyers_count
+
+            # Pass peak MCAP for dump detection
+            current_mcap = state.token_data.get('market_cap', 0) or 0
+            if current_mcap > state.peak_mcap:
+                state.peak_mcap = current_mcap
+            state.token_data['peak_mcap'] = state.peak_mcap
 
             # Get fresh conviction score
             conviction_data = await self.conviction_engine.analyze_token(

@@ -400,9 +400,18 @@ TIMING_RULES = {
         'enabled': True,              # Gate signals on minimum maturity
         'min_mcap_pre_grad': 12000,   # Pre-grad: skip if MCAP < $12K (lowered from $15K)
         'min_age_minutes_pre_grad': 12,  # Pre-grad: skip if age < 12 min (lowered from 15)
+        'min_age_minutes_fast_track': 5,  # Fast-track: high conviction tokens only need 5 min
+        'fast_track_min_score': 75,   # Score threshold to qualify for fast-track maturity
         'min_mcap_post_grad': 0,      # Post-grad: no min MCAP (already graduated)
         'min_age_minutes_post_grad': 0,  # Post-grad: no min age
         'log_skipped': True           # Log skipped signals
+    },
+
+    'dump_detection': {
+        'enabled': True,              # Block signals on tokens that already pumped & dumped
+        'max_retrace_pct': 50,        # Block if MCAP dropped >50% from peak (buying the dump)
+        'min_peak_mcap': 30000,       # Only apply if peak MCAP was meaningful ($30K+)
+        'log_skipped': True           # Log blocked dump signals
     },
 
     'post_call_monitoring': {
