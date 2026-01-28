@@ -12,14 +12,18 @@ Features:
 Based on Grok recommendations for better early detection.
 """
 import asyncio
+import concurrent.futures
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 from loguru import logger
-from tenacity import retry, stop_after_attempt, wait_exponential
+
 import feedparser
 from bertopic import BERTopic
 from sentence_transformers import SentenceTransformer
 import numpy as np
+
+# Dedicated thread pool for RSS fetches (prevents blocking the event loop)
+_rss_executor = concurrent.futures.ThreadPoolExecutor(max_workers=6, thread_name_prefix="rss")
 
 
 # RSS sources (crypto/Solana-focused, high-signal)
@@ -105,10 +109,9 @@ class RealtimeNarrativeDetector:
             )
             logger.info("✅ BERTopic model initialized")
 
-    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
     async def fetch_rss_feeds(self) -> List[str]:
         """
-        Fetch articles from all RSS sources
+        Fetch articles from all RSS sources concurrently with per-feed timeouts.
 
         Returns:
             List of article texts (title + summary)
@@ -116,51 +119,66 @@ class RealtimeNarrativeDetector:
         new_articles = []
         cutoff = datetime.utcnow() - timedelta(hours=24)  # Only last 24h for relevance
 
-        for url in RSS_SOURCES:
+        async def _fetch_single_feed(url: str) -> List[str]:
+            """Fetch a single RSS feed with timeout"""
+            articles = []
             try:
-                logger.debug(f"   📡 Fetching RSS: {url}")
-
-                # feedparser is blocking, run in executor
                 loop = asyncio.get_event_loop()
-                feed = await loop.run_in_executor(None, feedparser.parse, url)
+                feed = await asyncio.wait_for(
+                    loop.run_in_executor(_rss_executor, feedparser.parse, url),
+                    timeout=15  # 15 second timeout per feed
+                )
 
                 for entry in feed.entries:
-                    # Get publish date
                     pub_date = entry.get("published_parsed") or entry.get("updated_parsed")
                     if not pub_date:
                         continue
 
                     pub_dt = datetime(*pub_date[:6])
 
-                    # Skip old or duplicate articles
                     if pub_dt <= cutoff:
                         continue
                     if entry.link in self.article_cache:
                         continue
 
-                    # Extract text (title + summary/content)
                     title = entry.get("title", "")
                     summary = entry.get("summary", "")
 
-                    # Try content if no summary
                     if not summary:
                         content_list = entry.get("content", [])
                         if content_list:
                             summary = content_list[0].get("value", "")
 
                     text = f"{title} {summary}".strip()
-                    if len(text) < 20:  # Skip very short articles
+                    if len(text) < 20:
                         continue
 
-                    new_articles.append(text)
+                    articles.append(text)
                     self.article_cache[entry.link] = pub_dt
-                    logger.debug(f"      ✅ New article: {title[:50]}...")
 
+            except asyncio.TimeoutError:
+                logger.warning(f"   ⏰ RSS timeout (15s): {url}")
             except Exception as e:
-                logger.warning(f"   ⚠️  Failed to fetch {url}: {e}")
-                continue
+                logger.warning(f"   ⚠️  RSS failed: {url} — {e}")
+            return articles
 
-        logger.info(f"   📰 Fetched {len(new_articles)} new articles from {len(RSS_SOURCES)} sources")
+        # Fetch all feeds concurrently (max 15s per feed, ~15s total instead of 17×15s)
+        logger.info(f"   📡 Fetching {len(RSS_SOURCES)} RSS feeds concurrently...")
+        results = await asyncio.gather(
+            *[_fetch_single_feed(url) for url in RSS_SOURCES],
+            return_exceptions=True
+        )
+
+        feeds_ok = 0
+        for i, result in enumerate(results):
+            if isinstance(result, Exception):
+                logger.warning(f"   ⚠️  RSS exception: {RSS_SOURCES[i]} — {result}")
+            elif isinstance(result, list):
+                new_articles.extend(result)
+                if result:
+                    feeds_ok += 1
+
+        logger.info(f"   📰 Fetched {len(new_articles)} articles from {feeds_ok}/{len(RSS_SOURCES)} feeds")
         return new_articles
 
     async def update_narratives(self) -> Optional[Dict]:
@@ -171,35 +189,33 @@ class RealtimeNarrativeDetector:
             Dict with top topics and metadata
         """
         try:
-            # Initialize models on first run
-            self.initialize_models()
+            # Initialize models on first run (may download ~90MB model)
+            logger.info(f"   🔄 Initializing models...")
+            loop = asyncio.get_event_loop()
+            await asyncio.wait_for(
+                loop.run_in_executor(None, self.initialize_models),
+                timeout=120  # 2 min timeout for model download
+            )
 
-            # Fetch latest articles
+            # Fetch latest articles (concurrent, 15s timeout per feed)
             articles = await self.fetch_rss_feeds()
 
             if len(articles) < 5:
-                logger.warning(f"   ⚠️  Too few articles ({len(articles)}), skipping update")
+                logger.warning(f"   ⚠️  Too few articles ({len(articles)}), skipping BERTopic (need >= 5)")
                 return None
 
             logger.info(f"   🔄 Running BERTopic on {len(articles)} articles...")
 
-            # Run BERTopic in executor (CPU intensive)
-            loop = asyncio.get_event_loop()
-
-            # Fit or update model
+            # Fit or update model (CPU intensive, 60s timeout)
             if self.current_topics is None:
-                # First run: full fit
-                topics, probs = await loop.run_in_executor(
-                    None,
-                    self.topic_model.fit_transform,
-                    articles
+                topics, probs = await asyncio.wait_for(
+                    loop.run_in_executor(None, self.topic_model.fit_transform, articles),
+                    timeout=60
                 )
             else:
-                # Incremental update
-                topics, probs = await loop.run_in_executor(
-                    None,
-                    self.topic_model.transform,
-                    articles
+                topics, probs = await asyncio.wait_for(
+                    loop.run_in_executor(None, self.topic_model.transform, articles),
+                    timeout=60
                 )
 
             # Get top topics
@@ -452,8 +468,12 @@ class RealtimeNarrativeDetector:
 
                 logger.info(f"✅ Narrative update complete. Next update in {self.update_interval}s\n")
 
+            except asyncio.TimeoutError:
+                logger.error(f"❌ Narrative loop #{iteration} timed out (model init or BERTopic too slow)")
             except Exception as e:
-                logger.error(f"❌ Narrative loop error: {e}")
+                logger.error(f"❌ Narrative loop #{iteration} error: {e}")
+                import traceback
+                logger.error(traceback.format_exc())
 
             await asyncio.sleep(self.update_interval)
 
