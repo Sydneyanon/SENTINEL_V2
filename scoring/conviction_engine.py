@@ -891,6 +891,30 @@ class ConvictionEngine:
 
             final_score = mid_total + holder_result['penalty'] + holder_result['kol_bonus']
 
+            # BUYER-MCAP DIVERGENCE: High buyers + low MCAP = pump already dumped
+            # During a real pump: 500 buyers → $25K-50K MCAP ($50-100/buyer)
+            # After a dump: 500 buyers but $12K MCAP ($24/buyer) = trailing metrics
+            buyer_mcap_penalty = 0
+            if is_pre_grad and unique_buyers >= 150 and mcap > 0:
+                mcap_per_buyer = mcap / unique_buyers
+                if mcap_per_buyer < 30:
+                    # Severe divergence: $paper (599 buyers, $12K = $20/buyer)
+                    buyer_mcap_penalty = -35
+                    logger.warning(f"   🚨 BUYER-MCAP DIVERGENCE: {unique_buyers} buyers but only ${mcap:.0f} MCAP "
+                                   f"(${mcap_per_buyer:.0f}/buyer) — pump already dumped ({buyer_mcap_penalty} pts)")
+                elif mcap_per_buyer < 50:
+                    # Moderate divergence
+                    buyer_mcap_penalty = -20
+                    logger.warning(f"   ⚠️ BUYER-MCAP DIVERGENCE: {unique_buyers} buyers but ${mcap:.0f} MCAP "
+                                   f"(${mcap_per_buyer:.0f}/buyer) — possible dump ({buyer_mcap_penalty} pts)")
+                elif mcap_per_buyer < 75 and unique_buyers >= 300:
+                    # Mild divergence (only flag with very high buyer counts)
+                    buyer_mcap_penalty = -10
+                    logger.warning(f"   📊 BUYER-MCAP MILD: {unique_buyers} buyers, ${mcap:.0f} MCAP "
+                                   f"(${mcap_per_buyer:.0f}/buyer) ({buyer_mcap_penalty} pts)")
+
+            final_score += buyer_mcap_penalty
+
             # ML Prediction - Add conviction bonus based on predicted outcome
             kol_count = smart_wallet_data.get('wallet_count', 0)
             ml_result = self.ml_predictor.predict_for_signal(token_data, kol_count=kol_count)
@@ -1222,6 +1246,7 @@ class ConvictionEngine:
                     'kol_bonus': holder_result['kol_bonus'],
                     'ml_bonus': ml_result.get('ml_bonus', 0),
                     'dump_penalty': dump_penalty,
+                    'buyer_mcap_penalty': buyer_mcap_penalty,
                     'total': final_score
                 },
                 'rug_checks': {
