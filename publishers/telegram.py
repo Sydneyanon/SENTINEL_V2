@@ -383,6 +383,9 @@ class TelegramPublisher:
             try:
                 compact_caption = self._format_signal_compact(signal_data)
 
+                # Re-read banner from config (may be updated in memory via /testbanner upload)
+                self.banner_file_id = getattr(config, 'TELEGRAM_BANNER_FILE_ID', None)
+
                 # If we have a banner, send as animation/video with compact caption
                 if self.banner_file_id:
                     try:

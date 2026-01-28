@@ -1211,13 +1211,16 @@ class AdminBot:
 
             logger.info(f"🎬 Admin uploaded {media_type}, file_id: {file_id}")
 
+            # Apply immediately in memory (no redeploy needed)
+            config.TELEGRAM_BANNER_FILE_ID = file_id
+
             await msg.reply_text(
                 f"🎬 <b>Banner File ID Captured!</b>\n\n"
                 f"Type: <code>{media_type}</code>\n"
                 f"File ID:\n<code>{file_id}</code>\n\n"
-                f"Set this in Railway env vars:\n"
-                f"<code>TELEGRAM_BANNER_FILE_ID={file_id}</code>\n\n"
-                f"Then redeploy, or use /testbanner to verify.",
+                f"✅ <b>Applied in memory</b> — use /testbanner to verify.\n\n"
+                f"For persistence across restarts, set env var:\n"
+                f"<code>TELEGRAM_BANNER_FILE_ID={file_id}</code>",
                 parse_mode=ParseMode.HTML
             )
 
