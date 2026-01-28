@@ -422,11 +422,21 @@ class RealtimeNarrativeDetector:
         """
         self.is_running = True
         logger.info(f"🔄 Starting narrative update loop (every {self.update_interval}s)")
+        logger.info(f"   📡 RSS sources configured: {len(RSS_SOURCES)}")
+        logger.info(f"   🤖 Model: all-MiniLM-L6-v2 (will download ~90MB on first run)")
 
+        iteration = 0
         while self.is_running:
+            iteration += 1
             try:
-                logger.info("\n📰 Updating narratives from RSS feeds...")
+                logger.info(f"\n📰 [Narrative Loop #{iteration}] Updating from RSS feeds...")
                 await self.update_narratives()
+
+                if iteration == 1:
+                    if self.current_topics and self.current_topics.get('topics'):
+                        logger.info(f"   ✅ FIRST NARRATIVE UPDATE SUCCESSFUL - {len(self.current_topics['topics'])} topics detected")
+                    else:
+                        logger.warning(f"   ⚠️ FIRST NARRATIVE UPDATE: No topics detected (RSS feeds may be empty or failing)")
 
                 # Log trending narratives with momentum
                 trending = self.get_trending_narratives()

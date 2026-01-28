@@ -34,9 +34,11 @@ class NarrativeDetector:
 
     async def start(self):
         """Initialize narrative detector"""
+        self.use_static = getattr(config, 'ENABLE_STATIC_NARRATIVES', True)
         active_count = sum(1 for n in self.narratives.values() if n.get('active', False))
+
         logger.info(f"✅ Narrative Detector initialized")
-        logger.info(f"   📊 Tracking {active_count} static narratives")
+        logger.info(f"   📊 Static narratives: {'ENABLED' if self.use_static else 'DISABLED'} ({active_count} configured)")
 
         # Initialize realtime detector if enabled
         if self.use_realtime and REALTIME_AVAILABLE:
@@ -47,10 +49,18 @@ class NarrativeDetector:
             # Start background loop
             import asyncio
             asyncio.create_task(self.realtime_detector.narrative_loop())
-            logger.info(f"   ✅ Real-time narrative loop started")
+            logger.info(f"   ✅ Real-time narrative loop started (RSS + BERTopic)")
         elif self.use_realtime and not REALTIME_AVAILABLE:
-            logger.warning(f"   ⚠️  Real-time narratives enabled but dependencies missing!")
-            logger.warning(f"      Install: pip install feedparser bertopic sentence-transformers")
+            logger.error(f"   ❌ REAL-TIME NARRATIVES BROKEN: Dependencies missing!")
+            logger.error(f"      feedparser/bertopic/sentence-transformers not installed")
+            logger.error(f"      Run: pip install feedparser bertopic sentence-transformers")
+            logger.error(f"      ⚠️  Narrative scoring will be {'ZERO' if not self.use_static else 'static-only'}")
+        elif not self.use_realtime:
+            logger.info(f"   ℹ️  Real-time narratives disabled in config")
+
+        if not self.use_static and not (self.use_realtime and REALTIME_AVAILABLE):
+            logger.warning(f"   ⚠️  WARNING: Both static and real-time narratives are inactive!")
+            logger.warning(f"      Narrative score will always be 0 until real-time dependencies are installed")
 
         return True
     
@@ -70,52 +80,49 @@ class NarrativeDetector:
                 name, symbol, description
             )
 
-        # Combine all text for static analysis
+        # Static narrative analysis (if enabled)
         combined_text = f"{symbol} {name} {description}".lower()
-
         matched_narratives = []
         static_score = 0
 
-        # Check static narratives
-        for narrative_name, narrative_data in self.narratives.items():
-            if not narrative_data.get('active', False):
-                continue
+        use_static = getattr(self, 'use_static', True)  # Default True for backwards compat
+        if use_static:
+            # Check static narratives
+            for narrative_name, narrative_data in self.narratives.items():
+                if not narrative_data.get('active', False):
+                    continue
 
-            keywords = narrative_data.get('keywords', [])
-            weight = narrative_data.get('weight', 1.0)
+                keywords = narrative_data.get('keywords', [])
+                weight = narrative_data.get('weight', 1.0)
 
-            # Check for keyword matches
-            matches = [kw for kw in keywords if kw in combined_text]
+                # Check for keyword matches
+                matches = [kw for kw in keywords if kw in combined_text]
 
-            if matches:
-                matched_narratives.append({
-                    'name': narrative_name,
-                    'keywords_matched': matches,
-                    'weight': weight
-                })
+                if matches:
+                    matched_narratives.append({
+                        'name': narrative_name,
+                        'keywords_matched': matches,
+                        'weight': weight
+                    })
 
-                # Track this narrative mention
-                if narrative_name not in self.narrative_tracker:
-                    self.narrative_tracker[narrative_name] = []
-                self.narrative_tracker[narrative_name].append(datetime.utcnow())
+                    # Track this narrative mention
+                    if narrative_name not in self.narrative_tracker:
+                        self.narrative_tracker[narrative_name] = []
+                    self.narrative_tracker[narrative_name].append(datetime.utcnow())
 
-        # Calculate static score
-        if matched_narratives:
-            # Get the best matching narrative
-            best_narrative = max(matched_narratives, key=lambda x: x['weight'])
+            # Calculate static score
+            if matched_narratives:
+                best_narrative = max(matched_narratives, key=lambda x: x['weight'])
 
-            from config import WEIGHTS
+                from config import WEIGHTS
 
-            # Base score for hot narrative
-            static_score += WEIGHTS['narrative_hot']
+                static_score += WEIGHTS['narrative_hot']
 
-            # Bonus for multiple narratives
-            if len(matched_narratives) > 1:
-                static_score += WEIGHTS['narrative_multiple']
+                if len(matched_narratives) > 1:
+                    static_score += WEIGHTS['narrative_multiple']
 
-            # Check if this is a fresh narrative (< 48h of activity)
-            if self._is_narrative_fresh(best_narrative['name']):
-                static_score += WEIGHTS['narrative_fresh']
+                if self._is_narrative_fresh(best_narrative['name']):
+                    static_score += WEIGHTS['narrative_fresh']
 
         # Use max of realtime or static (realtime usually wins)
         final_score = max(realtime_score, static_score)
