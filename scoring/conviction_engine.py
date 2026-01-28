@@ -889,6 +889,9 @@ class ConvictionEngine:
 
             final_score = mid_total + holder_result['penalty'] + holder_result['kol_bonus']
 
+            # Get MCAP early — needed for buyer-MCAP divergence + MCAP cap checks
+            mcap = token_data.get('market_cap', 0)
+
             # BUYER-MCAP DIVERGENCE: High buyers + low MCAP = pump already dumped
             # During a real pump: 500 buyers → $25K-50K MCAP ($50-100/buyer)
             # After a dump: 500 buyers but $12K MCAP ($24/buyer) = trailing metrics
@@ -942,7 +945,6 @@ class ConvictionEngine:
             passed = final_score >= threshold or early_trigger_applied
 
             # GROK: MCAP cap - skip if too high (avoid tops)
-            mcap = token_data.get('market_cap', 0)
             mcap_cap_triggered = False
             if passed and config.TIMING_RULES['mcap_cap']['enabled']:
                 max_mcap = (config.TIMING_RULES['mcap_cap']['max_mcap_pre_grad'] if is_pre_grad

@@ -65,12 +65,13 @@ class AdminBot:
             self.app.add_handler(CommandHandler("pause", self._cmd_pause, filters=admin_filter))
             self.app.add_handler(CommandHandler("resume", self._cmd_resume, filters=admin_filter))
             self.app.add_handler(CommandHandler("winrate", self._cmd_winrate, filters=admin_filter))
+            self.app.add_handler(CommandHandler("testbanner", self._cmd_testbanner, filters=admin_filter))
 
             # Block all other users (unauthorized access attempts)
             self.app.add_handler(MessageHandler(~admin_filter, self._handle_unauthorized))
 
             logger.info(f"✅ Admin bot initialized")
-            logger.info(f"   Commands registered: /help /stats /active /performance /winrate /health /cache /missed /whales /config /dataset /collect /ml /pause /resume")
+            logger.info(f"   Commands registered: /help /stats /active /performance /winrate /health /cache /missed /whales /config /dataset /collect /ml /pause /resume /testbanner")
             logger.info(f"   Security: Only user {self.admin_user_id} can use commands")
             if self.admin_channel_id:
                 logger.info(f"   Response mode: Admin channel ({self.admin_channel_id})")
@@ -192,6 +193,7 @@ class AdminBot:
 <b>Control:</b>
 /pause - Pause signal posting
 /resume - Resume signal posting
+/testbanner - Test banner animation in channel
 
 <b>Help:</b>
 /help - Show this message
@@ -1089,6 +1091,94 @@ class AdminBot:
 
         except Exception as e:
             logger.error(f"❌ Error in /winrate: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            await self._send_response(update, context, f"❌ Error: {str(e)}")
+
+    async def _cmd_testbanner(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Test banner animation/video in channel"""
+        try:
+            from telegram.error import TelegramError
+
+            file_id = config.TELEGRAM_BANNER_FILE_ID
+            channel_id = config.TELEGRAM_CHANNEL_ID
+
+            if not file_id:
+                await self._send_response(update, context,
+                    "❌ No banner configured.\n"
+                    "Set <code>TELEGRAM_BANNER_FILE_ID</code> env var.")
+                return
+
+            if not channel_id:
+                await self._send_response(update, context, "❌ TELEGRAM_CHANNEL_ID not set.")
+                return
+
+            await self._send_response(update, context,
+                f"🎬 Testing banner...\n"
+                f"File ID: <code>{file_id[:30]}...</code>\n"
+                f"Channel: <code>{channel_id}</code>")
+
+            # Step 1: Validate file_id
+            try:
+                file_info = await context.bot.get_file(file_id)
+                size_kb = file_info.file_size / 1024 if file_info.file_size else 0
+                await self._send_response(update, context,
+                    f"✅ File ID valid ({size_kb:.0f} KB)\n"
+                    f"Path: <code>{file_info.file_path}</code>")
+            except TelegramError as e:
+                await self._send_response(update, context,
+                    f"❌ File ID INVALID: {e}\n\n"
+                    f"You need to re-upload the banner MP4/GIF.\n"
+                    f"Send the file to the bot, then set the new file_id.")
+                return
+
+            # Step 2: Try send_animation (for GIFs and short MP4s)
+            sent_msg = None
+            method_used = None
+            try:
+                sent_msg = await context.bot.send_animation(
+                    chat_id=channel_id,
+                    animation=file_id,
+                    caption="🎬 Banner test (send_animation) — auto-deleting...",
+                )
+                method_used = "send_animation"
+            except TelegramError as e1:
+                await self._send_response(update, context,
+                    f"⚠️ send_animation failed: {e1}\nTrying send_video...")
+
+                # Step 3: Try send_video
+                try:
+                    sent_msg = await context.bot.send_video(
+                        chat_id=channel_id,
+                        video=file_id,
+                        caption="🎬 Banner test (send_video) — auto-deleting...",
+                    )
+                    method_used = "send_video"
+                except TelegramError as e2:
+                    await self._send_response(update, context,
+                        f"❌ send_video also failed: {e2}\n\n"
+                        f"Both methods failed. The file may not be a valid animation/video.\n"
+                        f"Try re-uploading as MP4 (H.264, under 50MB).")
+                    return
+
+            # Clean up test message
+            if sent_msg:
+                await asyncio.sleep(3)
+                try:
+                    await context.bot.delete_message(
+                        chat_id=channel_id,
+                        message_id=sent_msg.message_id
+                    )
+                except TelegramError:
+                    pass
+
+                await self._send_response(update, context,
+                    f"✅ Banner works!\n"
+                    f"Method: <code>{method_used}</code>\n"
+                    f"Message sent and auto-deleted from channel.")
+
+        except Exception as e:
+            logger.error(f"❌ Error in /testbanner: {e}")
             import traceback
             logger.error(traceback.format_exc())
             await self._send_response(update, context, f"❌ Error: {str(e)}")
