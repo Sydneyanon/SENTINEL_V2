@@ -70,19 +70,29 @@ DISABLE_POLLING_BELOW_THRESHOLD = True
 # Signal thresholds based on graduation status
 # UPDATE 2026-01-27 (ON-CHAIN-FIRST SCORING):
 # - Removed KOL smart wallet scoring (was 0-40 pts) - organic scanner replaces KOL-first discovery
-# - Added buyer velocity scoring (0-25 pts) and bonding curve speed (0-15 pts)
-# - Increased unique buyers (0-20), volume (0-15), narrative (0-15 with RSS+BERTopic), telegram (0-10)
+# - Added buyer velocity scoring (0-18 pts) and bonding curve speed (0-15 pts)
+# - Unique buyers (0-10), volume (0-12), narrative (0-7 RSS+BERTopic), telegram (0-5)
 # - Lowered post-grad threshold from 75 to 65 (no KOL boost available)
 MIN_CONVICTION_SCORE = 45  # Pre-grad threshold (lowered from 60 — trial to catch mid-score runners)
 POST_GRAD_THRESHOLD = 65   # Lowered from 75 - no KOL boost, pure on-chain scoring
 
 # Base score threshold for distribution checks
 # Only check distribution if base score >= this value
-DISTRIBUTION_CHECK_THRESHOLD = 50
+DISTRIBUTION_CHECK_THRESHOLD = 30
 
 # =============================================================================
-# SCORING WEIGHTS (Total: 0-100 points possible)
-# UPDATE 2026-01-27: On-chain-first scoring (KOL scoring disabled)
+# SCORING WEIGHTS (Total: 0-100 points max — clean budget)
+# UPDATE 2026-01-28: Normalized to 100-point max for both pre-grad and post-grad
+#
+# PRE-GRAD BUDGET (100 max):
+#   Buyer Velocity: 18 | Bonding Speed: 15 | Acceleration: 15
+#   Buy/Sell Ratio: 10 | Unique Buyers: 10 | Volume: 8
+#   Vol/Liq Vel: 6 | Momentum: 6 | Narrative: 7 | TG Calls: 5
+#
+# POST-GRAD BUDGET (100 max):
+#   Buyer Velocity: 18 | Volume: 12 | Buy/Sell: 10 | Unique Buyers: 10
+#   Social Verification: 14 | Graduation Speed: 10 | Vol/Liq: 6
+#   Momentum: 8 | Narrative: 7 | TG Calls: 5
 # =============================================================================
 
 # Combined WEIGHTS dictionary (required by conviction engine)
@@ -91,23 +101,23 @@ WEIGHTS = {
     'smart_wallet_elite': 0,        # Elite wallet bought (disabled)
     'smart_wallet_kol': 0,          # Top KOL bought (disabled)
 
-    # Narrative Detection (max 15 points - raised from 10 for RSS+BERTopic matching)
-    'narrative_hot': 15,            # Hot/trending narrative (RSS+BERTopic cluster match)
-    'narrative_fresh': 8,           # Fresh narrative (< 48h)
-    'narrative_multiple': 5,        # Multiple narratives
+    # Narrative Detection (max 7 points — RSS+BERTopic matching)
+    'narrative_hot': 5,             # Hot/trending narrative (RSS+BERTopic cluster match)
+    'narrative_fresh': 2,           # Fresh narrative (< 48h)
+    'narrative_multiple': 2,        # Multiple narratives
 
-    # Holder Distribution (max 15 points)
-    'holders_high': 15,             # 100+ holders
-    'holders_medium': 10,           # 50-99 holders
-    'holders_low': 5,               # 30-49 holders
+    # Holder Distribution (max 10 points)
+    'holders_high': 10,             # 100+ holders
+    'holders_medium': 7,            # 50-99 holders
+    'holders_low': 4,               # 30-49 holders
 
-    # Volume Velocity (max 15 points - increased from 10)
-    'volume_spike': 15,             # Strong volume spike
-    'volume_increasing': 10,        # Steady increase
+    # Volume Velocity (max 8 points pre-grad, 12 post-grad)
+    'volume_spike': 8,              # Strong volume spike
+    'volume_increasing': 5,         # Steady increase
 
-    # Price Momentum (max 10 points)
-    'momentum_strong': 10,          # Strong upward momentum
-    'momentum_moderate': 5,         # Moderate momentum
+    # Price Momentum (max 6 points pre-grad, 8 post-grad)
+    'momentum_strong': 6,           # Strong upward momentum
+    'momentum_moderate': 3,         # Moderate momentum
 }
 
 # =============================================================================
@@ -123,15 +133,15 @@ SMART_WALLET_WEIGHTS = {
 }
 
 # =============================================================================
-# NEW: BUYER VELOCITY SCORING (0-25 points) - Replaces KOL scoring
+# BUYER VELOCITY SCORING (0-18 points) - Replaces KOL scoring
 # Measures how fast unique buyers are accumulating
 # =============================================================================
 BUYER_VELOCITY_WEIGHTS = {
-    'explosive': 35,         # 100+ buyers in 5 min (viral organic demand) - raised to 35, strongest predictor
-    'very_fast': 25,         # 50-99 buyers in 5 min (raised from 22)
-    'fast': 15,              # 25-49 buyers in 5 min
-    'moderate': 10,          # 15-24 buyers in 5 min
-    'slow': 5,               # 5-14 buyers in 5 min
+    'explosive': 18,         # 100+ buyers in 5 min (viral organic demand)
+    'very_fast': 14,         # 50-99 buyers in 5 min
+    'fast': 10,              # 25-49 buyers in 5 min
+    'moderate': 6,           # 15-24 buyers in 5 min
+    'slow': 3,               # 5-14 buyers in 5 min
     'minimal': 0,            # <5 buyers in 5 min
     'window_seconds': 300,   # 5-minute window for velocity calculation
 }
@@ -141,11 +151,11 @@ BUYER_VELOCITY_WEIGHTS = {
 # How fast the bonding curve is filling (organic demand indicator)
 # =============================================================================
 BONDING_SPEED_WEIGHTS = {
-    'hyper': 20,             # >7%/min bonding velocity (insane demand) — +10 bonus at 40%+
-    'rocket': 15,            # >5%/min bonding velocity (explosive demand) — +5 bonus at 50%+
-    'fast': 12,              # 2-5%/min bonding velocity
-    'steady': 8,             # 1-2%/min bonding velocity
-    'slow': 4,               # 0.5-1%/min bonding velocity
+    'hyper': 15,             # >7%/min bonding velocity (insane demand)
+    'rocket': 12,            # >5%/min bonding velocity (explosive demand)
+    'fast': 8,               # 2-5%/min bonding velocity
+    'steady': 5,             # 1-2%/min bonding velocity
+    'slow': 2,               # 0.5-1%/min bonding velocity
     'crawl': 0,              # <0.5%/min (weak demand)
 }
 
@@ -156,8 +166,8 @@ BONDING_SPEED_WEIGHTS = {
 ACCELERATION_BONUS = {
     'enabled': True,
     'thresholds': [
-        {'pct': 50, 'points': 25},   # +50% in ≤10 min → +25 pts
-        {'pct': 30, 'points': 15},   # +30% in ≤10 min → +15 pts
+        {'pct': 50, 'points': 15},   # +50% in ≤10 min → +15 pts
+        {'pct': 30, 'points': 8},    # +30% in ≤10 min → +8 pts
     ],
     'max_age_minutes': 10,            # Only apply if token age ≤10 min
 }
@@ -199,9 +209,9 @@ ORGANIC_SCANNER = {
 # =============================================================================
 GRADUATION_SPEED_BONUS = {
     'fast_grad_minutes': 15,       # Graduated in <15 min = strong demand
-    'fast_grad_bonus': 15,         # +15 pts for fast graduation
+    'fast_grad_bonus': 10,         # +10 pts for fast graduation
     'slow_grad_minutes': 30,       # Graduated in >30 min = weak demand
-    'slow_grad_penalty': -10,      # -10 pts for slow graduation with low growth
+    'slow_grad_penalty': -6,       # -6 pts for slow graduation with low growth
     'slow_grad_min_buyers': 100,   # Below this buyer count = "low growth"
 }
 
@@ -218,62 +228,60 @@ POLLING_INTERVALS = {
 # Credit-Saving Gating: Only fetch holders if these conditions met
 HOLDER_FETCH_GATES = {
     'min_unique_buyers': 50,     # Need at least 50 unique buyers
-    'min_base_score': 60,        # Need at least 60 pts from other factors
+    'min_base_score': 35,        # Need at least 35 pts from other factors
     'always_fetch_post_grad': True  # Always check holders post-graduation
 }
 
-# Volume Velocity (0-15 points) - ON-CHAIN: Increased from 10 max
-# POST-GRAD: Uses DexScreener volume/mcap ratio
+# Volume Velocity (0-8 pre-grad, 0-12 post-grad)
+# POST-GRAD: Uses DexScreener volume/mcap ratio (higher weight — key post-grad signal)
 VOLUME_WEIGHTS = {
-    'spiking': 15,          # Volume 2x+ expected rate (raised from 10)
-    'growing': 10,          # Volume 1.25x+ expected rate (raised from 7)
-    'steady': 5             # Volume >1x expected rate (raised from 3)
+    'spiking': 12,          # Volume 2x+ expected rate (post-grad)
+    'growing': 8,           # Volume 1.25x+ expected rate
+    'steady': 4             # Volume >1x expected rate
 }
 
 # PRE-GRAD: Uses PumpPortal WebSocket rolling SOL volume (FREE)
-# DexScreener has no data for pre-graduation tokens, so we track SOL
-# volume from real-time trade events and calculate 5-min velocity ratios
 PRE_GRAD_VOLUME_WEIGHTS = {
-    'spiking': 15,          # velocity_ratio > 3.0 OR current_window > 50 SOL
-    'growing': 10,          # velocity_ratio > 1.5 OR current_window > 20 SOL
-    'steady': 5,            # velocity_ratio > 1.0 OR current_window > 5 SOL
+    'spiking': 8,           # velocity_ratio > 3.0 OR current_window > 50 SOL
+    'growing': 5,           # velocity_ratio > 1.5 OR current_window > 20 SOL
+    'steady': 3,            # velocity_ratio > 1.0 OR current_window > 5 SOL
     'window_seconds': 300,  # 5-minute rolling windows
 }
 
-# Price Momentum (0-10 points) - GROK ENHANCED: More graduated
+# Price Momentum (0-6 pre-grad, 0-8 post-grad with multi-timeframe)
 MOMENTUM_WEIGHTS = {
-    'very_strong': 10,      # +50% in 5 minutes
-    'strong': 7,            # +30% in 5 minutes (raised from 5)
-    'moderate': 3           # +10% in 5 minutes (new tier)
+    'very_strong': 6,       # +50% in 5 minutes
+    'strong': 4,            # +30% in 5 minutes
+    'moderate': 2           # +10% in 5 minutes
 }
 
-# Distribution Scoring (0-20 points) - ON-CHAIN: Increased from 15 max
+# Distribution Scoring (0-10 points)
 # Pre-graduation: Based on unique buyers (FREE)
 UNIQUE_BUYER_WEIGHTS = {
-    'exceptional': 20,  # 100+ unique buyers (very strong organic, raised from 15)
-    'high': 15,         # 50-99 unique buyers (raised from 12)
-    'medium': 10,       # 25-49 unique buyers (raised from 8)
-    'low': 5,           # 10-24 unique buyers
+    'exceptional': 10,  # 100+ unique buyers (very strong organic)
+    'high': 7,          # 50-99 unique buyers
+    'medium': 5,        # 25-49 unique buyers
+    'low': 3,           # 10-24 unique buyers
     'minimal': 0        # <10 unique buyers (too early/risky)
 }
 
 # Post-graduation: Based on real holders (10 credits)
 HOLDER_WEIGHTS = {
-    'high': 15,             # 100+ holders
-    'medium': 10,           # 50-99 holders
-    'low': 5                # 20-49 holders
+    'high': 10,             # 100+ holders
+    'medium': 7,            # 50-99 holders
+    'low': 4                # 20-49 holders
 }
 
 # Twitter and LunarCrush scoring removed (no budget) - see lines 418-419
 
-# Telegram Social Confirmation Scoring (FREE - 0-10 points) - Reduced from 15
+# Telegram Social Confirmation Scoring (FREE - 0-5 points, 100-point budget)
 # Applies to tracked tokens as social confirmation
 TELEGRAM_CONFIRMATION_WEIGHTS = {
-    'high_intensity': 10,   # 6+ mentions OR 3+ groups (reduced from 15)
-    'medium_intensity': 7,  # 3-5 mentions OR growing buzz (reduced from 10)
-    'low_intensity': 3,     # 1-2 mentions (reduced from 5)
+    'high_intensity': 5,    # 6+ mentions OR 3+ groups
+    'medium_intensity': 3,  # 3-5 mentions OR growing buzz
+    'low_intensity': 1,     # 1-2 mentions
     'age_decay': 0.5,       # 50% reduction if call >2 hours old
-    'max_social_total': 15  # Cap total social score (reduced from 25)
+    'max_social_total': 5   # Cap total social score
 }
 
 # Telegram Call-Triggered Tracking (Optional)
@@ -583,7 +591,7 @@ LOG_FILE = "prometheus.log"
 # FEATURE FLAGS
 # =============================================================================
 
-ENABLE_NARRATIVES = True    # GROK: Enabled for early detection (+0-25 pts)
+ENABLE_NARRATIVES = True    # Enabled for early detection (+0-7 pts, 100-point budget)
 ENABLE_STATIC_NARRATIVES = False  # Static keyword matching - DISABLED (too noisy, not useful)
 ENABLE_REALTIME_NARRATIVES = True  # RSS + BERTopic for emerging narratives (no API cost)
 NARRATIVE_UPDATE_INTERVAL = 900  # Update narratives every 15 minutes (900s)

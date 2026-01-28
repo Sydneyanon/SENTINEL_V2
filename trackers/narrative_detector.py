@@ -131,7 +131,7 @@ class NarrativeDetector:
             'has_narrative': final_score > 0,
             'narratives': matched_narratives,
             'primary_narrative': matched_narratives[0]['name'] if matched_narratives else None,
-            'score': min(final_score, 25),  # Cap at 25 points (GROK narratives max)
+            'score': min(final_score, 7),  # Cap at 7 points (100-point budget)
             'realtime_score': realtime_score,
             'static_score': static_score,
             'realtime_reason': realtime_reason if realtime_score > 0 else None

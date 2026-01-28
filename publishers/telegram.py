@@ -111,7 +111,7 @@ class TelegramPublisher:
         message = f"""🔥 <b>PROMETHEUS SIGNAL</b> {fire_emojis}
 
 <b>${symbol}</b> | <b>{phase_label}</b>
-<b>Conviction: {conviction}</b>
+<b>Conviction: {conviction}/100</b>
 
 💰 Price: ${price:.8f}
 💎 MCap: ${mcap:,.0f}
@@ -263,7 +263,7 @@ class TelegramPublisher:
         msg = f"\U0001f525 <b>PROMETHEUS SIGNAL</b> {fire_emojis}\n\n"
         if signal_data.get('early_pump_alert'):
             msg += f"\u26a0\ufe0f <b>HIGH RISK \u2013 EARLY MOMENTUM</b> \u26a0\ufe0f\n"
-        msg += f"<b>${symbol}</b> | {phase} | {conviction}\n\n"
+        msg += f"<b>${symbol}</b> | {phase} | {conviction}/100\n\n"
         msg += f"\U0001f4b0 ${price:.8f} | \U0001f48e MCap {fmt_k(mcap)}\n"
         msg += f"\U0001f4a7 Liq {fmt_k(liquidity)} | \U0001f465 {holders} {holder_label}\n"
 
