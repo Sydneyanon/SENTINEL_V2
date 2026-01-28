@@ -242,7 +242,7 @@ class ConvictionEngine:
             base_scores['graduation_speed'] = grad_speed_bonus
 
             base_total = sum(base_scores.values())
-            logger.info(f"   💰 BASE SCORE: {base_total}/148")
+            logger.info(f"   💰 BASE SCORE: {base_total}")
             
             # ================================================================
             # PHASE 2: BUNDLE DETECTION (FREE) ⭐
@@ -289,7 +289,7 @@ class ConvictionEngine:
                 logger.info(f"   👥 Unique Buyers: DISABLED (active_tracker not initialized)")
 
             mid_total = adjusted_base + unique_buyers_score
-            logger.info(f"   💎 MID SCORE: {mid_total}/100")
+            logger.info(f"   💎 MID SCORE: {mid_total}")
 
             # Social sentiment removed (no budget)
             social_score = 0
@@ -440,7 +440,7 @@ class ConvictionEngine:
             # Early exit if mid score too low (now includes Telegram call boost)
             # FIX: Moved after Telegram calls so called tokens don't get early-exited
             if mid_total < 20:
-                logger.info(f"   ⏭️  Mid Score: {mid_total}/100 - Too low for further analysis")
+                logger.info(f"   ⏭️  Mid Score: {mid_total} - Too low for further analysis")
                 return {
                     'score': mid_total,
                     'passed': False,
@@ -1100,7 +1100,7 @@ class ConvictionEngine:
                             logger.debug(f"   📊 Retrace {retrace_pct:.0f}% from peak ${peak_mcap:.0f} (within tolerance)")
 
             logger.info("=" * 60)
-            logger.info(f"   🎯 FINAL CONVICTION: {final_score}/100")
+            logger.info(f"   🎯 FINAL CONVICTION: {final_score}")
             logger.info(f"   📊 Threshold: {threshold} ({'PRE-GRAD' if is_pre_grad else 'POST-GRAD'})")
             if early_trigger_applied:
                 logger.info(f"   ⚡ Early trigger activated!")
