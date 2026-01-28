@@ -399,11 +399,14 @@ TIMING_RULES = {
     'signal_maturity_gate': {
         'enabled': True,              # Gate signals on minimum maturity
         'min_mcap_pre_grad': 12000,   # Pre-grad: skip if MCAP < $12K (lowered from $15K)
-        'min_age_minutes_pre_grad': 12,  # Pre-grad: skip if age < 12 min (lowered from 15)
+        'min_age_minutes_pre_grad': 12,  # Pre-grad: skip if age < 12 min (default)
         'min_age_minutes_fast_track': 5,  # Fast-track: high conviction OR high velocity → only 5 min
         'fast_track_min_score': 75,   # Score threshold to qualify for fast-track maturity
         'fast_track_min_velocity_score': 15,  # Buyer velocity score threshold (25+ buyers/5min = "fast")
-        'hard_block_age_minutes': 5,  # Hard block: NO signal before 5 min regardless of score
+        'min_age_minutes_ultra_fast': 2,  # Ultra fast-track: explosive velocity + bonding → 2 min
+        'ultra_fast_min_velocity_score': 22,  # Ultra: need "very_fast" velocity (50+ buyers/5min)
+        'ultra_fast_min_bonding_pct': 50,  # Ultra: need 50%+ bonding (real organic demand)
+        'hard_block_age_minutes': 2,  # Hard block: NO signal before 2 min (filters bot pumps)
         'min_mcap_post_grad': 0,      # Post-grad: no min MCAP (already graduated)
         'min_age_minutes_post_grad': 0,  # Post-grad: no min age
         'log_skipped': True           # Log skipped signals

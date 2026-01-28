@@ -891,6 +891,30 @@ class ConvictionEngine:
 
             final_score = mid_total + holder_result['penalty'] + holder_result['kol_bonus']
 
+            # BUYER-MCAP DIVERGENCE: High buyers + low MCAP = pump already dumped
+            # During a real pump: 500 buyers → $25K-50K MCAP ($50-100/buyer)
+            # After a dump: 500 buyers but $12K MCAP ($24/buyer) = trailing metrics
+            buyer_mcap_penalty = 0
+            if is_pre_grad and unique_buyers >= 150 and mcap > 0:
+                mcap_per_buyer = mcap / unique_buyers
+                if mcap_per_buyer < 30:
+                    # Severe divergence: $paper (599 buyers, $12K = $20/buyer)
+                    buyer_mcap_penalty = -35
+                    logger.warning(f"   🚨 BUYER-MCAP DIVERGENCE: {unique_buyers} buyers but only ${mcap:.0f} MCAP "
+                                   f"(${mcap_per_buyer:.0f}/buyer) — pump already dumped ({buyer_mcap_penalty} pts)")
+                elif mcap_per_buyer < 50:
+                    # Moderate divergence
+                    buyer_mcap_penalty = -20
+                    logger.warning(f"   ⚠️ BUYER-MCAP DIVERGENCE: {unique_buyers} buyers but ${mcap:.0f} MCAP "
+                                   f"(${mcap_per_buyer:.0f}/buyer) — possible dump ({buyer_mcap_penalty} pts)")
+                elif mcap_per_buyer < 75 and unique_buyers >= 300:
+                    # Mild divergence (only flag with very high buyer counts)
+                    buyer_mcap_penalty = -10
+                    logger.warning(f"   📊 BUYER-MCAP MILD: {unique_buyers} buyers, ${mcap:.0f} MCAP "
+                                   f"(${mcap_per_buyer:.0f}/buyer) ({buyer_mcap_penalty} pts)")
+
+            final_score += buyer_mcap_penalty
+
             # ML Prediction - Add conviction bonus based on predicted outcome
             kol_count = smart_wallet_data.get('wallet_count', 0)
             ml_result = self.ml_predictor.predict_for_signal(token_data, kol_count=kol_count)
@@ -953,24 +977,37 @@ class ConvictionEngine:
                             logger.warning(f"   🚫 MATURITY HARD BLOCK: {maturity_gate_reason}")
                         # Skip all further maturity checks - hard block overrides everything
 
-                # FAST-TRACK: High conviction OR high velocity → reduced maturity wait
+                # ULTRA FAST-TRACK: Explosive velocity + bonding → 2 min maturity
+                # Catches tokens like $typeshit that pump to 2x in first 5 min
                 if not maturity_gate_triggered and is_pre_grad:
-                    fast_track_score = maturity_cfg.get('fast_track_min_score', 75)
-                    fast_track_velocity = maturity_cfg.get('fast_track_min_velocity_score', 15)
-                    fast_track_age = maturity_cfg.get('min_age_minutes_fast_track', 5)
                     velocity_score = base_scores.get('buyer_velocity', 0)
+                    ultra_velocity = maturity_cfg.get('ultra_fast_min_velocity_score', 22)
+                    ultra_bonding = maturity_cfg.get('ultra_fast_min_bonding_pct', 50)
+                    ultra_age = maturity_cfg.get('min_age_minutes_ultra_fast', 2)
 
-                    score_qualifies = final_score >= fast_track_score
-                    velocity_qualifies = velocity_score >= fast_track_velocity
+                    if (velocity_score >= ultra_velocity
+                            and bonding_pct >= ultra_bonding
+                            and ultra_age > 0):
+                        min_age_min = ultra_age
+                        logger.info(f"   🚀 ULTRA FAST-TRACK: velocity {velocity_score} >= {ultra_velocity} + "
+                                    f"bonding {bonding_pct:.0f}% >= {ultra_bonding}%, maturity reduced to {ultra_age}m")
+                    else:
+                        # FAST-TRACK: High conviction OR high velocity → 5 min maturity
+                        fast_track_score = maturity_cfg.get('fast_track_min_score', 75)
+                        fast_track_velocity = maturity_cfg.get('fast_track_min_velocity_score', 15)
+                        fast_track_age = maturity_cfg.get('min_age_minutes_fast_track', 5)
 
-                    if (score_qualifies or velocity_qualifies) and fast_track_age > 0:
-                        min_age_min = fast_track_age
-                        reason_parts = []
-                        if score_qualifies:
-                            reason_parts.append(f"score {final_score} >= {fast_track_score}")
-                        if velocity_qualifies:
-                            reason_parts.append(f"velocity {velocity_score} >= {fast_track_velocity}")
-                        logger.info(f"   ⚡ FAST-TRACK: {' + '.join(reason_parts)}, maturity reduced to {fast_track_age}m")
+                        score_qualifies = final_score >= fast_track_score
+                        velocity_qualifies = velocity_score >= fast_track_velocity
+
+                        if (score_qualifies or velocity_qualifies) and fast_track_age > 0:
+                            min_age_min = fast_track_age
+                            reason_parts = []
+                            if score_qualifies:
+                                reason_parts.append(f"score {final_score} >= {fast_track_score}")
+                            if velocity_qualifies:
+                                reason_parts.append(f"velocity {velocity_score} >= {fast_track_velocity}")
+                            logger.info(f"   ⚡ FAST-TRACK: {' + '.join(reason_parts)}, maturity reduced to {fast_track_age}m")
 
                 # Check minimum MCAP (skip if hard block already triggered)
                 if not maturity_gate_triggered:
@@ -1209,6 +1246,7 @@ class ConvictionEngine:
                     'kol_bonus': holder_result['kol_bonus'],
                     'ml_bonus': ml_result.get('ml_bonus', 0),
                     'dump_penalty': dump_penalty,
+                    'buyer_mcap_penalty': buyer_mcap_penalty,
                     'total': final_score
                 },
                 'rug_checks': {
