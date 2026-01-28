@@ -5,7 +5,7 @@ Detects emerging crypto narratives from news sources without expensive APIs
 Features:
 - Fetches from 7+ crypto RSS feeds every 15-30 minutes
 - Uses BERTopic to cluster emerging narratives
-- Awards 0-25 bonus points for tokens matching hot narratives
+- Awards 0-7 bonus points for tokens matching hot narratives (100-point budget)
 - Self-contained, runs as background task
 - Railway-optimized (low CPU/RAM)
 

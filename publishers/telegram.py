@@ -44,9 +44,17 @@ class TelegramPublisher:
             logger.info(f"✅ Telegram bot initialized: @{me.username}")
             
             if self.banner_file_id:
-                logger.info(f"🎨 Video banner enabled (file_id: {self.banner_file_id[:20]}...)")
+                logger.info(f"🎨 Banner configured (file_id: {self.banner_file_id[:20]}...)")
+                # Test if the file_id is still valid
+                try:
+                    file_info = await self.bot.get_file(self.banner_file_id)
+                    logger.info(f"   ✅ Banner file_id valid (size: {file_info.file_size} bytes)")
+                except TelegramError as e:
+                    logger.error(f"   ❌ Banner file_id INVALID: {e}")
+                    logger.error(f"   Re-upload your banner MP4/GIF to get a fresh file_id")
+                    self.banner_file_id = None  # Disable broken banner
             else:
-                logger.info(f"⚠️ No banner configured - signals will be text-only (raw value: {repr(config.TELEGRAM_BANNER_FILE_ID)})")
+                logger.info(f"⚠️ No banner configured - signals will be text-only")
             
             return True
         except Exception as e:
@@ -122,21 +130,21 @@ class TelegramPublisher:
 
             # Primary on-chain signals (positive scores only)
             score_items = [
-                ('buyer_velocity', '🏃 Buyer Velocity', 35),
-                ('unique_buyers', '👥 Unique Buyers', 20),
-                ('buy_sell_ratio', '💹 Buy/Sell Ratio', 20),
-                ('bonding_speed', '⚡ Bonding Speed', 30),
-                ('acceleration', '🔥 Acceleration', 25),
-                ('volume', '📊 Volume', 15),
-                ('momentum', '🚀 Momentum', 10),
-                ('narrative', '🎯 Narrative', 15),
-                ('telegram_calls', '📱 TG Calls', 10),
+                ('buyer_velocity', '🏃 Vel'),
+                ('unique_buyers', '👥 Buyers'),
+                ('buy_sell_ratio', '💹 B/S'),
+                ('bonding_speed', '⚡ Bond'),
+                ('acceleration', '🔥 Accel'),
+                ('volume', '📊 Vol'),
+                ('momentum', '🚀 Mom'),
+                ('narrative', '🎯 Narr'),
+                ('telegram_calls', '📱 TG'),
             ]
 
-            for key, label, max_pts in score_items:
+            for key, label in score_items:
                 val = breakdown.get(key, 0)
                 if val > 0:
-                    message += f"{label}: +{val}/{max_pts}\n"
+                    message += f"{label}: +{val}\n"
 
             # ML bonus (if active)
             ml_bonus = breakdown.get('ml_bonus', 0)
@@ -160,7 +168,7 @@ class TelegramPublisher:
                 message += f"⚠️ {' | '.join(penalties)}\n"
 
             message += f"<b>═══════════════</b>\n"
-            message += f"<b>TOTAL: {breakdown.get('total', conviction)}/100</b>\n"
+            message += f"<b>TOTAL: {breakdown.get('total', conviction)}</b>\n"
             message += "\n"
 
         # Narrative info
@@ -190,6 +198,22 @@ class TelegramPublisher:
             if reason:
                 message += f"   {reason}\n"
             message += "\n"
+
+        # Socials
+        twitter = token_data.get('twitter', '')
+        telegram_link = token_data.get('telegram', '')
+        website = token_data.get('website', '')
+        social_items = []
+        if twitter:
+            social_items.append(f'<a href="{twitter}">Twitter</a>')
+        if telegram_link:
+            social_items.append(f'<a href="{telegram_link}">Telegram</a>')
+        if website:
+            social_items.append(f'<a href="{website}">Website</a>')
+
+        social_count = len(social_items)
+        if social_items:
+            message += f"🌐 <b>Socials ({social_count}/3):</b> {' | '.join(social_items)}\n\n"
 
         # Links
         message += f"""🔗 <a href="https://dexscreener.com/solana/{token_address}">DexScreener</a>
@@ -280,6 +304,20 @@ class TelegramPublisher:
             if pen_parts:
                 msg += f"\u26a0\ufe0f Penalties: {', '.join(pen_parts)}\n"
 
+        # Socials
+        twitter = token_data.get('twitter', '')
+        telegram_link = token_data.get('telegram', '')
+        website = token_data.get('website', '')
+        socials = []
+        if twitter:
+            socials.append(f'<a href="{twitter}">𝕏</a>')
+        if telegram_link:
+            socials.append(f'<a href="{telegram_link}">TG</a>')
+        if website:
+            socials.append(f'<a href="{website}">Web</a>')
+        if socials:
+            msg += f"\n🌐 Socials: {' | '.join(socials)}\n"
+
         # Links
         msg += f'\n<a href="https://dexscreener.com/solana/{token_address}">DexS</a>'
         msg += f' | <a href="https://birdeye.so/token/{token_address}">Bird</a>'
@@ -334,7 +372,7 @@ class TelegramPublisher:
         logger.info(f"   Price: ${token_data.get('price_usd', 0):.8f}")
         logger.info(f"   MCap: ${token_data.get('market_cap', 0):,.0f}")
         logger.info(f"   Liquidity: ${token_data.get('liquidity', 0):,.0f}")
-        logger.info(f"   Conviction: {conviction}/100")
+        logger.info(f"   Conviction: {conviction}")
         logger.info(f"   Target channel: {self.channel_id}")
 
         # OPT-051: Retry logic (3 attempts, 2s delay)
@@ -345,26 +383,38 @@ class TelegramPublisher:
             try:
                 compact_caption = self._format_signal_compact(signal_data)
 
-                # If we have a banner, send as video message with compact caption
+                # If we have a banner, send as animation/video with compact caption
                 if self.banner_file_id:
                     try:
-                        logger.info(f"🎬 Sending video banner for ${symbol}...")
-                        result = await self.bot.send_video(
+                        logger.info(f"🎬 Sending animation banner for ${symbol}...")
+                        result = await self.bot.send_animation(
                             chat_id=self.channel_id,
-                            video=self.banner_file_id,
+                            animation=self.banner_file_id,
                             caption=compact_caption,
                             parse_mode=ParseMode.HTML,
-                            supports_streaming=True,
                             disable_notification=False
                         )
-                    except TelegramError as e:
-                        logger.warning(f"⚠️ Video banner failed ({e}), sending compact text-only")
-                        result = await self.bot.send_message(
-                            chat_id=self.channel_id,
-                            text=compact_caption,
-                            parse_mode=ParseMode.HTML,
-                            disable_web_page_preview=False
-                        )
+                    except TelegramError as e1:
+                        logger.warning(f"⚠️ Animation failed ({e1}), trying send_video...")
+                        try:
+                            result = await self.bot.send_video(
+                                chat_id=self.channel_id,
+                                video=self.banner_file_id,
+                                caption=compact_caption,
+                                parse_mode=ParseMode.HTML,
+                                supports_streaming=True,
+                                disable_notification=False
+                            )
+                        except TelegramError as e2:
+                            logger.warning(f"⚠️ Video also failed ({e2}), file_id may be expired. Sending text-only")
+                            logger.warning(f"   Banner file_id: {self.banner_file_id[:30]}...")
+                            logger.warning(f"   Re-upload banner with upload_banner() to get a fresh file_id")
+                            result = await self.bot.send_message(
+                                chat_id=self.channel_id,
+                                text=compact_caption,
+                                parse_mode=ParseMode.HTML,
+                                disable_web_page_preview=False
+                            )
                 else:
                     # No banner - send compact text message
                     result = await self.bot.send_message(
@@ -376,7 +426,7 @@ class TelegramPublisher:
 
                 # SUCCESS! Reset failure counter
                 self.consecutive_failures = 0
-                logger.info(f"📤 Posted Prometheus signal to Telegram: ${symbol} ({conviction}/100)")
+                logger.info(f"📤 Posted Prometheus signal to Telegram: ${symbol} ({conviction})")
                 return result.message_id
 
             except TelegramError as e:
@@ -425,7 +475,7 @@ class TelegramPublisher:
         })
 
         logger.error(f"🚨 FAILED TO POST SIGNAL: {mint} ({symbol}) - {error}")
-        logger.error(f"   Conviction: {conviction}/100")
+        logger.error(f"   Conviction: {conviction}")
         logger.error(f"   Consecutive failures: {self.consecutive_failures}")
 
         # OPT-051: Health check - alert if 3+ consecutive failures
@@ -471,14 +521,22 @@ Failed signals logged to database with 'posting_failed' flag.
 The fire has been stolen. Watching for elite trader activity... 🔥"""
             
             if self.banner_file_id:
-                # Send with video banner
-                await self.bot.send_video(
-                    chat_id=self.channel_id,
-                    video=self.banner_file_id,
-                    caption=test_message,
-                    parse_mode=ParseMode.HTML,
-                    supports_streaming=True
-                )
+                # Send with animation banner (fallback to video)
+                try:
+                    await self.bot.send_animation(
+                        chat_id=self.channel_id,
+                        animation=self.banner_file_id,
+                        caption=test_message,
+                        parse_mode=ParseMode.HTML
+                    )
+                except TelegramError:
+                    await self.bot.send_video(
+                        chat_id=self.channel_id,
+                        video=self.banner_file_id,
+                        caption=test_message,
+                        parse_mode=ParseMode.HTML,
+                        supports_streaming=True
+                    )
             else:
                 await self.bot.send_message(
                     chat_id=self.channel_id,

@@ -19,22 +19,21 @@ class ConvictionEngine:
     """
     Analyzes tokens and calculates conviction scores (0-100)
 
-    Scoring breakdown (ON-CHAIN-FIRST - KOL scoring disabled):
-    - Buyer Velocity: 0-30 points (strongest predictor, raised from 25)
-    - Unique Buyers: 0-20 points (increased from 0-15)
-    - Buy/Sell Ratio: 0-20 points (percentage-based)
-    - Volume Velocity: 0-15 points (increased from 0-10)
-    - Bonding Curve Speed: 0-20 points (15 base + 5 bonus at 50%+ bonding)
-    - Price Momentum: 0-10 points
-    - Narrative Detection: 0-15 points (RSS+BERTopic matching)
-    - Telegram Calls: 0-10 points (reduced from 0-15)
-    - Bundle Penalty: -5 to -40 points (with overrides)
-    - Holder Concentration: -15 to -40 points
-    - ML Prediction: -30 to +20 points
-    Total: 0-140+ points (can exceed with bonuses)
-
-    NOTE: Smart wallet (KOL) scoring structure preserved but disabled.
-          Set config.SMART_WALLET_WEIGHTS['max_score'] > 0 to re-enable.
+    Scoring breakdown (ON-CHAIN-FIRST — 100-point budget):
+    PRE-GRAD (100 max positive):
+    - Buyer Velocity: 0-18 pts | Bonding Speed: 0-15 pts
+    - Acceleration: 0-15 pts  | Buy/Sell Ratio: 0-10 pts
+    - Unique Buyers: 0-10 pts | Volume: 0-8 pts
+    - Vol/Liq Velocity: 0-6   | Momentum: 0-6 pts
+    - Narrative: 0-7 pts      | TG Calls: 0-5 pts
+    POST-GRAD (100 max positive):
+    - Buyer Velocity: 0-18 pts | Volume: 0-12 pts
+    - Buy/Sell Ratio: 0-10 pts | Unique Buyers: 0-10 pts
+    - Social Verification: 0-14 | Graduation Speed: 0-10 pts
+    - Vol/Liq Velocity: 0-6    | Momentum: 0-8 pts
+    - Narrative: 0-7 pts       | TG Calls: 0-5 pts
+    Penalties (subtractive): Bundle, Holder Conc., RugCheck, Authority, Dev Sell, Dump, MCAP
+    ML Prediction: -30 to +20 pts (additive)
     """
     
     def __init__(
@@ -101,16 +100,16 @@ class ConvictionEngine:
             print(f"📊 Status: {'🌱 PRE-GRADUATION (pump.fun)' if is_pre_grad else '🎓 POST-GRADUATION (Raydium)'}")
             print(f"⚡ Bonding Curve: {bonding_pct:.1f}%")
             print()
-            print("🎯 ON-CHAIN-FIRST SCORING SYSTEM (0-140+ scale):")
-            print("   ├─ 🏃 Buyer Velocity (0-30 pts)")
-            print("   ├─ 👥 Unique Buyers (0-20 pts)")
-            print("   ├─ 💹 Buy/Sell Ratio (0-20 pts)")
-            print("   ├─ 📊 Volume Velocity (0-15 pts)")
-            print("   ├─ ⚡ Bonding Curve Speed (0-20 pts)")
-            print("   ├─ 🚀 Price Momentum (0-10 pts)")
-            print("   ├─ 🎯 Narrative Match (0-15 pts)")
-            print("   ├─ 📱 Telegram Calls (0-10 pts)")
-            print("   └─ 🚨 Rug Detection Penalties (-40 to 0)")
+            print("🎯 ON-CHAIN-FIRST SCORING SYSTEM (0-100 scale):")
+            print("   ├─ 🏃 Buyer Velocity (0-18 pts)")
+            print("   ├─ 👥 Unique Buyers (0-10 pts)")
+            print("   ├─ 💹 Buy/Sell Ratio (0-10 pts)")
+            print("   ├─ 📊 Volume Velocity (0-12 pts)")
+            print("   ├─ ⚡ Bonding Curve Speed (0-15 pts)")
+            print("   ├─ 🚀 Price Momentum (0-6 pts)")
+            print("   ├─ 🎯 Narrative Match (0-7 pts)")
+            print("   ├─ 📱 Telegram Calls (0-5 pts)")
+            print("   └─ 🚨 Rug Detection Penalties (subtractive)")
             print()
             print("⏳ Calculating real-time conviction score...")
             print("="*80 + "\n")
@@ -144,7 +143,7 @@ class ConvictionEngine:
                 else:
                     logger.debug(f"   👑 Smart Wallets: DISABLED (on-chain-first mode)")
 
-            # 1b. Buyer Velocity (0-25 points) - NEW: Replaces KOL scoring
+            # 1b. Buyer Velocity (0-18 points) - Replaces KOL scoring
             buyer_velocity_score = self._score_buyer_velocity(token_address)
             base_scores['buyer_velocity'] = buyer_velocity_score
             if buyer_velocity_score > 0:
@@ -160,13 +159,13 @@ class ConvictionEngine:
             else:
                 logger.debug(f"   ⚡ Bonding Speed: 0 points")
 
-            # 1d. Price Acceleration Bonus (0-25 points, pre-grad only)
+            # 1d. Price Acceleration Bonus (0-15 points, pre-grad only)
             acceleration_score = self._score_acceleration(token_data) if is_pre_grad else 0
             base_scores['acceleration'] = acceleration_score
             if acceleration_score > 0:
                 logger.info(f"   🔥 Acceleration: {acceleration_score} points")
 
-            # 2. Narrative Detection (0-10 points) - if enabled (reduced from 25)
+            # 2. Narrative Detection (0-7 points) - if enabled (100-point budget)
             narrative_data = {}  # Track for Telegram display
             if self.narrative_detector and config.ENABLE_NARRATIVES:
                 narrative_data = self.narrative_detector.analyze_token(
@@ -174,7 +173,7 @@ class ConvictionEngine:
                     token_name,
                     token_data.get('description', '')
                 )
-                base_scores['narrative'] = min(narrative_data.get('score', 0), 15)  # Cap at 15 (RSS+BERTopic clusters)
+                base_scores['narrative'] = min(narrative_data.get('score', 0), 7)  # Cap at 7 (100-point budget)
                 if base_scores['narrative'] > 0:
                     # Show which system matched (RSS+BERTopic realtime vs static)
                     realtime_score = narrative_data.get('realtime_score', 0)
@@ -204,10 +203,10 @@ class ConvictionEngine:
             base_scores['momentum'] = momentum_score
             logger.info(f"   🚀 Momentum: {momentum_score} points")
 
-            # 5. Buy/Sell Ratio (0-20 points) - Updated: Percentage-based scoring
+            # 5. Buy/Sell Ratio (0-10 points) - Percentage-based scoring
             buy_sell_score = self._score_buy_sell_ratio(token_data)
             base_scores['buy_sell_ratio'] = buy_sell_score
-            logger.info(f"   💹 Buy/Sell Ratio: {buy_sell_score}/20 points")
+            logger.info(f"   💹 Buy/Sell Ratio: {buy_sell_score} points")
 
             # 6. Volume/Liquidity Velocity (0-8 points) - OPT-044: High velocity = early momentum
             velocity_score = self._score_volume_liquidity_velocity(token_data)
@@ -242,7 +241,7 @@ class ConvictionEngine:
             base_scores['graduation_speed'] = grad_speed_bonus
 
             base_total = sum(base_scores.values())
-            logger.info(f"   💰 BASE SCORE: {base_total}/148")
+            logger.info(f"   💰 BASE SCORE: {base_total}/100")
             
             # ================================================================
             # PHASE 2: BUNDLE DETECTION (FREE) ⭐
@@ -289,7 +288,7 @@ class ConvictionEngine:
                 logger.info(f"   👥 Unique Buyers: DISABLED (active_tracker not initialized)")
 
             mid_total = adjusted_base + unique_buyers_score
-            logger.info(f"   💎 MID SCORE: {mid_total}/100")
+            logger.info(f"   💎 MID SCORE: {mid_total}")
 
             # Social sentiment removed (no budget)
             social_score = 0
@@ -386,7 +385,7 @@ class ConvictionEngine:
             if total_social > max_social:
                 excess = total_social - max_social
                 social_confirmation_score -= excess
-                logger.info(f"   ⚖️  Social cap applied: reduced Telegram by {excess} pts (max 25 total)")
+                logger.info(f"   ⚖️  Social cap applied: reduced Telegram by {excess} pts (max {max_social} total)")
                 telegram_call_data['capped'] = True
 
             mid_total += social_confirmation_score
@@ -415,18 +414,18 @@ class ConvictionEngine:
 
                         # BONUS 1: High call frequency (same CA mentioned 3+ times)
                         if call_count >= 3:
-                            multi_call_bonus += 10
-                            logger.info(f"      🔥 HIGH FREQUENCY BONUS: +10 pts ({call_count} calls)")
+                            multi_call_bonus += 3
+                            logger.info(f"      🔥 HIGH FREQUENCY BONUS: +3 pts ({call_count} calls)")
 
                         # BONUS 2: Multi-group confirmation (3+ different groups)
                         if group_count >= 3:
-                            multi_call_bonus += 15
-                            logger.info(f"      🔥 MULTI-GROUP BONUS: +15 pts ({group_count} groups)")
+                            multi_call_bonus += 5
+                            logger.info(f"      🔥 MULTI-GROUP BONUS: +5 pts ({group_count} groups)")
 
-                        # If both bonuses apply, cap at +10 to avoid over-scoring (reduced from 20)
-                        if multi_call_bonus > 10:
-                            logger.info(f"      ⚖️  Multi-call bonus capped at +10 pts")
-                            multi_call_bonus = 10
+                        # If both bonuses apply, cap at +3 (100-point budget)
+                        if multi_call_bonus > 3:
+                            logger.info(f"      ⚖️  Multi-call bonus capped at +3 pts")
+                            multi_call_bonus = 3
 
                         if multi_call_bonus > 0:
                             telegram_call_data['multi_call_bonus'] = multi_call_bonus
@@ -440,7 +439,7 @@ class ConvictionEngine:
             # Early exit if mid score too low (now includes Telegram call boost)
             # FIX: Moved after Telegram calls so called tokens don't get early-exited
             if mid_total < 20:
-                logger.info(f"   ⏭️  Mid Score: {mid_total}/100 - Too low for further analysis")
+                logger.info(f"   ⏭️  Mid Score: {mid_total} - Too low for further analysis")
                 return {
                     'score': mid_total,
                     'passed': False,
@@ -466,8 +465,8 @@ class ConvictionEngine:
             # Data comes from PumpPortal (pre-grad) or DexScreener (post-grad)
             #
             # SCORING ASYMMETRY (pre-grad socials matter less):
-            # - Pre-grad: -10 (none) to +13 (full set) — most memecoins skip socials
-            # - Post-grad: -15 (none) to +21 (full + active) — socials more meaningful once DEX listed
+            # - Pre-grad: -7 (none) to +9 (full set) — most memecoins skip socials
+            # - Post-grad: -10 (none) to +14 (full + active) — socials more meaningful once DEX listed
 
             social_verification_score = 0
             social_verification_data = {}
@@ -475,8 +474,8 @@ class ConvictionEngine:
             # Check if social data is available (from PumpPortal or DexScreener)
             # If data not available yet for pre-grad, assume no socials (penalize unknown)
             if token_data.get('has_twitter') is None and is_pre_grad:
-                social_verification_score = -10
-                logger.warning(f"   ⚠️  PRE-GRAD: Social data not loaded yet - assuming no socials: -10 pts")
+                social_verification_score = -7
+                logger.warning(f"   ⚠️  PRE-GRAD: Social data not loaded yet - assuming no socials: -7 pts")
             elif token_data.get('has_twitter') is not None:
                 has_website = token_data.get('has_website', False)
                 has_twitter = token_data.get('has_twitter', False)
@@ -489,58 +488,57 @@ class ConvictionEngine:
                 if social_source != 'unknown':
                     logger.debug(f"   📊 Social data source: {social_source}")
 
-                # PRE-GRAD SCORING: -20 to +13 (more punitive for no socials)
+                # PRE-GRAD SCORING: -7 to +9 (100-point budget, socials matter less pre-grad)
                 if is_pre_grad:
                     if social_count == 0:
                         # No socials pre-grad = common for memecoins, light penalty
-                        # FIX: Was -20, too harsh - missed $STARTUP (+695%) runner
-                        social_verification_score = -10
+                        social_verification_score = -7
                         social_verification_data['anonymous'] = True
-                        logger.warning(f"   ⚠️  PRE-GRAD: No socials: -10 pts (common for memecoins)")
+                        logger.warning(f"   ⚠️  PRE-GRAD: No socials: -7 pts (common for memecoins)")
                     elif has_telegram and not has_twitter:
                         # Only Telegram = easy to fake/spam
-                        social_verification_score = 2
-                        logger.info(f"   📱 PRE-GRAD: Only Telegram: +2 pts (weak signal)")
+                        social_verification_score = 1
+                        logger.info(f"   📱 PRE-GRAD: Only Telegram: +1 pts (weak signal)")
                     elif has_twitter and has_telegram:
                         # Twitter + Telegram = strong pre-grad signal
-                        social_verification_score = 10
+                        social_verification_score = 7
                         social_verification_data['multi_platform'] = True
                         if has_website:
                             # Twitter + TG + website = rare pre-grad, very strong
-                            social_verification_score = 13
-                            logger.info(f"   ✅ PRE-GRAD: Full social set: +13 pts (rare, strong)")
+                            social_verification_score = 9
+                            logger.info(f"   ✅ PRE-GRAD: Full social set: +9 pts (rare, strong)")
                         else:
-                            logger.info(f"   ✅ PRE-GRAD: Twitter + Telegram: +10 pts")
+                            logger.info(f"   ✅ PRE-GRAD: Twitter + Telegram: +7 pts")
                     elif has_twitter:
                         # Only Twitter = decent signal
-                        social_verification_score = 6
-                        logger.info(f"   🐦 PRE-GRAD: Twitter only: +6 pts")
+                        social_verification_score = 4
+                        logger.info(f"   🐦 PRE-GRAD: Twitter only: +4 pts")
 
-                # POST-GRAD SCORING: -15 to +21 (socials more meaningful)
+                # POST-GRAD SCORING: -10 to +14 (100-point budget, socials more meaningful)
                 else:
                     if social_count == 0:
                         # No socials post-grad = anonymous but less damning
-                        social_verification_score = -15
+                        social_verification_score = -10
                         social_verification_data['anonymous'] = True
-                        logger.warning(f"   ⚠️  POST-GRAD: No socials: -15 pts (anonymous)")
+                        logger.warning(f"   ⚠️  POST-GRAD: No socials: -10 pts (anonymous)")
                     else:
                         # Base scoring for social presence
                         if has_twitter and has_telegram:
                             # Both Twitter + Telegram = legit project
-                            social_verification_score = 10
+                            social_verification_score = 7
                             social_verification_data['multi_platform'] = True
                         elif has_twitter or has_telegram:
                             # At least one social = some legitimacy
-                            social_verification_score = 5
+                            social_verification_score = 3
 
                         # Additional bonuses for post-grad
                         if has_website:
-                            social_verification_score += 6  # Website matters more post-grad
+                            social_verification_score += 4  # Website matters more post-grad
                         if has_discord:
-                            social_verification_score += 5  # Discord community = strong signal
+                            social_verification_score += 3  # Discord community = strong signal
 
-                        # Cap at +21 for post-grad
-                        social_verification_score = min(social_verification_score, 21)
+                        # Cap at +14 for post-grad (100-point budget)
+                        social_verification_score = min(social_verification_score, 14)
 
                         if social_verification_score > 0:
                             logger.info(f"   ✅ POST-GRAD: Social verification: +{social_verification_score} pts")
@@ -899,17 +897,17 @@ class ConvictionEngine:
                 mcap_per_buyer = mcap / unique_buyers
                 if mcap_per_buyer < 30:
                     # Severe divergence: $paper (599 buyers, $12K = $20/buyer)
-                    buyer_mcap_penalty = -35
+                    buyer_mcap_penalty = -25
                     logger.warning(f"   🚨 BUYER-MCAP DIVERGENCE: {unique_buyers} buyers but only ${mcap:.0f} MCAP "
                                    f"(${mcap_per_buyer:.0f}/buyer) — pump already dumped ({buyer_mcap_penalty} pts)")
                 elif mcap_per_buyer < 50:
                     # Moderate divergence
-                    buyer_mcap_penalty = -20
+                    buyer_mcap_penalty = -15
                     logger.warning(f"   ⚠️ BUYER-MCAP DIVERGENCE: {unique_buyers} buyers but ${mcap:.0f} MCAP "
                                    f"(${mcap_per_buyer:.0f}/buyer) — possible dump ({buyer_mcap_penalty} pts)")
                 elif mcap_per_buyer < 75 and unique_buyers >= 300:
                     # Mild divergence (only flag with very high buyer counts)
-                    buyer_mcap_penalty = -10
+                    buyer_mcap_penalty = -8
                     logger.warning(f"   📊 BUYER-MCAP MILD: {unique_buyers} buyers, ${mcap:.0f} MCAP "
                                    f"(${mcap_per_buyer:.0f}/buyer) ({buyer_mcap_penalty} pts)")
 
@@ -1139,14 +1137,14 @@ class ConvictionEngine:
 
                     # Show weakest scoring components (on-chain-first)
                     breakdown_items = [
-                        ('Buyer Velocity', base_scores.get('buyer_velocity', 0), 35),
-                        ('Unique Buyers', unique_buyers_score, 20),
-                        ('Buy/Sell Ratio', base_scores.get('buy_sell_ratio', 0), 20),
-                        ('Volume', base_scores['volume'], 15),
+                        ('Buyer Velocity', base_scores.get('buyer_velocity', 0), 18),
+                        ('Unique Buyers', unique_buyers_score, 10),
+                        ('Buy/Sell Ratio', base_scores.get('buy_sell_ratio', 0), 10),
+                        ('Volume', base_scores['volume'], 12),
                         ('Bonding Speed', base_scores.get('bonding_speed', 0), 15),
-                        ('Momentum', base_scores['momentum'], 10),
-                        ('Narrative', base_scores['narrative'], 10),
-                        ('Telegram Calls', social_confirmation_score, 10),
+                        ('Momentum', base_scores['momentum'], 6),
+                        ('Narrative', base_scores['narrative'], 7),
+                        ('Telegram Calls', social_confirmation_score, 5),
                     ]
 
                     # Sort by potential gains (max points - actual points)
@@ -1279,7 +1277,7 @@ class ConvictionEngine:
     
     def _score_volume_velocity(self, token_data: Dict) -> int:
         """
-        Score based on volume velocity (0-15 points) - PHASE-AWARE
+        Score based on volume velocity (0-8 pre-grad, 0-12 post-grad) - PHASE-AWARE
 
         Pre-Graduation: Uses PumpPortal WebSocket rolling SOL volume (FREE)
           - DexScreener has NO data for pre-grad tokens (volume_24h = 0, mcap = 0)
@@ -1324,11 +1322,11 @@ class ConvictionEngine:
 
         # Score based on velocity ratio (acceleration) OR absolute volume (raw demand)
         if ratio > 3.0 or current > 50:
-            score = weights['spiking']   # 15 pts
+            score = weights['spiking']   # 8 pts
         elif ratio > 1.5 or current > 20:
-            score = weights['growing']   # 10 pts
+            score = weights['growing']   # 5 pts
         elif ratio > 1.0 or current > 5:
-            score = weights['steady']    # 5 pts
+            score = weights['steady']    # 3 pts
         else:
             score = 0
 
@@ -1399,60 +1397,50 @@ class ConvictionEngine:
     
     def _score_price_momentum(self, token_data: Dict) -> int:
         """
-        Score based on price momentum (-25 to +10 points base + multi-timeframe bonus)
-        GROK CALIBRATED: 2-3x stronger downside penalties, phase-aware
-
-        - Pre-grad: Uses 5m price change (-25 to +10 pts) — dumps are usually fatal
-        - Post-grad: Uses 5m price change (-15 to +10 pts) — post-Raydium volatility is normal
+        Score based on price momentum (-15 to +6 pre-grad, -10 to +8 post-grad)
+        Phase-aware: pre-grad dumps are more fatal.
+        Post-grad gets +2 multi-timeframe bonus (max +8 total).
         """
         bonding_pct = token_data.get('bonding_curve_pct', 0)
         is_pre_grad = bonding_pct < 100
 
-        # Base score from 5m price change (more graduated)
         price_change_5m = token_data.get('price_change_5m', 0)
 
-        if price_change_5m >= 50:  # +50% in 5 min
-            base_score = config.MOMENTUM_WEIGHTS['very_strong']  # 10 pts
-        elif price_change_5m >= 30:  # +30% in 5 min
-            base_score = config.MOMENTUM_WEIGHTS['strong']  # 7 pts
-        elif price_change_5m >= 10:  # +10% in 5 min (moderate)
-            base_score = config.MOMENTUM_WEIGHTS.get('moderate', 3)  # 3 pts
-        elif price_change_5m >= 0:  # Flat/slightly positive
+        if price_change_5m >= 50:
+            base_score = config.MOMENTUM_WEIGHTS['very_strong']  # 6 pts
+        elif price_change_5m >= 30:
+            base_score = config.MOMENTUM_WEIGHTS['strong']       # 4 pts
+        elif price_change_5m >= 10:
+            base_score = config.MOMENTUM_WEIGHTS.get('moderate', 2)  # 2 pts
+        elif price_change_5m >= 0:
             base_score = 0
-        elif price_change_5m >= -10:  # -10% to 0% (mild decline)
-            base_score = -5
-            logger.warning(f"   📉 DECLINING: {price_change_5m:.1f}% in 5m (-5 pts)")
-        elif price_change_5m >= -20:  # -20% to -10% (selling pressure)
-            base_score = -5 if not is_pre_grad else -12
+        elif price_change_5m >= -10:
+            base_score = -3
+            logger.warning(f"   📉 DECLINING: {price_change_5m:.1f}% in 5m (-3 pts)")
+        elif price_change_5m >= -20:
+            base_score = -3 if not is_pre_grad else -8
             logger.warning(f"   📉 DUMPING: {price_change_5m:.1f}% in 5m ({base_score} pts {'[pre-grad]' if is_pre_grad else '[post-grad]'})")
-        elif price_change_5m >= -40:  # -40% to -20% (active dump)
-            base_score = -12 if not is_pre_grad else -20
+        elif price_change_5m >= -40:
+            base_score = -8 if not is_pre_grad else -12
             logger.warning(f"   📉 HEAVY DUMP: {price_change_5m:.1f}% in 5m ({base_score} pts {'[pre-grad]' if is_pre_grad else '[post-grad]'})")
-        else:  # -40%+ (crash)
-            base_score = -15 if not is_pre_grad else -25
+        else:
+            base_score = -10 if not is_pre_grad else -15
             logger.warning(f"   📉 CRASHING: {price_change_5m:.1f}% in 5m ({base_score} pts {'[pre-grad]' if is_pre_grad else '[post-grad]'})")
 
-        # POST-GRAD ONLY: Multi-timeframe momentum bonus
+        # POST-GRAD ONLY: Multi-timeframe momentum bonus (max +2)
         if not is_pre_grad:
             price_change_1h = token_data.get('price_change_1h', 0)
             price_change_6h = token_data.get('price_change_6h', 0)
             price_change_24h = token_data.get('price_change_24h', 0)
 
-            timeframe_bonus = 0
-            positive_timeframes = []
-
-            # +5 pts per positive timeframe (sustained momentum)
-            if price_change_1h > 0:
-                timeframe_bonus += 5
-                positive_timeframes.append(f"1h: +{price_change_1h:.1f}%")
-            if price_change_6h > 0:
-                timeframe_bonus += 5
-                positive_timeframes.append(f"6h: +{price_change_6h:.1f}%")
-            if price_change_24h > 0:
-                timeframe_bonus += 5
-                positive_timeframes.append(f"24h: +{price_change_24h:.1f}%")
+            positive_count = sum(1 for p in [price_change_1h, price_change_6h, price_change_24h] if p > 0)
+            timeframe_bonus = min(positive_count, 2)  # +1 per positive timeframe, max +2
 
             if timeframe_bonus > 0:
+                positive_timeframes = []
+                if price_change_1h > 0: positive_timeframes.append(f"1h: +{price_change_1h:.1f}%")
+                if price_change_6h > 0: positive_timeframes.append(f"6h: +{price_change_6h:.1f}%")
+                if price_change_24h > 0: positive_timeframes.append(f"24h: +{price_change_24h:.1f}%")
                 logger.info(f"   📈 Multi-timeframe momentum: +{timeframe_bonus} pts ({', '.join(positive_timeframes)})")
 
             return base_score + timeframe_bonus
@@ -1460,17 +1448,17 @@ class ConvictionEngine:
         return base_score
     
     def _score_unique_buyers(self, unique_buyers: int) -> int:
-        """Score based on unique buyer count (0-20 points) - ON-CHAIN: Increased from 15"""
+        """Score based on unique buyer count (0-10 points) - 100-point budget"""
         weights = config.UNIQUE_BUYER_WEIGHTS
 
         if unique_buyers >= 100:
-            return weights['exceptional']  # 20 pts
+            return weights['exceptional']  # 10 pts
         elif unique_buyers >= 50:
-            return weights['high']         # 15 pts
+            return weights['high']         # 7 pts
         elif unique_buyers >= 25:
-            return weights['medium']       # 10 pts
+            return weights['medium']       # 5 pts
         elif unique_buyers >= 10:
-            return weights['low']          # 5 pts
+            return weights['low']          # 3 pts
         else:
             return weights['minimal']      # 0 pts
 
@@ -1588,106 +1576,79 @@ class ConvictionEngine:
 
     def _score_buy_sell_ratio(self, token_data: Dict) -> int:
         """
-        Score based on buy/sell ratio percentage (0-20 points)
-        Updated 2026-01-25: Percentage-based scoring for better ML training data
+        Score based on buy/sell ratio percentage (0-10 points)
+        Normalized to 100-point budget.
 
         Formula: buy_percentage = (buys / (buys + sells)) * 100
 
-        Thresholds (based on 2025-2026 Solana memecoin data):
-        - >80% buys (Very Bullish): 16-20 points - Strong accumulation signal
-        - 70-80% buys (Bullish): 12-16 points - Positive momentum building
-        - 50-70% buys (Neutral): 8-12 points - Balanced, watch for shift
-        - 30-50% buys (Bearish): 4-8 points - Caution, potential distribution
-        - <30% buys (Very Bearish): 0-4 points - Red flag, heavy selling
-
-        Edge cases:
-        - Ignore if total txs < 20 (insufficient data)
-        - Prefer volume-weighted for accuracy (filters bot noise)
+        Thresholds:
+        - >80% buys (Very Bullish): 8-10 points
+        - 70-80% buys (Bullish): 6-8 points
+        - 50-70% buys (Neutral): 4-6 points
+        - 30-50% buys (Bearish): 2-4 points
+        - <30% buys (Very Bearish): 0-2 points
         """
-        # Get transaction counts
         buys_24h = token_data.get('buys_24h', 0)
         sells_24h = token_data.get('sells_24h', 0)
-
-        # Get volume data (if available) for volume-weighted calculation
         buy_volume = token_data.get('buy_volume_24h', 0)
         sell_volume = token_data.get('sell_volume_24h', 0)
-
-        # Check if we have sufficient data
         total_txs = buys_24h + sells_24h
 
         if total_txs < 20:
-            # Insufficient data - return neutral score
             logger.debug(f"      Insufficient buy/sell data ({total_txs} txs)")
-            return 8  # Neutral score (middle of range)
+            return 4  # Neutral score (middle of range)
 
-        # Prefer volume-weighted if available (more accurate, filters small bot txs)
         if buy_volume > 0 and sell_volume > 0:
             total_volume = buy_volume + sell_volume
             buy_percentage = (buy_volume / total_volume) * 100
             logger.debug(f"      Volume-weighted: {buy_percentage:.1f}% buys (${buy_volume:.0f}/${sell_volume:.0f})")
         else:
-            # Fall back to transaction count
             buy_percentage = (buys_24h / total_txs) * 100
             logger.debug(f"      Count-based: {buy_percentage:.1f}% buys ({buys_24h}/{sells_24h})")
 
-        # Score based on buy percentage
         if buy_percentage >= 80:
-            # Very Bullish: Aggressive accumulation
-            score = 16 + int((buy_percentage - 80) / 5)  # 16-20 points
-            return min(score, 20)
+            score = 8 + int((buy_percentage - 80) / 10)  # 8-10
+            return min(score, 10)
         elif buy_percentage >= 70:
-            # Bullish: Positive momentum
-            score = 12 + int((buy_percentage - 70) / 2.5)  # 12-16 points
+            score = 6 + int((buy_percentage - 70) / 5)   # 6-8
             return score
         elif buy_percentage >= 50:
-            # Neutral: Balanced
-            score = 8 + int((buy_percentage - 50) / 5)  # 8-12 points
+            score = 4 + int((buy_percentage - 50) / 10)  # 4-6
             return score
         elif buy_percentage >= 30:
-            # Bearish: Caution
-            score = 4 + int((buy_percentage - 30) / 5)  # 4-8 points
+            score = 2 + int((buy_percentage - 30) / 10)  # 2-4
             return score
         else:
-            # Very Bearish: Heavy distribution
-            score = int(buy_percentage / 7.5)  # 0-4 points
+            score = int(buy_percentage / 15)             # 0-2
             return max(score, 0)
 
     def _score_volume_liquidity_velocity(self, token_data: Dict) -> int:
         """
-        Score based on volume/liquidity velocity (0-10 points)
-        GROK ENHANCED: More graduated scoring for moderate flows
-        OPT-044: High velocity indicates hot trading activity
-
-        Pattern from 36 runners:
-        - Small runners: avg velocity = 20.67 (hot trading)
-        - Mega runners: avg velocity = 0.30 (stable/mature)
-
+        Score based on volume/liquidity velocity (0-6 points)
+        Normalized to 100-point budget.
         High velocity = early momentum phase (GOOD)
         Low velocity = mature/stagnant (NEUTRAL/BAD)
         """
         volume_24h = token_data.get('volume_24h', 0)
-        liquidity = token_data.get('liquidity', 1)  # Avoid div by zero
+        liquidity = token_data.get('liquidity', 1)
 
-        # If no data, return 0
         if volume_24h == 0 or liquidity == 0:
             return 0
 
-        # Calculate velocity ratio
         velocity_ratio = volume_24h / max(liquidity, 1000)
 
-        # Scoring logic (more graduated)
-        if velocity_ratio > 30:  # Extremely hot trading
-            return 10  # Raised from 8
-        elif velocity_ratio > 20:  # Very hot trading activity (GROK: >20% flow)
-            return 8  # Raised from 6
-        elif velocity_ratio > 10:  # Good momentum
-            return 5  # Raised from 4
-        elif velocity_ratio > 5:  # Moderate activity
-            return 3  # Raised from 2
-        elif velocity_ratio > 2:  # Light activity
-            return 1  # New tier
-        elif velocity_ratio < 1:  # Low activity (red flag)
-            return -3
+        if velocity_ratio > 30:
+            return 6
+        elif velocity_ratio > 20:
+            return 5
+        elif velocity_ratio > 10:
+            return 3
+        elif velocity_ratio > 5:
+            return 2
+        elif velocity_ratio > 2:
+            return 1
+        elif velocity_ratio < 1:
+            return -2
         else:
             return 0
 
@@ -1723,7 +1684,7 @@ class ConvictionEngine:
 
     def _score_buyer_velocity(self, token_address: str) -> int:
         """
-        Score based on buyer velocity (0-35 points) - NEW: Replaces KOL scoring
+        Score based on buyer velocity (0-18 points) - Replaces KOL scoring
         Measures how fast unique buyers are accumulating in a 5-minute window.
 
         Uses PumpPortal buyer history data (FREE).
@@ -1766,15 +1727,15 @@ class ConvictionEngine:
 
         # Score based on velocity thresholds
         if buyers_per_5min >= 100:
-            return weights['explosive']   # 25 pts
+            return weights['explosive']   # 18 pts
         elif buyers_per_5min >= 50:
-            return weights['very_fast']   # 20 pts
+            return weights['very_fast']   # 14 pts
         elif buyers_per_5min >= 25:
-            return weights['fast']        # 15 pts
+            return weights['fast']        # 10 pts
         elif buyers_per_5min >= 15:
-            return weights['moderate']    # 10 pts
+            return weights['moderate']    # 6 pts
         elif buyers_per_5min >= 5:
-            return weights['slow']        # 5 pts
+            return weights['slow']        # 3 pts
         else:
             return weights['minimal']     # 0 pts
 
@@ -1807,31 +1768,21 @@ class ConvictionEngine:
 
         # Score based on velocity thresholds
         if bonding_velocity >= 7.0:
-            score = weights.get('hyper', 20)  # 20 pts
-            # BONUS: Hyper fill at 40%+ bonding = insane demand
-            if bonding_pct >= 40:
-                score += 10
-                logger.info(f"      🚀 HYPER bonding speed: +10 pts ({bonding_velocity:.1f}%/min at {bonding_pct:.0f}% bonding)")
-            return score
+            return weights.get('hyper', 15)   # 15 pts
         elif bonding_velocity >= 5.0:
-            score = weights['rocket']   # 15 pts
-            # BONUS: Fast fill at 50%+ bonding = very strong interest signal
-            if bonding_pct >= 50:
-                score += 5
-                logger.info(f"      ⚡ Bonding speed bonus: +5 pts ({bonding_velocity:.1f}%/min at {bonding_pct:.0f}% bonding)")
-            return score
+            return weights['rocket']          # 12 pts
         elif bonding_velocity >= 2.0:
-            return weights['fast']     # 12 pts
+            return weights['fast']            # 8 pts
         elif bonding_velocity >= 1.0:
-            return weights['steady']   # 8 pts
+            return weights['steady']          # 5 pts
         elif bonding_velocity >= 0.5:
-            return weights['slow']     # 4 pts
+            return weights['slow']            # 2 pts
         else:
-            return weights['crawl']    # 0 pts
+            return weights['crawl']           # 0 pts
 
     def _score_acceleration(self, token_data: Dict) -> int:
         """
-        Score based on early price acceleration (0-25 points) - PRE-GRAD ONLY
+        Score based on early price acceleration (0-15 points) - PRE-GRAD ONLY
         Rewards rapid price increase within the first 10 minutes (early FOMO indicator).
 
         Uses price_change_5m as proxy for recent momentum on young tokens.
@@ -1876,7 +1827,7 @@ class ConvictionEngine:
 
     def _score_graduation_speed(self, token_address: str, token_data: Dict) -> int:
         """
-        Score based on graduation speed (-10 to +15 points) - POST-GRAD ONLY
+        Score based on graduation speed (-6 to +10 points) - POST-GRAD ONLY
         Fast graduation = strong organic demand; slow graduation = weak signal.
 
         Uses:
