@@ -13,6 +13,7 @@ Based on Grok recommendations for better early detection.
 """
 import asyncio
 import concurrent.futures
+import functools
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 from loguru import logger
@@ -24,6 +25,9 @@ import numpy as np
 
 # Dedicated thread pool for RSS fetches (prevents blocking the event loop)
 _rss_executor = concurrent.futures.ThreadPoolExecutor(max_workers=6, thread_name_prefix="rss")
+
+# User-Agent to avoid RSS feeds blocking us as a bot
+_RSS_USER_AGENT = "Mozilla/5.0 (compatible; SentinelBot/2.0; +https://github.com)"
 
 
 # RSS sources (crypto/Solana-focused, high-signal)
@@ -119,17 +123,29 @@ class RealtimeNarrativeDetector:
         cutoff = datetime.utcnow() - timedelta(hours=24)  # Only last 24h for relevance
 
         async def _fetch_single_feed(url: str) -> List[str]:
-            """Fetch a single RSS feed with timeout"""
+            """Fetch a single RSS feed with timeout and User-Agent"""
             articles = []
             try:
                 loop = asyncio.get_event_loop()
+                parse_fn = functools.partial(feedparser.parse, url, agent=_RSS_USER_AGENT)
                 feed = await asyncio.wait_for(
-                    loop.run_in_executor(_rss_executor, feedparser.parse, url),
+                    loop.run_in_executor(_rss_executor, parse_fn),
                     timeout=15  # 15 second timeout per feed
                 )
 
+                if feed.bozo and not feed.entries:
+                    logger.debug(f"   ⚠️  RSS malformed/empty: {url} — {getattr(feed.bozo_exception, 'getMessage', lambda: str(feed.bozo_exception))()}")
+                    return articles
+
                 for entry in feed.entries:
-                    # Get publish date - be lenient, don't skip dateless articles
+                    # Check for duplicate first (more efficient than parsing dates)
+                    entry_link = getattr(entry, 'link', None) or getattr(entry, 'id', None)
+                    if not entry_link:
+                        continue
+                    if entry_link in self.article_cache:
+                        continue
+
+                    # Date filter (lenient: accept articles without dates)
                     pub_date = entry.get("published_parsed") or entry.get("updated_parsed")
                     if pub_date:
                         try:
@@ -138,10 +154,6 @@ class RealtimeNarrativeDetector:
                                 continue
                         except (TypeError, ValueError):
                             pass  # Bad date format, include article anyway
-
-                    link = getattr(entry, 'link', None) or entry.get('id', '')
-                    if link and link in self.article_cache:
-                        continue
 
                     title = entry.get("title", "")
                     summary = entry.get("summary", "")
@@ -156,8 +168,10 @@ class RealtimeNarrativeDetector:
                         continue
 
                     articles.append(text)
-                    if link:
-                        self.article_cache[link] = datetime.utcnow()
+                    self.article_cache[entry_link] = datetime.utcnow()
+
+                if articles:
+                    logger.info(f"   ✅ {len(articles)} articles from {url.split('/')[2]}")
 
             except asyncio.TimeoutError:
                 logger.warning(f"   ⏰ RSS timeout (15s): {url}")
