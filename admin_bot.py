@@ -203,7 +203,8 @@ class AdminBot:
 /addwallet &lt;name&gt; &lt;address&gt; - Add wallet to tracking
 /removewallet &lt;address&gt; - Remove wallet from tracking
 /renamewallet &lt;address&gt; &lt;name&gt; - Rename a wallet
-/refreshwallets - Pull wallets from Dune query
+/refreshwallets [source] [limit] - Pull wallets from Dune
+  Sources: alltime, pnl (net profit), volume (pumpswap)
 
 <b>Data &amp; ML:</b>
 /dataset - ML training dataset stats
@@ -1519,21 +1520,68 @@ class AdminBot:
             await self._send_response(update, context, f"❌ Error: {str(e)}")
 
     async def _cmd_refreshwallets(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Refresh wallets from Dune query: /refreshwallets"""
+        """Refresh wallets from Dune query: /refreshwallets [source] [limit]
+
+        Sources:
+        - alltime (default): adam_tehc's all-time pump.fun leaderboard (query 4032586)
+        - pnl: Net PnL leaderboard with recent activity (query 4925276)
+        - volume: Pumpfun + Pumpswap volume data (query 5232018)
+        """
         try:
             if not self.database:
                 await self._send_response(update, context, "❌ Database not available")
                 return
 
+            # Parse arguments
+            args = context.args if context.args else []
+            source = 'alltime'
+            limit = 50  # Default limit
+
+            for arg in args:
+                if arg.lower() in ['alltime', 'pnl', 'volume']:
+                    source = arg.lower()
+                elif arg.isdigit():
+                    limit = min(int(arg), 200)  # Cap at 200
+
+            # Query configurations
+            QUERY_CONFIG = {
+                'alltime': {
+                    'id': '4032586',
+                    'name': 'adam_tehc All-Time Pump.fun Leaderboard',
+                    'profit_field': 'realized_profit',
+                    'wallet_field': 'wallet',
+                    'includes_pumpswap': False
+                },
+                'pnl': {
+                    'id': '4925276',
+                    'name': 'Net PnL Leaderboard (Solana DEX)',
+                    'profit_field': 'net_pnl',
+                    'wallet_field': 'wallet_address',
+                    'includes_pumpswap': True
+                },
+                'volume': {
+                    'id': '5232018',
+                    'name': 'Pumpfun + Pumpswap Volume',
+                    'profit_field': 'total_volume_usd',  # Using volume as proxy
+                    'wallet_field': 'wallet',
+                    'includes_pumpswap': True
+                }
+            }
+
+            config = QUERY_CONFIG[source]
+
             await self._send_response(update, context,
-                "🔄 <b>Fetching wallets from Dune...</b>\n\n"
+                f"🔄 <b>Fetching wallets from Dune...</b>\n\n"
+                f"<b>Source:</b> {config['name']}\n"
+                f"<b>Limit:</b> {limit} wallets\n"
+                f"<b>Includes Pumpswap:</b> {'✅' if config['includes_pumpswap'] else '❌'}\n\n"
                 "This may take a moment.")
 
             import aiohttp
 
-            # Dune API config - adam_tehc's pump fun leaderboard
+            # Dune API config
             dune_api_key = os.getenv('DUNE_API_KEY', '')
-            dune_query_id = os.getenv('DUNE_WALLET_QUERY_ID', '4032586')  # adam_tehc's pump fun leaderboard with PnL
+            dune_query_id = config['id']
 
             if not dune_api_key:
                 await self._send_response(update, context,
@@ -1542,8 +1590,8 @@ class AdminBot:
                     "<code>DUNE_API_KEY=your_key_here</code>")
                 return
 
-            # Fetch from Dune API - get top 100 wallets by profit
-            api_url = f"https://api.dune.com/api/v1/query/{dune_query_id}/results?limit=100"
+            # Fetch from Dune API
+            api_url = f"https://api.dune.com/api/v1/query/{dune_query_id}/results?limit={limit}"
             headers = {"X-Dune-API-Key": dune_api_key}
 
             async with aiohttp.ClientSession() as session:
@@ -1568,22 +1616,24 @@ class AdminBot:
                 await self._send_response(update, context, "❌ No results from Dune query.")
                 return
 
-            # Parse adam_tehc leaderboard data (has realized_profit and rank)
+            # Parse leaderboard data dynamically based on source
             added = 0
             skipped_existing = 0
             top_pnl = 0
+            profit_field = config['profit_field']
+            wallet_field = config['wallet_field']
 
-            for row in rows:
-                wallet = row.get('wallet', '')
-                rank = row.get('rank', 0)
-                realized_profit = row.get('realized_profit', 0)
+            for idx, row in enumerate(rows):
+                wallet = row.get(wallet_field, '')
+                rank = row.get('rank', row.get('position', idx + 1))
+                profit_value = row.get(profit_field, 0) or 0
 
                 if not wallet:
                     continue
 
                 # Track top PnL for reporting
-                if realized_profit > top_pnl:
-                    top_pnl = realized_profit
+                if profit_value > top_pnl:
+                    top_pnl = profit_value
 
                 # Check if already exists
                 existing = await self.database.get_tracked_wallet(wallet)
@@ -1591,23 +1641,26 @@ class AdminBot:
                     skipped_existing += 1
                     continue
 
-                # Generate name with rank
-                name = f"Rank{rank}_{wallet[:6]}"
+                # Generate name with source prefix
+                source_prefix = {'alltime': 'AT', 'pnl': 'PnL', 'volume': 'Vol'}
+                name = f"{source_prefix[source]}{rank}_{wallet[:6]}"
 
-                # Determine tier based on profit
-                if realized_profit >= 10_000_000:
+                # Determine tier based on profit/volume
+                if profit_value >= 10_000_000:
                     tier = 'elite'  # $10M+
-                elif realized_profit >= 1_000_000:
+                elif profit_value >= 1_000_000:
                     tier = 'top_kol'  # $1M+
+                elif profit_value >= 100_000:
+                    tier = 'verified'  # $100K+
                 else:
-                    tier = 'verified'  # Rest of top 100
+                    tier = 'emerging'  # Smaller but active
 
                 success = await self.database.add_tracked_wallet(
                     address=wallet,
                     name=name,
                     tier=tier,
-                    pnl=realized_profit,
-                    source='dune_adam_tehc'
+                    pnl=profit_value,
+                    source=f'dune_{source}'
                 )
 
                 if success:
@@ -1634,14 +1687,21 @@ class AdminBot:
                 logger.error(f"Helius webhook error: {e}")
                 webhook_msg = f"\n⚠️ Helius webhook failed: {str(e)[:50]}"
 
+            value_label = "Volume" if source == 'volume' else "PnL"
+            pumpswap_note = " (incl. Pumpswap)" if config['includes_pumpswap'] else ""
+
             response = f"✅ <b>Dune Refresh Complete!</b>\n\n"
-            response += f"<b>Source:</b> adam_tehc pump.fun leaderboard\n"
+            response += f"<b>Source:</b> {config['name']}{pumpswap_note}\n"
             response += f"<b>Added:</b> {added} new wallets\n"
             response += f"<b>Skipped (existing):</b> {skipped_existing}\n"
-            response += f"<b>Top PnL:</b> ${top_pnl:,.0f}\n"
+            response += f"<b>Top {value_label}:</b> ${top_pnl:,.0f}\n"
             response += f"<b>Total from Dune:</b> {len(rows)}"
             response += webhook_msg
-            response += f"\n\nUse /wallets to see all tracked wallets."
+            response += f"\n\n<b>Usage:</b>\n"
+            response += f"<code>/refreshwallets alltime 50</code> - All-time leaders\n"
+            response += f"<code>/refreshwallets pnl 50</code> - Net PnL leaders\n"
+            response += f"<code>/refreshwallets volume 50</code> - Pumpswap volume\n"
+            response += f"\nUse /wallets to see all tracked wallets."
 
             await self._send_response(update, context, response)
 
