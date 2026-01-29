@@ -804,16 +804,38 @@ class AdminBot:
             data_file = 'data/historical_training_data.json'
             whale_file = 'data/successful_whale_wallets.json'
 
-            if not os.path.exists(data_file):
+            # Primary: Load from database (persists across Railway deploys)
+            db_count = 0
+            if self.database:
+                try:
+                    db_count = await self.database.get_training_token_count()
+                except Exception:
+                    pass
+
+            # Fallback: Load from file
+            file_data = {}
+            try:
+                with open(data_file, 'r') as f:
+                    file_data = json.load(f)
+            except (FileNotFoundError, json.JSONDecodeError):
+                pass
+
+            file_count = file_data.get('total_tokens', 0)
+
+            # Use whichever source has more data
+            if db_count == 0 and file_count == 0:
                 await self._send_response(update, context,
                     "ℹ️ <b>No dataset yet.</b>\n\n"
                     "Run /collect to start building training data.")
                 return
 
-            with open(data_file, 'r') as f:
-                data = json.load(f)
+            # Prefer DB count if higher (file may be stale after Railway deploy)
+            data = file_data
 
-            total = data.get('total_tokens', 0)
+            # Use DB count if it's higher than file (file resets on Railway deploy)
+            total = max(db_count, file_data.get('total_tokens', 0))
+            data_source = "DB" if db_count >= file_count else "file"
+
             last_collection = data.get('last_daily_collection', data.get('last_backfill', 'never'))
             collected_today = data.get('tokens_collected_today', data.get('tokens_added_this_run', 0))
             outcome_dist = data.get('outcome_distribution', {})
@@ -829,7 +851,9 @@ class AdminBot:
             source_label = "Helius + DexScreener" if 'helius' in discovery_method else "DexScreener"
 
             response = "📊 <b>ML TRAINING DATASET</b>\n\n"
-            response += f"<b>Tokens:</b> {total}\n"
+            response += f"<b>Tokens:</b> {total} ({data_source})\n"
+            if db_count != file_count:
+                response += f"<b>DB/File:</b> {db_count}/{file_count}\n"
             response += f"<b>Source:</b> {source_label}\n"
             response += f"<b>Last collection:</b> {last_collection}\n"
             response += f"<b>Added last run:</b> {collected_today}\n\n"

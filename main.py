@@ -363,6 +363,54 @@ async def lifespan(app: FastAPI):
     await db.connect()
     logger.info("✅ Database connected and tables created")
 
+    # CRITICAL: Sync training tokens from DB to file (survives Railway deploys)
+    # Railway's ephemeral filesystem resets files on each deploy, but DB persists
+    try:
+        import json
+        db_tokens = await db.load_training_tokens()
+        if db_tokens:
+            # Load existing file to preserve metadata
+            file_data = {}
+            data_file = 'data/historical_training_data.json'
+            try:
+                with open(data_file, 'r') as f:
+                    file_data = json.load(f)
+            except (FileNotFoundError, json.JSONDecodeError):
+                pass
+
+            file_count = len(file_data.get('tokens', []))
+            db_count = len(db_tokens)
+
+            # Only sync if DB has more tokens than file (prevents accidental data loss)
+            if db_count > file_count:
+                logger.info(f"🔄 Syncing training data: DB has {db_count} tokens, file has {file_count}")
+
+                # Calculate outcome distribution
+                outcome_dist = {}
+                for token in db_tokens:
+                    outcome = token.get('outcome', 'unknown')
+                    outcome_dist[outcome] = outcome_dist.get(outcome, 0) + 1
+
+                output = {
+                    'collected_at': datetime.utcnow().isoformat(),
+                    'total_tokens': db_count,
+                    'synced_from_db': True,
+                    'last_sync': datetime.utcnow().isoformat(),
+                    'outcome_distribution': outcome_dist,
+                    'tokens': db_tokens
+                }
+
+                os.makedirs('data', exist_ok=True)
+                with open(data_file, 'w') as f:
+                    json.dump(output, f, indent=2)
+                logger.info(f"✅ Synced {db_count} training tokens from DB to file")
+            else:
+                logger.info(f"📊 Training data in sync: DB={db_count}, file={file_count}")
+        else:
+            logger.info("📊 No training tokens in database yet")
+    except Exception as e:
+        logger.warning(f"⚠️ Could not sync training tokens: {e}")
+
     # Run startup diagnostics (database check + OPT-041 verification)
     asyncio.create_task(run_diagnostics(db))
 
