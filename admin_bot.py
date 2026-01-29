@@ -1575,20 +1575,20 @@ class AdminBot:
                 }
             }
 
-            config = QUERY_CONFIG[source]
+            query_cfg = QUERY_CONFIG[source]
 
             await self._send_response(update, context,
                 f"🔄 <b>Fetching wallets from Dune...</b>\n\n"
-                f"<b>Source:</b> {config['name']}\n"
+                f"<b>Source:</b> {query_cfg['name']}\n"
                 f"<b>Limit:</b> {limit} wallets\n"
-                f"<b>Includes Pumpswap:</b> {'✅' if config['includes_pumpswap'] else '❌'}\n\n"
+                f"<b>Includes Pumpswap:</b> {'✅' if query_cfg['includes_pumpswap'] else '❌'}\n\n"
                 "This may take a moment.")
 
             import aiohttp
 
             # Dune API config
             dune_api_key = os.getenv('DUNE_API_KEY', '')
-            dune_query_id = config['id']
+            dune_query_id = query_cfg['id']
 
             if not dune_api_key:
                 await self._send_response(update, context,
@@ -1629,8 +1629,8 @@ class AdminBot:
             skipped = 0
             top_pnl = 0
             hot_wallets = []  # Wallets with big gains since last check
-            profit_field = config['profit_field']
-            wallet_field = config['wallet_field']
+            profit_field = query_cfg['profit_field']
+            wallet_field = query_cfg['wallet_field']
 
             for idx, row in enumerate(rows):
                 wallet = row.get(wallet_field, '')
@@ -1718,10 +1718,10 @@ class AdminBot:
                 webhook_msg = f"\n⚠️ Helius webhook failed: {str(e)[:50]}"
 
             value_label = "Volume" if source == 'volume' else "PnL"
-            pumpswap_note = " (incl. Pumpswap)" if config['includes_pumpswap'] else ""
+            pumpswap_note = " (incl. Pumpswap)" if query_cfg['includes_pumpswap'] else ""
 
             response = f"✅ <b>Dune Refresh Complete!</b>\n\n"
-            response += f"<b>Source:</b> {config['name']}{pumpswap_note}\n"
+            response += f"<b>Source:</b> {query_cfg['name']}{pumpswap_note}\n"
             response += f"<b>Added:</b> {added} new wallets\n"
             response += f"<b>Updated:</b> {updated} existing\n"
             response += f"<b>Unchanged:</b> {skipped}\n"
