@@ -269,22 +269,25 @@ async def cleanup_task():
                     if enriched_wallets:
                         # Update smart_wallet_tracker with fresh data
                         old_count = len(smart_wallet_tracker.tracked_wallets)
-                        
+
                         smart_wallet_tracker.tracked_wallets = {
-                            wallet['address']: wallet 
+                            wallet['address']: wallet
                             for wallet in enriched_wallets
                         }
-                        
+
+                        # Also merge DB wallets (from /refreshwallets)
+                        if db:
+                            try:
+                                db_wallets = await db.get_tracked_wallets_for_conviction()
+                                if db_wallets:
+                                    smart_wallet_tracker.tracked_wallets.update(db_wallets)
+                                    logger.info(f"   📥 Merged {len(db_wallets)} DB wallets")
+                            except Exception as db_e:
+                                logger.warning(f"   ⚠️ Could not load DB wallets: {db_e}")
+
                         # Log changes
-                        logger.info(f"✅ Refreshed {len(enriched_wallets)} wallets")
-                        
-                        # Show any significant changes
-                        for wallet in enriched_wallets:
-                            name = wallet.get('name', 'Unknown')
-                            tier = wallet.get('tier', 'unknown')
-                            win_rate = wallet.get('win_rate', 0)
-                            logger.info(f"   📊 {name} ({tier}): {win_rate*100:.1f}% WR")
-                        
+                        logger.info(f"✅ Refreshed {len(smart_wallet_tracker.tracked_wallets)} total wallets")
+
                         last_wallet_refresh = datetime.utcnow()
                         logger.info("=" * 70)
                     else:
@@ -433,7 +436,20 @@ async def lifespan(app: FastAPI):
     }
     
     logger.info(f"✅ Smart Wallet Tracker configured with {len(enriched_wallets)} wallets")
-    
+
+    # Load additional wallets from DB (added via /refreshwallets from Dune)
+    try:
+        db_wallets = await db.get_tracked_wallets_for_conviction()
+        if db_wallets:
+            # Merge DB wallets into tracker (DB wallets override if conflict)
+            before_count = len(smart_wallet_tracker.tracked_wallets)
+            smart_wallet_tracker.tracked_wallets.update(db_wallets)
+            added_count = len(smart_wallet_tracker.tracked_wallets) - before_count
+            logger.info(f"✅ Loaded {len(db_wallets)} wallets from DB ({added_count} new, {len(db_wallets) - added_count} updated)")
+            logger.info(f"   📊 Total tracked wallets for conviction: {len(smart_wallet_tracker.tracked_wallets)}")
+    except Exception as e:
+        logger.warning(f"⚠️ Could not load DB wallets: {e}")
+
     # Initialize Helius fetcher
     logger.info("🔗 Initializing Helius data fetcher...")
     helius_fetcher = HeliusDataFetcher()
