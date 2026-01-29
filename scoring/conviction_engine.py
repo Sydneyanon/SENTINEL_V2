@@ -945,15 +945,199 @@ class ConvictionEngine:
             passed = final_score >= threshold or early_trigger_applied
 
             # GROK: MCAP cap - skip if too high (avoid tops)
+            # POST-GRAD: Uses tiered system to catch $100-150K runners
             mcap_cap_triggered = False
+            post_grad_tier = None
+            post_grad_tier_info = ''
+            tier_score_boost = 0  # Score boost from post-grad tiers
+
             if passed and config.TIMING_RULES['mcap_cap']['enabled']:
-                max_mcap = (config.TIMING_RULES['mcap_cap']['max_mcap_pre_grad'] if is_pre_grad
-                           else config.TIMING_RULES['mcap_cap']['max_mcap_post_grad'])
-                if mcap > max_mcap:
-                    passed = False
-                    mcap_cap_triggered = True
-                    if config.TIMING_RULES['mcap_cap']['log_skipped']:
-                        logger.warning(f"   🚫 MCAP CAP: ${mcap:.0f} > ${max_mcap} (too late, skipping signal)")
+                if is_pre_grad:
+                    # Pre-grad: Simple cap at $25K
+                    max_mcap = config.TIMING_RULES['mcap_cap']['max_mcap_pre_grad']
+                    if mcap > max_mcap:
+                        passed = False
+                        mcap_cap_triggered = True
+                        if config.TIMING_RULES['mcap_cap']['log_skipped']:
+                            logger.warning(f"   🚫 MCAP CAP: ${mcap:.0f} > ${max_mcap} (too late for pre-grad)")
+                else:
+                    # Post-grad: Use tiered system (catches runners up to $200K)
+                    # GROK LOGIC: Score boosts are ADDITIVE (reward proven runners)
+                    # - Threshold stays at 65 across all tiers
+                    # - Higher MCAP = token proved itself = gets bonus points
+                    tier_cfg = config.TIMING_RULES.get('post_grad_tiers', {})
+                    max_mcap = config.TIMING_RULES['mcap_cap']['max_mcap_post_grad']
+                    tier_score_boost = 0  # Accumulated tier boost
+
+                    if tier_cfg.get('enabled', False):
+                        # Determine which tier this token falls into
+                        tier_1 = tier_cfg.get('tier_1', {})
+                        tier_2 = tier_cfg.get('tier_2', {})
+                        tier_3 = tier_cfg.get('tier_3', {})
+                        accel_cfg = tier_cfg.get('acceleration_bonus', {})
+
+                        # Get data for tier checks
+                        volume_1h = token_data.get('volume_1h', 0)
+                        liquidity = token_data.get('liquidity', 0) or 1  # Avoid div by 0
+                        volume_velocity = volume_1h / liquidity if liquidity > 0 else 0
+                        price_change_1h = token_data.get('price_change_1h', 0)
+                        price_change_30m = token_data.get('price_change_30m', token_data.get('price_change_5m', 0) * 2)  # Estimate
+                        peak_mcap = token_data.get('peak_mcap', mcap)
+                        current_retrace_pct = ((peak_mcap - mcap) / peak_mcap * 100) if peak_mcap > mcap else 0
+                        has_smart_wallet = smart_wallet_score > 0
+                        smart_wallet_count = len(smart_wallet_data.get('wallets', [])) if smart_wallet_data else 0
+
+                        # Get graduation speed (if available)
+                        grad_minutes = None
+                        if token_created_at:
+                            grad_minutes = (datetime.utcnow() - token_created_at).total_seconds() / 60
+
+                        # ========================================
+                        # TIER 1: Fresh graduates ($70K-$100K)
+                        # No boost - need full 65 from base factors
+                        # ========================================
+                        if mcap <= tier_1.get('max_mcap', 100000):
+                            post_grad_tier = 1
+                            score_boost = tier_1.get('score_boost', 0)
+                            min_grad_speed = tier_1.get('min_grad_speed_minutes', 30)
+
+                            # Note graduation speed
+                            if grad_minutes and grad_minutes > min_grad_speed:
+                                logger.info(f"   📊 TIER 1: Fresh graduate (${mcap/1000:.0f}K) - slow grad ({grad_minutes:.0f}m)")
+                            else:
+                                logger.info(f"   📊 TIER 1: Fresh graduate (${mcap/1000:.0f}K) - no boost (need {threshold} base)")
+
+                            tier_score_boost = score_boost
+                            post_grad_tier_info = tier_1.get('description', 'Fresh graduate')
+
+                        # ========================================
+                        # TIER 2: Confirmed runners ($100K-$150K)
+                        # +5 boost for proving it can climb
+                        # ========================================
+                        elif mcap <= tier_2.get('max_mcap', 150000):
+                            post_grad_tier = 2
+                            score_boost = tier_2.get('score_boost', 5)
+                            min_volume_vel = tier_2.get('min_volume_velocity', 1.5)
+                            min_price_1h = tier_2.get('min_price_change_1h', 10)
+                            max_retrace = tier_2.get('max_retrace_pct', 30)
+                            soft_retrace_threshold = tier_2.get('retrace_soft_threshold', 20)
+                            soft_retrace_penalty = tier_2.get('retrace_soft_penalty', -5)
+
+                            # Apply gates (hard blocks)
+                            tier_passed = True
+                            gate_fails = []
+
+                            if volume_velocity < min_volume_vel:
+                                tier_passed = False
+                                gate_fails.append(f"vol_vel {volume_velocity:.1f}x < {min_volume_vel}x")
+                            if price_change_1h < min_price_1h:
+                                tier_passed = False
+                                gate_fails.append(f"price_1h +{price_change_1h:.0f}% < +{min_price_1h}%")
+                            if current_retrace_pct > max_retrace:
+                                tier_passed = False
+                                gate_fails.append(f"retrace {current_retrace_pct:.0f}% > {max_retrace}%")
+
+                            if tier_passed:
+                                tier_score_boost = score_boost
+                                # Soft penalty for moderate retrace (20-30%)
+                                if current_retrace_pct > soft_retrace_threshold:
+                                    tier_score_boost += soft_retrace_penalty
+                                    logger.info(f"   📊 TIER 2: Confirmed runner (${mcap/1000:.0f}K) - boost +{score_boost}, retrace penalty {soft_retrace_penalty}")
+                                else:
+                                    logger.info(f"   📊 TIER 2: Confirmed runner (${mcap/1000:.0f}K) - boost +{score_boost}")
+                                post_grad_tier_info = tier_2.get('description', 'Confirmed runner')
+                            else:
+                                passed = False
+                                mcap_cap_triggered = True
+                                logger.warning(f"   🚫 TIER 2 GATES FAILED: {', '.join(gate_fails)}")
+                                post_grad_tier_info = f"Tier 2 blocked: {', '.join(gate_fails)}"
+
+                        # ========================================
+                        # TIER 3: Extended runners ($150K-$200K)
+                        # +10 boost for major climb, needs validation
+                        # ========================================
+                        elif mcap <= tier_3.get('max_mcap', 200000):
+                            post_grad_tier = 3
+                            score_boost = tier_3.get('score_boost', 10)
+                            min_volume_vel = tier_3.get('min_volume_velocity', 2.0)
+                            min_price_1h = tier_3.get('min_price_change_1h', 20)
+                            max_retrace = tier_3.get('max_retrace_pct', 20)
+                            require_smart = tier_3.get('require_smart_wallet', True)
+                            no_smart_penalty = tier_3.get('no_smart_wallet_penalty', -10)
+                            multi_wallet_bonus = tier_3.get('multi_wallet_bonus', 10)
+
+                            # Apply strict gates
+                            tier_passed = True
+                            gate_fails = []
+
+                            if volume_velocity < min_volume_vel:
+                                tier_passed = False
+                                gate_fails.append(f"vol_vel {volume_velocity:.1f}x < {min_volume_vel}x")
+                            if price_change_1h < min_price_1h:
+                                tier_passed = False
+                                gate_fails.append(f"price_1h +{price_change_1h:.0f}% < +{min_price_1h}%")
+                            if current_retrace_pct > max_retrace:
+                                tier_passed = False
+                                gate_fails.append(f"retrace {current_retrace_pct:.0f}% > {max_retrace}%")
+
+                            if tier_passed:
+                                tier_score_boost = score_boost
+
+                                # Smart wallet handling
+                                if has_smart_wallet:
+                                    # Multi-wallet bonus (+10 for 2+ wallets)
+                                    if smart_wallet_count >= 2:
+                                        tier_score_boost += multi_wallet_bonus
+                                        logger.info(f"   📊 TIER 3: Extended runner (${mcap/1000:.0f}K) - boost +{score_boost}, multi-wallet +{multi_wallet_bonus}")
+                                    else:
+                                        logger.info(f"   📊 TIER 3: Extended runner (${mcap/1000:.0f}K) - boost +{score_boost}")
+                                elif require_smart:
+                                    # No smart wallet at Tier 3 = penalty (but not hard block)
+                                    tier_score_boost += no_smart_penalty
+                                    logger.warning(f"   📊 TIER 3: Extended runner (${mcap/1000:.0f}K) - boost +{score_boost}, no smart wallet {no_smart_penalty}")
+
+                                post_grad_tier_info = tier_3.get('description', 'Extended runner')
+                            else:
+                                passed = False
+                                mcap_cap_triggered = True
+                                logger.warning(f"   🚫 TIER 3 GATES FAILED: {', '.join(gate_fails)}")
+                                post_grad_tier_info = f"Tier 3 blocked: {', '.join(gate_fails)}"
+
+                        # Beyond Tier 3: Hard cap at $200K
+                        else:
+                            passed = False
+                            mcap_cap_triggered = True
+                            if config.TIMING_RULES['mcap_cap']['log_skipped']:
+                                logger.warning(f"   🚫 MCAP CAP: ${mcap/1000:.0f}K > $200K (beyond all tiers)")
+
+                        # ========================================
+                        # ACCELERATION BONUS: +15 for +30% in 30min
+                        # Applies to all tiers (explosive moves)
+                        # ========================================
+                        if accel_cfg.get('enabled', True) and post_grad_tier and not mcap_cap_triggered:
+                            min_accel = accel_cfg.get('min_price_change_30m', 30)
+                            accel_bonus = accel_cfg.get('bonus_points', 15)
+                            if price_change_30m >= min_accel:
+                                tier_score_boost += accel_bonus
+                                logger.info(f"   🚀 ACCELERATION BONUS: +{accel_bonus} pts (price +{price_change_30m:.0f}% in 30m)")
+
+                        # Apply tier boost to final score
+                        if tier_score_boost != 0:
+                            final_score += tier_score_boost
+                            logger.info(f"   📈 TIER BOOST APPLIED: {tier_score_boost:+d} pts → new score {final_score}")
+
+                        # Check if boosted score passes threshold
+                        if not mcap_cap_triggered and final_score < threshold:
+                            passed = False
+                            logger.warning(f"   ⚠️ POST-GRAD: Score {final_score} < threshold {threshold} (even with tier boost)")
+
+                    else:
+                        # Tier system disabled - use simple cap
+                        if mcap > max_mcap:
+                            passed = False
+                            mcap_cap_triggered = True
+                            if config.TIMING_RULES['mcap_cap']['log_skipped']:
+                                logger.warning(f"   🚫 MCAP CAP: ${mcap:.0f} > ${max_mcap} (too late for post-grad)")
 
             # MATURITY GATE: Skip if token too young or MCAP too low (avoid sniped rugs)
             maturity_gate_triggered = False
@@ -1118,7 +1302,10 @@ class ConvictionEngine:
 
             logger.info("=" * 60)
             logger.info(f"   🎯 FINAL CONVICTION: {final_score}/100")
-            logger.info(f"   📊 Threshold: {threshold} ({'PRE-GRAD' if is_pre_grad else 'POST-GRAD'})")
+            stage_info = 'PRE-GRAD' if is_pre_grad else f'POST-GRAD Tier {post_grad_tier}' if post_grad_tier else 'POST-GRAD'
+            logger.info(f"   📊 Threshold: {threshold} ({stage_info})")
+            if post_grad_tier and post_grad_tier_info:
+                logger.info(f"   📊 Post-grad tier: {post_grad_tier_info}")
             if early_trigger_applied:
                 logger.info(f"   ⚡ Early trigger activated!")
             if early_pump_alert:
@@ -1229,6 +1416,9 @@ class ConvictionEngine:
                 'passed': passed,
                 'threshold': threshold,
                 'is_pre_grad': is_pre_grad,
+                'post_grad_tier': post_grad_tier,                # Post-grad tier (1, 2, or 3)
+                'post_grad_tier_info': post_grad_tier_info,      # Tier description
+                'tier_score_boost': tier_score_boost,  # Score boost from tier
                 'early_trigger_applied': early_trigger_applied,  # GROK: Early trigger flag
                 'early_pump_alert': early_pump_alert,            # Early Pump Alert forced signal
                 'mcap_cap_triggered': mcap_cap_triggered,        # GROK: MCAP cap flag
