@@ -402,8 +402,44 @@ TIMING_RULES = {
     'mcap_cap': {
         'enabled': True,              # Cap signals at high MCAP (avoid tops)
         'max_mcap_pre_grad': 25000,   # Skip if MCAP >$25K on pre-grad call
-        'max_mcap_post_grad': 50000,  # Skip if MCAP >$50K on post-grad call
+        'max_mcap_post_grad': 200000, # Skip if MCAP >$200K on post-grad call (raised from $50K)
         'log_skipped': True           # Log skipped signals for analysis
+    },
+
+    # NEW: Tiered Post-Grad Strategy (Grok recommendation 2026-01-29)
+    # Catches $100-150K entries that run to $500-600K
+    # Pump.fun graduation is ~$69K, so we tier based on distance from grad
+    'post_grad_tiers': {
+        'enabled': True,
+
+        # Tier 1: Fresh graduates ($70K-$100K) - highest win rate, early entry
+        'tier_1': {
+            'max_mcap': 100000,           # Up to $100K MCAP
+            'threshold_modifier': 0,      # Use standard POST_GRAD_THRESHOLD (45)
+            'min_grad_speed_minutes': 30, # Must have graduated in <30 min (quality filter)
+            'description': 'Fresh graduate'
+        },
+
+        # Tier 2: Confirmed runners ($100K-$150K) - proven momentum, moderate risk
+        'tier_2': {
+            'max_mcap': 150000,           # $100K-$150K MCAP
+            'threshold_modifier': +5,     # Need score 50+ (stricter)
+            'min_volume_velocity': 1.5,   # Volume must be 1.5x+ liquidity (active trading)
+            'min_price_change_1h': 10,    # Must be up 10%+ in 1h (momentum)
+            'max_retrace_pct': 30,        # Can't be in >30% retrace (not dead cat)
+            'description': 'Confirmed runner'
+        },
+
+        # Tier 3: Extended runners ($150K-$200K) - late entry, needs strong signals
+        'tier_3': {
+            'max_mcap': 200000,           # $150K-$200K MCAP
+            'threshold_modifier': +10,    # Need score 55+ (very strict)
+            'min_volume_velocity': 2.0,   # Volume must be 2x+ liquidity (very active)
+            'min_price_change_1h': 20,    # Must be up 20%+ in 1h (strong momentum)
+            'max_retrace_pct': 20,        # Can't be in >20% retrace (fresh breakout only)
+            'require_smart_wallet': True, # Require smart wallet activity (validation)
+            'description': 'Extended runner'
+        }
     },
 
     'signal_maturity_gate': {

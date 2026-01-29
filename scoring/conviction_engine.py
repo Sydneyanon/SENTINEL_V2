@@ -945,15 +945,160 @@ class ConvictionEngine:
             passed = final_score >= threshold or early_trigger_applied
 
             # GROK: MCAP cap - skip if too high (avoid tops)
+            # POST-GRAD: Uses tiered system to catch $100-150K runners
             mcap_cap_triggered = False
+            post_grad_tier = None
+            post_grad_tier_info = ''
+
             if passed and config.TIMING_RULES['mcap_cap']['enabled']:
-                max_mcap = (config.TIMING_RULES['mcap_cap']['max_mcap_pre_grad'] if is_pre_grad
-                           else config.TIMING_RULES['mcap_cap']['max_mcap_post_grad'])
-                if mcap > max_mcap:
-                    passed = False
-                    mcap_cap_triggered = True
-                    if config.TIMING_RULES['mcap_cap']['log_skipped']:
-                        logger.warning(f"   🚫 MCAP CAP: ${mcap:.0f} > ${max_mcap} (too late, skipping signal)")
+                if is_pre_grad:
+                    # Pre-grad: Simple cap at $25K
+                    max_mcap = config.TIMING_RULES['mcap_cap']['max_mcap_pre_grad']
+                    if mcap > max_mcap:
+                        passed = False
+                        mcap_cap_triggered = True
+                        if config.TIMING_RULES['mcap_cap']['log_skipped']:
+                            logger.warning(f"   🚫 MCAP CAP: ${mcap:.0f} > ${max_mcap} (too late for pre-grad)")
+                else:
+                    # Post-grad: Use tiered system (catches runners up to $200K)
+                    tier_cfg = config.TIMING_RULES.get('post_grad_tiers', {})
+                    max_mcap = config.TIMING_RULES['mcap_cap']['max_mcap_post_grad']
+
+                    if tier_cfg.get('enabled', False):
+                        # Determine which tier this token falls into
+                        tier_1 = tier_cfg.get('tier_1', {})
+                        tier_2 = tier_cfg.get('tier_2', {})
+                        tier_3 = tier_cfg.get('tier_3', {})
+
+                        # Get data for tier checks
+                        volume_1h = token_data.get('volume_1h', 0)
+                        liquidity = token_data.get('liquidity', 0) or 1  # Avoid div by 0
+                        volume_velocity = volume_1h / liquidity if liquidity > 0 else 0
+                        price_change_1h = token_data.get('price_change_1h', 0)
+                        peak_mcap = token_data.get('peak_mcap', mcap)
+                        current_retrace_pct = ((peak_mcap - mcap) / peak_mcap * 100) if peak_mcap > mcap else 0
+                        has_smart_wallet = smart_wallet_score > 0
+
+                        # Get graduation speed (if available)
+                        grad_minutes = None
+                        if token_created_at:
+                            # Assume recent graduation for post-grad
+                            grad_minutes = (datetime.utcnow() - token_created_at).total_seconds() / 60
+
+                        # Tier 1: Fresh graduates ($70K-$100K) - standard threshold
+                        if mcap <= tier_1.get('max_mcap', 100000):
+                            post_grad_tier = 1
+                            tier_threshold_mod = tier_1.get('threshold_modifier', 0)
+                            min_grad_speed = tier_1.get('min_grad_speed_minutes', 30)
+
+                            # Optional: Check graduation speed
+                            if grad_minutes and grad_minutes > min_grad_speed:
+                                # Slow graduation → still allow but note it
+                                logger.info(f"   📊 TIER 1: Fresh graduate (${mcap/1000:.0f}K) - slow grad ({grad_minutes:.0f}m)")
+                            else:
+                                logger.info(f"   📊 TIER 1: Fresh graduate (${mcap/1000:.0f}K) - standard threshold")
+
+                            post_grad_tier_info = tier_1.get('description', 'Fresh graduate')
+                            # Adjust threshold if needed
+                            if tier_threshold_mod != 0:
+                                threshold += tier_threshold_mod
+                                if final_score < threshold:
+                                    passed = False
+                                    logger.warning(f"   ⚠️ TIER 1: Score {final_score} < adjusted threshold {threshold}")
+
+                        # Tier 2: Confirmed runners ($100K-$150K) - stricter gates
+                        elif mcap <= tier_2.get('max_mcap', 150000):
+                            post_grad_tier = 2
+                            tier_threshold_mod = tier_2.get('threshold_modifier', 5)
+                            min_volume_vel = tier_2.get('min_volume_velocity', 1.5)
+                            min_price_1h = tier_2.get('min_price_change_1h', 10)
+                            max_retrace = tier_2.get('max_retrace_pct', 30)
+
+                            # Apply gates
+                            tier_passed = True
+                            gate_fails = []
+
+                            if volume_velocity < min_volume_vel:
+                                tier_passed = False
+                                gate_fails.append(f"vol_vel {volume_velocity:.1f}x < {min_volume_vel}x")
+                            if price_change_1h < min_price_1h:
+                                tier_passed = False
+                                gate_fails.append(f"price_1h +{price_change_1h:.0f}% < +{min_price_1h}%")
+                            if current_retrace_pct > max_retrace:
+                                tier_passed = False
+                                gate_fails.append(f"retrace {current_retrace_pct:.0f}% > {max_retrace}%")
+
+                            # Adjust threshold
+                            adjusted_threshold = threshold + tier_threshold_mod
+                            if final_score < adjusted_threshold:
+                                tier_passed = False
+                                gate_fails.append(f"score {final_score} < {adjusted_threshold}")
+
+                            if tier_passed:
+                                logger.info(f"   📊 TIER 2: Confirmed runner (${mcap/1000:.0f}K) - gates PASSED")
+                                post_grad_tier_info = tier_2.get('description', 'Confirmed runner')
+                                threshold = adjusted_threshold
+                            else:
+                                passed = False
+                                mcap_cap_triggered = True
+                                logger.warning(f"   🚫 TIER 2 GATES FAILED: {', '.join(gate_fails)}")
+                                post_grad_tier_info = f"Tier 2 blocked: {', '.join(gate_fails)}"
+
+                        # Tier 3: Extended runners ($150K-$200K) - very strict gates
+                        elif mcap <= tier_3.get('max_mcap', 200000):
+                            post_grad_tier = 3
+                            tier_threshold_mod = tier_3.get('threshold_modifier', 10)
+                            min_volume_vel = tier_3.get('min_volume_velocity', 2.0)
+                            min_price_1h = tier_3.get('min_price_change_1h', 20)
+                            max_retrace = tier_3.get('max_retrace_pct', 20)
+                            require_smart = tier_3.get('require_smart_wallet', True)
+
+                            # Apply strict gates
+                            tier_passed = True
+                            gate_fails = []
+
+                            if volume_velocity < min_volume_vel:
+                                tier_passed = False
+                                gate_fails.append(f"vol_vel {volume_velocity:.1f}x < {min_volume_vel}x")
+                            if price_change_1h < min_price_1h:
+                                tier_passed = False
+                                gate_fails.append(f"price_1h +{price_change_1h:.0f}% < +{min_price_1h}%")
+                            if current_retrace_pct > max_retrace:
+                                tier_passed = False
+                                gate_fails.append(f"retrace {current_retrace_pct:.0f}% > {max_retrace}%")
+                            if require_smart and not has_smart_wallet:
+                                tier_passed = False
+                                gate_fails.append("no smart wallet activity")
+
+                            # Adjust threshold (very strict)
+                            adjusted_threshold = threshold + tier_threshold_mod
+                            if final_score < adjusted_threshold:
+                                tier_passed = False
+                                gate_fails.append(f"score {final_score} < {adjusted_threshold}")
+
+                            if tier_passed:
+                                logger.info(f"   📊 TIER 3: Extended runner (${mcap/1000:.0f}K) - strict gates PASSED")
+                                post_grad_tier_info = tier_3.get('description', 'Extended runner')
+                                threshold = adjusted_threshold
+                            else:
+                                passed = False
+                                mcap_cap_triggered = True
+                                logger.warning(f"   🚫 TIER 3 GATES FAILED: {', '.join(gate_fails)}")
+                                post_grad_tier_info = f"Tier 3 blocked: {', '.join(gate_fails)}"
+
+                        # Beyond Tier 3: Hard cap at $200K
+                        else:
+                            passed = False
+                            mcap_cap_triggered = True
+                            if config.TIMING_RULES['mcap_cap']['log_skipped']:
+                                logger.warning(f"   🚫 MCAP CAP: ${mcap/1000:.0f}K > $200K (beyond all tiers)")
+                    else:
+                        # Tier system disabled - use simple cap
+                        if mcap > max_mcap:
+                            passed = False
+                            mcap_cap_triggered = True
+                            if config.TIMING_RULES['mcap_cap']['log_skipped']:
+                                logger.warning(f"   🚫 MCAP CAP: ${mcap:.0f} > ${max_mcap} (too late for post-grad)")
 
             # MATURITY GATE: Skip if token too young or MCAP too low (avoid sniped rugs)
             maturity_gate_triggered = False
@@ -1118,7 +1263,10 @@ class ConvictionEngine:
 
             logger.info("=" * 60)
             logger.info(f"   🎯 FINAL CONVICTION: {final_score}/100")
-            logger.info(f"   📊 Threshold: {threshold} ({'PRE-GRAD' if is_pre_grad else 'POST-GRAD'})")
+            stage_info = 'PRE-GRAD' if is_pre_grad else f'POST-GRAD Tier {post_grad_tier}' if post_grad_tier else 'POST-GRAD'
+            logger.info(f"   📊 Threshold: {threshold} ({stage_info})")
+            if post_grad_tier and post_grad_tier_info:
+                logger.info(f"   📊 Post-grad tier: {post_grad_tier_info}")
             if early_trigger_applied:
                 logger.info(f"   ⚡ Early trigger activated!")
             if early_pump_alert:
@@ -1229,6 +1377,8 @@ class ConvictionEngine:
                 'passed': passed,
                 'threshold': threshold,
                 'is_pre_grad': is_pre_grad,
+                'post_grad_tier': post_grad_tier,                # Post-grad tier (1, 2, or 3)
+                'post_grad_tier_info': post_grad_tier_info,      # Tier description
                 'early_trigger_applied': early_trigger_applied,  # GROK: Early trigger flag
                 'early_pump_alert': early_pump_alert,            # Early Pump Alert forced signal
                 'mcap_cap_triggered': mcap_cap_triggered,        # GROK: MCAP cap flag
