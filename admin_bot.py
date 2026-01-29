@@ -72,6 +72,7 @@ class AdminBot:
             self.app.add_handler(CommandHandler("addwallet", self._cmd_addwallet, filters=admin_filter))
             self.app.add_handler(CommandHandler("removewallet", self._cmd_removewallet, filters=admin_filter))
             self.app.add_handler(CommandHandler("renamewallet", self._cmd_renamewallet, filters=admin_filter))
+            self.app.add_handler(CommandHandler("refreshwallets", self._cmd_refreshwallets, filters=admin_filter))
 
             # Handle media uploads from admin (for banner file_id capture)
             self.app.add_handler(MessageHandler(
@@ -202,6 +203,7 @@ class AdminBot:
 /addwallet &lt;name&gt; &lt;address&gt; - Add wallet to tracking
 /removewallet &lt;address&gt; - Remove wallet from tracking
 /renamewallet &lt;address&gt; &lt;name&gt; - Rename a wallet
+/refreshwallets - Pull wallets from Dune query
 
 <b>Data &amp; ML:</b>
 /dataset - ML training dataset stats
@@ -1514,4 +1516,126 @@ class AdminBot:
 
         except Exception as e:
             logger.error(f"❌ Error in /renamewallet: {e}")
+            await self._send_response(update, context, f"❌ Error: {str(e)}")
+
+    async def _cmd_refreshwallets(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Refresh wallets from Dune query: /refreshwallets"""
+        try:
+            if not self.database:
+                await self._send_response(update, context, "❌ Database not available")
+                return
+
+            await self._send_response(update, context,
+                "🔄 <b>Fetching wallets from Dune...</b>\n\n"
+                "This may take a moment.")
+
+            import aiohttp
+
+            # Dune API config
+            dune_api_key = os.getenv('DUNE_API_KEY', '')
+            dune_query_id = os.getenv('DUNE_WALLET_QUERY_ID', '6612826')  # User's query
+
+            if not dune_api_key:
+                await self._send_response(update, context,
+                    "❌ DUNE_API_KEY not set in environment.\n\n"
+                    "Add to Railway:\n"
+                    "<code>DUNE_API_KEY=your_key_here</code>")
+                return
+
+            # Fetch from Dune API
+            api_url = f"https://api.dune.com/api/v1/query/{dune_query_id}/results?limit=50"
+            headers = {"X-Dune-API-Key": dune_api_key}
+
+            async with aiohttp.ClientSession() as session:
+                async with session.get(api_url, headers=headers, timeout=aiohttp.ClientTimeout(total=60)) as resp:
+                    if resp.status != 200:
+                        error = await resp.text()
+                        await self._send_response(update, context,
+                            f"❌ Dune API error: HTTP {resp.status}\n{error[:200]}")
+                        return
+
+                    data = await resp.json()
+
+            # Check if query finished
+            if not data.get('is_execution_finished'):
+                await self._send_response(update, context,
+                    "⏳ Query still running. Try again in a minute.")
+                return
+
+            rows = data.get('result', {}).get('rows', [])
+
+            if not rows:
+                await self._send_response(update, context, "❌ No results from Dune query.")
+                return
+
+            # Filter out obvious bots (>500k txs) and add wallets
+            added = 0
+            skipped_bots = 0
+            skipped_existing = 0
+
+            for row in rows:
+                wallet = row.get('wallet', '')
+                tx_count = row.get('tx_count', 0)
+
+                if not wallet:
+                    continue
+
+                # Skip obvious bots (>500k transactions in 24h is not human)
+                if tx_count > 500000:
+                    skipped_bots += 1
+                    continue
+
+                # Check if already exists
+                existing = await self.database.get_tracked_wallet(wallet)
+                if existing:
+                    skipped_existing += 1
+                    continue
+
+                # Add wallet with auto-generated name
+                name = f"Dune_{wallet[:6]}"
+                success = await self.database.add_tracked_wallet(
+                    address=wallet,
+                    name=name,
+                    tier='unknown',
+                    source='dune'
+                )
+
+                if success:
+                    added += 1
+
+            # Update Helius webhook with all addresses
+            webhook_msg = ""
+            try:
+                from helius_fetcher import HeliusDataFetcher
+                helius = HeliusDataFetcher()
+                all_addresses = await self.database.get_tracked_wallet_addresses()
+
+                if all_addresses:
+                    import config
+                    base_url = getattr(config, 'RAILWAY_PUBLIC_URL', None) or getattr(config, 'WEBHOOK_BASE_URL', None)
+
+                    if base_url:
+                        webhook_url = f"{base_url}/webhook/smart-wallet"
+                        webhook_id = await helius.ensure_wallet_webhook(webhook_url, all_addresses)
+
+                        if webhook_id:
+                            webhook_msg = f"\n📡 Helius webhook updated ({len(all_addresses)} wallets)"
+            except Exception as e:
+                logger.error(f"Helius webhook error: {e}")
+                webhook_msg = f"\n⚠️ Helius webhook failed: {str(e)[:50]}"
+
+            response = f"✅ <b>Dune Refresh Complete!</b>\n\n"
+            response += f"<b>Added:</b> {added} new wallets\n"
+            response += f"<b>Skipped (bots):</b> {skipped_bots}\n"
+            response += f"<b>Skipped (existing):</b> {skipped_existing}\n"
+            response += f"<b>Total from Dune:</b> {len(rows)}"
+            response += webhook_msg
+            response += f"\n\nUse /wallets to see all tracked wallets."
+
+            await self._send_response(update, context, response)
+
+        except Exception as e:
+            logger.error(f"❌ Error in /refreshwallets: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             await self._send_response(update, context, f"❌ Error: {str(e)}")
