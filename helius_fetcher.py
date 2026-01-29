@@ -1065,7 +1065,7 @@ class HeliusDataFetcher:
             logger.error(f"❌ Error registering wallet webhook: {e}")
             return None
 
-    async def update_wallet_webhook(self, webhook_id: str, wallet_addresses: List[str]) -> bool:
+    async def update_wallet_webhook(self, webhook_id: str, wallet_addresses: List[str], webhook_url: str = None) -> bool:
         """
         Update an existing wallet webhook with new addresses.
         Use this to add/remove wallets without recreating the webhook.
@@ -1073,6 +1073,7 @@ class HeliusDataFetcher:
         Args:
             webhook_id: The Helius webhook ID to update
             wallet_addresses: New complete list of wallet addresses
+            webhook_url: The webhook URL (required by Helius API)
 
         Returns:
             True on success, False on failure
@@ -1080,8 +1081,13 @@ class HeliusDataFetcher:
         try:
             api_url = f"https://api.helius.xyz/v0/webhooks/{webhook_id}?api-key={self.api_key}"
 
+            # Helius requires ALL fields even for updates
             payload = {
-                "accountAddresses": wallet_addresses
+                "webhookURL": webhook_url or "",
+                "transactionTypes": ["ANY"],
+                "accountAddresses": wallet_addresses,
+                "webhookType": "enhanced",
+                "txnStatus": "success",
             }
 
             async with aiohttp.ClientSession() as session:
@@ -1127,8 +1133,8 @@ class HeliusDataFetcher:
             existing_id = await self.get_wallet_webhook_id(webhook_url)
 
             if existing_id:
-                # Update existing webhook with current addresses
-                success = await self.update_wallet_webhook(existing_id, wallet_addresses)
+                # Update existing webhook with current addresses (pass URL for Helius API)
+                success = await self.update_wallet_webhook(existing_id, wallet_addresses, webhook_url)
                 return existing_id if success else None
             else:
                 # Create new webhook
