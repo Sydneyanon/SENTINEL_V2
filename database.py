@@ -1203,3 +1203,28 @@ class Database:
             logger.error(f"Error getting wallet addresses: {e}")
             return []
 
+    async def get_tracked_wallets_for_conviction(self) -> dict:
+        """Get tracked wallets in format for SmartWalletTracker (address -> wallet_info dict)"""
+        try:
+            async with self.pool.acquire() as conn:
+                rows = await conn.fetch('''
+                    SELECT wallet_address, wallet_name, tier, win_rate, pnl, source
+                    FROM tracked_wallets WHERE active = TRUE
+                ''')
+
+                wallets = {}
+                for row in rows:
+                    wallets[row['wallet_address']] = {
+                        'address': row['wallet_address'],
+                        'name': row['wallet_name'],
+                        'tier': row['tier'] or 'verified',
+                        'win_rate': row['win_rate'] or 0.50,
+                        'pnl': row['pnl'] or 0,
+                        'source': row['source'] or 'dune',
+                        'active': True
+                    }
+                return wallets
+        except Exception as e:
+            logger.error(f"Error getting wallets for conviction: {e}")
+            return {}
+

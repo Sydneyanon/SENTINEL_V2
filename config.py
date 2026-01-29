@@ -97,9 +97,11 @@ DISTRIBUTION_CHECK_THRESHOLD = 30
 
 # Combined WEIGHTS dictionary (required by conviction engine)
 WEIGHTS = {
-    # Smart Wallet Activity - DISABLED (kept at 0 for structure, can re-enable)
-    'smart_wallet_elite': 0,        # Elite wallet bought (disabled)
-    'smart_wallet_kol': 0,          # Top KOL bought (disabled)
+    # Smart Wallet Activity - ENABLED (Dune leaderboard wallets)
+    'smart_wallet_elite': 15,       # Elite wallet bought ($10M+ PnL)
+    'smart_wallet_kol': 10,         # Top KOL bought ($1M+ PnL)
+    'smart_wallet_verified': 7,     # Verified wallet bought ($100K+ PnL)
+    'smart_wallet_emerging': 4,     # Emerging wallet bought (from 7-day)
 
     # Narrative Detection (max 7 points — RSS+BERTopic matching)
     'narrative_hot': 5,             # Hot/trending narrative (RSS+BERTopic cluster match)
@@ -124,11 +126,11 @@ WEIGHTS = {
 # DETAILED SCORING WEIGHTS (for specific calculations)
 # =============================================================================
 
-# Smart Wallet Activity (DISABLED - kept for structure, can re-enable)
+# Smart Wallet Activity (ENABLED - Dune leaderboard wallets)
 SMART_WALLET_WEIGHTS = {
-    'per_kol': 0,            # Disabled (was 10)
-    'max_score': 0,          # Disabled (was 40)
-    'multi_kol_bonus': 0,    # Disabled (was 15)
+    'per_kol': 10,           # Base points per tracked wallet
+    'max_score': 40,         # Cap total smart wallet score
+    'multi_kol_bonus': 15,   # Bonus for 3+ wallets buying same token
     'kol_time_window': 300   # 5 minutes for multi-KOL bonus
 }
 
