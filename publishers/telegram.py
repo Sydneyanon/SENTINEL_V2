@@ -297,7 +297,7 @@ class TelegramPublisher:
 
             # Penalties (compact)
             pen_parts = []
-            for key in ('bundle_penalty', 'holder_penalty', 'rugcheck_penalty'):
+            for key in ('bundle_penalty', 'holder_penalty', 'rugcheck_penalty', 'buyer_mcap_penalty', 'dump_penalty'):
                 v = breakdown.get(key, 0)
                 if v != 0:
                     pen_parts.append(f"{v}")

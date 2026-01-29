@@ -1091,13 +1091,30 @@ class ConvictionEngine:
                         dump_reason = f"PENALTY: MCAP ${mcap:.0f} is {retrace_pct:.0f}% below peak ${peak_mcap:.0f} ({dump_penalty} pts)"
                         logger.warning(f"   ⚠️ DUMP PENALTY: {dump_reason}")
                         # Re-check if score still passes threshold after penalty
-                        if final_score < threshold and not early_trigger_applied:
+                        # NOTE: Must check even when early_trigger_applied - dump kills the opportunity
+                        if final_score < threshold:
                             passed = False
                             dump_detected = True
                     else:
                         # <40% retrace → no penalty (normal volatility)
                         if retrace_pct > 10:
                             logger.debug(f"   📊 Retrace {retrace_pct:.0f}% from peak ${peak_mcap:.0f} (within tolerance)")
+
+            # ================================================================
+            # FINAL SANITY CHECK: Block signals that dropped below threshold after penalties
+            # This catches edge cases where early_trigger or early_pump_alert set passed=True
+            # but subsequent penalties (buyer_mcap_penalty, dump_penalty) tanked the score
+            # ================================================================
+            if passed and final_score < threshold:
+                # Score dropped below threshold after being set to pass - block it!
+                reason = []
+                if buyer_mcap_penalty < 0:
+                    reason.append(f"buyer-MCAP penalty {buyer_mcap_penalty}")
+                if dump_penalty < 0:
+                    reason.append(f"dump penalty {dump_penalty}")
+                reason_str = ", ".join(reason) if reason else "penalties applied"
+                logger.warning(f"   🛡️ SANITY CHECK: Score {final_score} < threshold {threshold} after {reason_str} — blocking signal")
+                passed = False
 
             logger.info("=" * 60)
             logger.info(f"   🎯 FINAL CONVICTION: {final_score}/100")
