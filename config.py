@@ -74,7 +74,7 @@ DISABLE_POLLING_BELOW_THRESHOLD = True
 # - Unique buyers (0-10), volume (0-12), narrative (0-7 RSS+BERTopic), telegram (0-5)
 # - Lowered post-grad threshold from 75 to 65 (no KOL boost available)
 MIN_CONVICTION_SCORE = 30  # Pre-grad threshold (adjusted for 100-point budget, was 45)
-POST_GRAD_THRESHOLD = 45   # Post-grad threshold (adjusted for 100-point budget, was 65)
+POST_GRAD_THRESHOLD = 65   # Post-grad threshold (raised to 65 for tiered system - Grok 2026-01-29)
 
 # Base score threshold for distribution checks
 # Only check distribution if base score >= this value
@@ -409,36 +409,56 @@ TIMING_RULES = {
     # NEW: Tiered Post-Grad Strategy (Grok recommendation 2026-01-29)
     # Catches $100-150K entries that run to $500-600K
     # Pump.fun graduation is ~$69K, so we tier based on distance from grad
+    #
+    # LOGIC: Score boosts are ADDITIVE (reward proven runners)
+    # - Threshold stays at 65 across all tiers
+    # - Higher MCAP = token proved itself = gets bonus points
+    # - Still need gates to avoid dead cats
     'post_grad_tiers': {
         'enabled': True,
 
-        # Tier 1: Fresh graduates ($70K-$100K) - highest win rate, early entry
+        # Tier 1: Fresh graduates ($70K-$100K) - track only, no boost
+        # Need full 65 score from base factors (hardest tier)
         'tier_1': {
             'max_mcap': 100000,           # Up to $100K MCAP
-            'threshold_modifier': 0,      # Use standard POST_GRAD_THRESHOLD (45)
+            'score_boost': 0,             # No boost - fresh grad needs to prove itself
             'min_grad_speed_minutes': 30, # Must have graduated in <30 min (quality filter)
             'description': 'Fresh graduate'
         },
 
-        # Tier 2: Confirmed runners ($100K-$150K) - proven momentum, moderate risk
+        # Tier 2: Confirmed runners ($100K-$150K) - proven momentum
+        # Token climbed from $69K grad → $100K+, reward with +5 pts
         'tier_2': {
             'max_mcap': 150000,           # $100K-$150K MCAP
-            'threshold_modifier': +5,     # Need score 50+ (stricter)
+            'score_boost': +5,            # +5 for proving it can climb (effective threshold 60)
             'min_volume_velocity': 1.5,   # Volume must be 1.5x+ liquidity (active trading)
             'min_price_change_1h': 10,    # Must be up 10%+ in 1h (momentum)
             'max_retrace_pct': 30,        # Can't be in >30% retrace (not dead cat)
+            'retrace_soft_penalty': -5,   # Soft penalty if 20-30% retrace
+            'retrace_soft_threshold': 20, # Apply soft penalty above this retrace %
             'description': 'Confirmed runner'
         },
 
-        # Tier 3: Extended runners ($150K-$200K) - late entry, needs strong signals
+        # Tier 3: Extended runners ($150K-$200K) - major validation
+        # Token went $69K → $150K+, strong signal, cumulative +10 pts
         'tier_3': {
             'max_mcap': 200000,           # $150K-$200K MCAP
-            'threshold_modifier': +10,    # Need score 55+ (very strict)
+            'score_boost': +10,           # +10 cumulative for major climb (effective threshold 55)
             'min_volume_velocity': 2.0,   # Volume must be 2x+ liquidity (very active)
             'min_price_change_1h': 20,    # Must be up 20%+ in 1h (strong momentum)
             'max_retrace_pct': 20,        # Can't be in >20% retrace (fresh breakout only)
             'require_smart_wallet': True, # Require smart wallet activity (validation)
+            'no_smart_wallet_penalty': -10,  # Penalty if no smart wallet at this MCAP
+            'smart_wallet_recency_minutes': 60,  # Smart wallet buy must be within 60 min
+            'multi_wallet_bonus': 10,     # +10 bonus if 2+ smart wallets bought
             'description': 'Extended runner'
+        },
+
+        # Acceleration bonus: +15 pts for explosive moves
+        'acceleration_bonus': {
+            'enabled': True,
+            'min_price_change_30m': 30,   # +30% in 30 min
+            'bonus_points': 15,           # +15 pts for acceleration
         }
     },
 
