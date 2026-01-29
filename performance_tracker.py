@@ -149,14 +149,14 @@ class PerformanceTracker:
         """Get signals that are still being tracked (posted in last 24 hours)"""
         async with self.db.pool.acquire() as conn:
             rows = await conn.fetch('''
-                SELECT s.*, 
+                SELECT s.*,
                        COALESCE(MAX(p.milestone), 0) as max_milestone_reached
                 FROM signals s
                 LEFT JOIN performance p ON s.token_address = p.token_address
                 WHERE s.signal_posted = TRUE
                 AND s.created_at > NOW() - INTERVAL '24 hours'
                 GROUP BY s.id
-                HAVING COALESCE(MAX(p.milestone), 0) < 100
+                HAVING COALESCE(MAX(p.milestone), 0) < 10000
                 ORDER BY s.created_at DESC
             ''')
             return [dict(row) for row in rows]
@@ -211,17 +211,19 @@ class PerformanceTracker:
             
             for milestone in MILESTONES:
                 if multiple >= milestone and milestone > max_milestone_reached:
-                    # New milestone reached!
-                    logger.info(f"🎯 {signal['token_symbol']} hit {milestone}x milestone!")
+                    # New milestone reached! Log at WARNING level so it shows with default settings
+                    will_post = milestone in config.MILESTONE_POST_THRESHOLDS
+                    logger.warning(f"🎯 MILESTONE: {signal['token_symbol']} hit {milestone}x! (posting={will_post})")
 
                     # Save to database (all milestones)
                     await self.db.insert_milestone(token_address, milestone, current_price)
 
                     # Post to Telegram only for key thresholds
-                    if milestone in config.MILESTONE_POST_THRESHOLDS:
+                    if will_post:
+                        logger.warning(f"   📤 Posting {milestone}x milestone to TG...")
                         await self._post_milestone_update(signal, milestone, current_price, multiple, signal_type)
                     else:
-                        logger.debug(f"   📊 {milestone}x recorded (no TG post)")
+                        logger.info(f"   📊 {milestone}x recorded (no TG post - not in POST_THRESHOLDS)")
                     
         except Exception as e:
             logger.error(f"❌ Error checking performance for {signal.get('token_symbol')}: {e}")
@@ -298,6 +300,11 @@ class PerformanceTracker:
     async def _post_milestone_update(self, signal: Dict, milestone: float, current_price: float, multiple: float, signal_type: str):
         """Post milestone update to Telegram with tier-based video banner"""
         try:
+            # Validate Telegram is ready before attempting to post
+            if not self.telegram or not self.telegram.bot or not self.telegram.channel_id:
+                logger.error(f"❌ Cannot post milestone: Telegram not initialized (bot={self.telegram.bot is not None if self.telegram else 'N/A'}, channel={self.telegram.channel_id if self.telegram else 'N/A'})")
+                return
+
             symbol = signal['token_symbol']
             token_address = signal['token_address']
             entry_price = signal['entry_price']
@@ -348,10 +355,12 @@ class PerformanceTracker:
                     disable_web_page_preview=True
                 )
 
-            logger.info(f"\U0001f4e4 Milestone update posted: {symbol} hit {int(milestone)}x")
+            logger.warning(f"✅ MILESTONE POSTED: {symbol} hit {int(milestone)}x milestone to TG!")
 
         except Exception as e:
-            logger.error(f"\u274c Failed to post milestone update: {e}")
+            import traceback
+            logger.error(f"❌ Failed to post milestone update for {signal.get('token_symbol', '?')}: {e}")
+            logger.error(f"   Traceback: {traceback.format_exc()}")
     
     async def post_daily_report(self):
         """Post daily performance report"""

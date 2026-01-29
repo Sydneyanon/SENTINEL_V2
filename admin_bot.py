@@ -67,6 +67,13 @@ class AdminBot:
             self.app.add_handler(CommandHandler("winrate", self._cmd_winrate, filters=admin_filter))
             self.app.add_handler(CommandHandler("testbanner", self._cmd_testbanner, filters=admin_filter))
 
+            # Wallet management commands
+            self.app.add_handler(CommandHandler("wallets", self._cmd_wallets, filters=admin_filter))
+            self.app.add_handler(CommandHandler("addwallet", self._cmd_addwallet, filters=admin_filter))
+            self.app.add_handler(CommandHandler("removewallet", self._cmd_removewallet, filters=admin_filter))
+            self.app.add_handler(CommandHandler("renamewallet", self._cmd_renamewallet, filters=admin_filter))
+            self.app.add_handler(CommandHandler("refreshwallets", self._cmd_refreshwallets, filters=admin_filter))
+
             # Handle media uploads from admin (for banner file_id capture)
             self.app.add_handler(MessageHandler(
                 admin_filter & (filters.VIDEO | filters.ANIMATION | filters.Document.VIDEO),
@@ -77,7 +84,7 @@ class AdminBot:
             self.app.add_handler(MessageHandler(~admin_filter, self._handle_unauthorized))
 
             logger.info(f"✅ Admin bot initialized")
-            logger.info(f"   Commands registered: /help /stats /active /performance /winrate /health /cache /missed /whales /config /dataset /collect /ml /pause /resume /testbanner")
+            logger.info(f"   Commands registered: /help /stats /active /performance /winrate /health /cache /missed /whales /config /dataset /collect /ml /pause /resume /testbanner /wallets /addwallet /removewallet /renamewallet")
             logger.info(f"   Security: Only user {self.admin_user_id} can use commands")
             if self.admin_channel_id:
                 logger.info(f"   Response mode: Admin channel ({self.admin_channel_id})")
@@ -190,6 +197,14 @@ class AdminBot:
 /cache - Telegram calls cache status
 /whales - Discovered whale wallets
 /config - Live scoring config values
+
+<b>Wallet Management:</b>
+/wallets - View all tracked wallets
+/addwallet &lt;name&gt; &lt;address&gt; - Add wallet to tracking
+/removewallet &lt;address&gt; - Remove wallet from tracking
+/renamewallet &lt;address&gt; &lt;name&gt; - Rename a wallet
+/refreshwallets [source] [limit] - Pull wallets from Dune
+  Sources: alltime, pnl (net profit), volume (pumpswap)
 
 <b>Data &amp; ML:</b>
 /dataset - ML training dataset stats
@@ -804,16 +819,38 @@ class AdminBot:
             data_file = 'data/historical_training_data.json'
             whale_file = 'data/successful_whale_wallets.json'
 
-            if not os.path.exists(data_file):
+            # Primary: Load from database (persists across Railway deploys)
+            db_count = 0
+            if self.database:
+                try:
+                    db_count = await self.database.get_training_token_count()
+                except Exception:
+                    pass
+
+            # Fallback: Load from file
+            file_data = {}
+            try:
+                with open(data_file, 'r') as f:
+                    file_data = json.load(f)
+            except (FileNotFoundError, json.JSONDecodeError):
+                pass
+
+            file_count = file_data.get('total_tokens', 0)
+
+            # Use whichever source has more data
+            if db_count == 0 and file_count == 0:
                 await self._send_response(update, context,
                     "ℹ️ <b>No dataset yet.</b>\n\n"
                     "Run /collect to start building training data.")
                 return
 
-            with open(data_file, 'r') as f:
-                data = json.load(f)
+            # Prefer DB count if higher (file may be stale after Railway deploy)
+            data = file_data
 
-            total = data.get('total_tokens', 0)
+            # Use DB count if it's higher than file (file resets on Railway deploy)
+            total = max(db_count, file_data.get('total_tokens', 0))
+            data_source = "DB" if db_count >= file_count else "file"
+
             last_collection = data.get('last_daily_collection', data.get('last_backfill', 'never'))
             collected_today = data.get('tokens_collected_today', data.get('tokens_added_this_run', 0))
             outcome_dist = data.get('outcome_distribution', {})
@@ -829,7 +866,9 @@ class AdminBot:
             source_label = "Helius + DexScreener" if 'helius' in discovery_method else "DexScreener"
 
             response = "📊 <b>ML TRAINING DATASET</b>\n\n"
-            response += f"<b>Tokens:</b> {total}\n"
+            response += f"<b>Tokens:</b> {total} ({data_source})\n"
+            if db_count != file_count:
+                response += f"<b>DB/File:</b> {db_count}/{file_count}\n"
             response += f"<b>Source:</b> {source_label}\n"
             response += f"<b>Last collection:</b> {last_collection}\n"
             response += f"<b>Added last run:</b> {collected_today}\n\n"
@@ -1226,3 +1265,476 @@ class AdminBot:
 
         except Exception as e:
             logger.error(f"❌ Error handling media upload: {e}")
+
+    # ================================================================
+    # WALLET MANAGEMENT COMMANDS
+    # ================================================================
+
+    async def _cmd_wallets(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Show all tracked wallets"""
+        try:
+            if not self.database:
+                await self._send_response(update, context, "❌ Database not available")
+                return
+
+            wallets = await self.database.get_tracked_wallets(active_only=True)
+
+            if not wallets:
+                await self._send_response(update, context,
+                    "👛 <b>TRACKED WALLETS</b>\n\n"
+                    "No wallets tracked yet.\n\n"
+                    "Add wallets with:\n"
+                    "<code>/addwallet Name Address</code>")
+                return
+
+            response = f"👛 <b>TRACKED WALLETS ({len(wallets)})</b>\n\n"
+
+            for i, w in enumerate(wallets[:30], 1):  # Limit to 30 to avoid message length issues
+                name = w.get('wallet_name', 'Unknown')
+                addr = w.get('wallet_address', '')
+                addr_short = f"{addr[:6]}...{addr[-4:]}" if len(addr) > 12 else addr
+                tier = w.get('tier', 'unknown')
+                win_rate = w.get('win_rate')
+                pnl = w.get('pnl')
+                source = w.get('source', 'manual')
+
+                # Status indicator
+                status = "🟢" if tier in ['elite', 'top_kol'] else "⚪"
+
+                response += f"{status} <b>{name}</b>\n"
+                response += f"   <code>{addr_short}</code>\n"
+
+                # Stats line
+                stats = []
+                if win_rate is not None:
+                    stats.append(f"WR: {win_rate*100:.0f}%")
+                if pnl is not None:
+                    pnl_str = f"+${pnl:,.0f}" if pnl >= 0 else f"-${abs(pnl):,.0f}"
+                    stats.append(f"PnL: {pnl_str}")
+                if stats:
+                    response += f"   {' | '.join(stats)}\n"
+
+                response += "\n"
+
+            if len(wallets) > 30:
+                response += f"<i>...and {len(wallets) - 30} more</i>\n\n"
+
+            response += "<b>Commands:</b>\n"
+            response += "<code>/addwallet Name Address</code>\n"
+            response += "<code>/removewallet Address</code>\n"
+            response += "<code>/renamewallet Address NewName</code>"
+
+            await self._send_response(update, context, response)
+
+        except Exception as e:
+            logger.error(f"❌ Error in /wallets: {e}")
+            await self._send_response(update, context, f"❌ Error: {str(e)}")
+
+    async def _cmd_addwallet(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Add a wallet to tracking: /addwallet <name> <address>"""
+        try:
+            if not self.database:
+                await self._send_response(update, context, "❌ Database not available")
+                return
+
+            args = context.args
+            if len(args) < 2:
+                await self._send_response(update, context,
+                    "❌ <b>Usage:</b> <code>/addwallet Name Address</code>\n\n"
+                    "Example:\n"
+                    "<code>/addwallet Ansem 9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM</code>")
+                return
+
+            name = args[0]
+            address = args[1]
+
+            # Validate address format (basic check)
+            if len(address) < 32 or len(address) > 50:
+                await self._send_response(update, context,
+                    "❌ Invalid Solana address format.\n"
+                    "Address should be 32-44 characters.")
+                return
+
+            # Check if already exists
+            existing = await self.database.get_tracked_wallet(address)
+
+            # Add to database
+            success = await self.database.add_tracked_wallet(
+                address=address,
+                name=name,
+                tier='unknown',
+                source='manual'
+            )
+
+            if success:
+                action = "updated" if existing else "added"
+                response = f"✅ <b>Wallet {action}!</b>\n\n"
+                response += f"<b>Name:</b> {name}\n"
+                response += f"<b>Address:</b>\n<code>{address}</code>\n\n"
+
+                # Try to register with Helius webhook
+                try:
+                    from helius_fetcher import HeliusDataFetcher
+                    helius = HeliusDataFetcher()
+
+                    # Get all wallet addresses
+                    all_addresses = await self.database.get_tracked_wallet_addresses()
+
+                    if all_addresses:
+                        # Get the webhook URL from config
+                        import config
+                        base_url = getattr(config, 'RAILWAY_PUBLIC_URL', None) or getattr(config, 'WEBHOOK_BASE_URL', None)
+
+                        if base_url:
+                            webhook_url = f"{base_url}/webhook/smart-wallet"
+                            webhook_id = await helius.ensure_wallet_webhook(webhook_url, all_addresses)
+
+                            if webhook_id:
+                                response += f"📡 <b>Helius webhook updated</b>\n"
+                                response += f"   Monitoring {len(all_addresses)} wallets\n"
+                            else:
+                                response += f"⚠️ Helius webhook update failed\n"
+                        else:
+                            response += f"⚠️ No webhook URL configured\n"
+                except Exception as e:
+                    logger.error(f"Helius webhook error: {e}")
+                    response += f"⚠️ Helius webhook: {str(e)[:50]}\n"
+
+                response += f"\n🔔 Wallet now tracked!"
+            else:
+                response = f"❌ Failed to add wallet. Check logs."
+
+            await self._send_response(update, context, response)
+
+        except Exception as e:
+            logger.error(f"❌ Error in /addwallet: {e}")
+            await self._send_response(update, context, f"❌ Error: {str(e)}")
+
+    async def _cmd_removewallet(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Remove a wallet from tracking: /removewallet <address>"""
+        try:
+            if not self.database:
+                await self._send_response(update, context, "❌ Database not available")
+                return
+
+            args = context.args
+            if len(args) < 1:
+                await self._send_response(update, context,
+                    "❌ <b>Usage:</b> <code>/removewallet Address</code>\n\n"
+                    "Example:\n"
+                    "<code>/removewallet 9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM</code>")
+                return
+
+            address = args[0]
+
+            # Check if exists
+            existing = await self.database.get_tracked_wallet(address)
+            if not existing:
+                await self._send_response(update, context,
+                    f"❌ Wallet not found:\n<code>{address}</code>")
+                return
+
+            wallet_name = existing.get('wallet_name', 'Unknown')
+
+            # Remove from database (soft delete)
+            success = await self.database.remove_tracked_wallet(address)
+
+            if success:
+                response = f"✅ <b>Wallet removed!</b>\n\n"
+                response += f"<b>Name:</b> {wallet_name}\n"
+                response += f"<b>Address:</b>\n<code>{address}</code>\n\n"
+
+                # Update Helius webhook
+                try:
+                    from helius_fetcher import HeliusDataFetcher
+                    helius = HeliusDataFetcher()
+
+                    all_addresses = await self.database.get_tracked_wallet_addresses()
+
+                    import config
+                    base_url = getattr(config, 'RAILWAY_PUBLIC_URL', None) or getattr(config, 'WEBHOOK_BASE_URL', None)
+
+                    if base_url and all_addresses:
+                        webhook_url = f"{base_url}/webhook/smart-wallet"
+                        webhook_id = await helius.ensure_wallet_webhook(webhook_url, all_addresses)
+
+                        if webhook_id:
+                            response += f"📡 <b>Helius webhook updated</b>\n"
+                            response += f"   Now monitoring {len(all_addresses)} wallets"
+                except Exception as e:
+                    logger.error(f"Helius webhook error: {e}")
+
+                response += f"\n\n🔕 Wallet no longer tracked."
+            else:
+                response = f"❌ Failed to remove wallet. Check logs."
+
+            await self._send_response(update, context, response)
+
+        except Exception as e:
+            logger.error(f"❌ Error in /removewallet: {e}")
+            await self._send_response(update, context, f"❌ Error: {str(e)}")
+
+    async def _cmd_renamewallet(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Rename a tracked wallet: /renamewallet <address> <newname>"""
+        try:
+            if not self.database:
+                await self._send_response(update, context, "❌ Database not available")
+                return
+
+            args = context.args
+            if len(args) < 2:
+                await self._send_response(update, context,
+                    "❌ <b>Usage:</b> <code>/renamewallet Address NewName</code>\n\n"
+                    "Example:\n"
+                    "<code>/renamewallet 9WzDXwBb... Ansem_Main</code>")
+                return
+
+            address = args[0]
+            new_name = ' '.join(args[1:])  # Allow spaces in name
+
+            # Check if exists
+            existing = await self.database.get_tracked_wallet(address)
+            if not existing:
+                await self._send_response(update, context,
+                    f"❌ Wallet not found:\n<code>{address}</code>")
+                return
+
+            old_name = existing.get('wallet_name', 'Unknown')
+
+            # Rename
+            success = await self.database.rename_wallet(address, new_name)
+
+            if success:
+                addr_short = f"{address[:6]}...{address[-4:]}"
+                response = f"✅ <b>Wallet renamed!</b>\n\n"
+                response += f"<b>Old name:</b> {old_name}\n"
+                response += f"<b>New name:</b> {new_name}\n"
+                response += f"<b>Address:</b> <code>{addr_short}</code>"
+            else:
+                response = f"❌ Failed to rename wallet. Check logs."
+
+            await self._send_response(update, context, response)
+
+        except Exception as e:
+            logger.error(f"❌ Error in /renamewallet: {e}")
+            await self._send_response(update, context, f"❌ Error: {str(e)}")
+
+    async def _cmd_refreshwallets(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Refresh wallets from Dune query: /refreshwallets [source] [limit]
+
+        Sources:
+        - alltime (default): adam_tehc's all-time pump.fun leaderboard (query 4032586)
+        - pnl: Net PnL leaderboard with recent activity (query 4925276)
+        - volume: Pumpfun + Pumpswap volume data (query 5232018)
+        """
+        try:
+            if not self.database:
+                await self._send_response(update, context, "❌ Database not available")
+                return
+
+            # Parse arguments
+            args = context.args if context.args else []
+            source = 'alltime'
+            limit = 50  # Default limit
+
+            for arg in args:
+                if arg.lower() in ['alltime', 'pnl', 'volume']:
+                    source = arg.lower()
+                elif arg.isdigit():
+                    limit = min(int(arg), 200)  # Cap at 200
+
+            # Query configurations
+            QUERY_CONFIG = {
+                'alltime': {
+                    'id': '4032586',
+                    'name': 'adam_tehc All-Time Pump.fun Leaderboard',
+                    'profit_field': 'realized_profit',
+                    'wallet_field': 'wallet',
+                    'includes_pumpswap': False
+                },
+                'pnl': {
+                    'id': '4925276',
+                    'name': 'Net PnL Leaderboard (Solana DEX)',
+                    'profit_field': 'net_pnl',
+                    'wallet_field': 'wallet_address',
+                    'includes_pumpswap': True
+                },
+                'volume': {
+                    'id': '5232018',
+                    'name': 'Pumpfun + Pumpswap Volume',
+                    'profit_field': 'total_volume_usd',  # Using volume as proxy
+                    'wallet_field': 'wallet',
+                    'includes_pumpswap': True
+                }
+            }
+
+            config = QUERY_CONFIG[source]
+
+            await self._send_response(update, context,
+                f"🔄 <b>Fetching wallets from Dune...</b>\n\n"
+                f"<b>Source:</b> {config['name']}\n"
+                f"<b>Limit:</b> {limit} wallets\n"
+                f"<b>Includes Pumpswap:</b> {'✅' if config['includes_pumpswap'] else '❌'}\n\n"
+                "This may take a moment.")
+
+            import aiohttp
+
+            # Dune API config
+            dune_api_key = os.getenv('DUNE_API_KEY', '')
+            dune_query_id = config['id']
+
+            if not dune_api_key:
+                await self._send_response(update, context,
+                    "❌ DUNE_API_KEY not set in environment.\n\n"
+                    "Add to Railway:\n"
+                    "<code>DUNE_API_KEY=your_key_here</code>")
+                return
+
+            # Fetch from Dune API
+            api_url = f"https://api.dune.com/api/v1/query/{dune_query_id}/results?limit={limit}"
+            headers = {"X-Dune-API-Key": dune_api_key}
+
+            async with aiohttp.ClientSession() as session:
+                async with session.get(api_url, headers=headers, timeout=aiohttp.ClientTimeout(total=60)) as resp:
+                    if resp.status != 200:
+                        error = await resp.text()
+                        await self._send_response(update, context,
+                            f"❌ Dune API error: HTTP {resp.status}\n{error[:200]}")
+                        return
+
+                    data = await resp.json()
+
+            # Check if query finished
+            if not data.get('is_execution_finished'):
+                await self._send_response(update, context,
+                    "⏳ Query still running. Try again in a minute.")
+                return
+
+            rows = data.get('result', {}).get('rows', [])
+
+            if not rows:
+                await self._send_response(update, context, "❌ No results from Dune query.")
+                return
+
+            # Parse leaderboard data dynamically based on source
+            added = 0
+            updated = 0
+            skipped = 0
+            top_pnl = 0
+            hot_wallets = []  # Wallets with big gains since last check
+            profit_field = config['profit_field']
+            wallet_field = config['wallet_field']
+
+            for idx, row in enumerate(rows):
+                wallet = row.get(wallet_field, '')
+                rank = row.get('rank', row.get('position', idx + 1))
+                profit_value = row.get(profit_field, 0) or 0
+
+                if not wallet:
+                    continue
+
+                # Track top PnL for reporting
+                if profit_value > top_pnl:
+                    top_pnl = profit_value
+
+                # Check if already exists
+                existing = await self.database.get_tracked_wallet(wallet)
+                if existing:
+                    old_pnl = existing.get('pnl', 0) or 0
+
+                    # Detect "hot" wallets - significant gains since last check
+                    if old_pnl > 0 and profit_value > old_pnl:
+                        gain = profit_value - old_pnl
+                        gain_pct = (gain / old_pnl) * 100
+
+                        # Flag if gained >20% or >$50K since last check
+                        if gain_pct > 20 or gain > 50000:
+                            hot_wallets.append({
+                                'name': existing.get('wallet_name', wallet[:8]),
+                                'gain': gain,
+                                'gain_pct': gain_pct,
+                                'new_pnl': profit_value
+                            })
+
+                    # Update stored PnL
+                    if profit_value != old_pnl:
+                        await self.database.update_wallet_stats(wallet, pnl=profit_value)
+                        updated += 1
+                    else:
+                        skipped += 1
+                    continue
+
+                # Generate name with source prefix
+                source_prefix = {'alltime': 'AT', 'pnl': 'PnL', 'volume': 'Vol'}
+                name = f"{source_prefix[source]}{rank}_{wallet[:6]}"
+
+                # Determine tier based on profit/volume
+                if profit_value >= 10_000_000:
+                    tier = 'elite'  # $10M+
+                elif profit_value >= 1_000_000:
+                    tier = 'top_kol'  # $1M+
+                elif profit_value >= 100_000:
+                    tier = 'verified'  # $100K+
+                else:
+                    tier = 'emerging'  # Smaller but active
+
+                success = await self.database.add_tracked_wallet(
+                    address=wallet,
+                    name=name,
+                    tier=tier,
+                    pnl=profit_value,
+                    source=f'dune_{source}'
+                )
+
+                if success:
+                    added += 1
+
+            # Update Helius webhook with all addresses
+            webhook_msg = ""
+            try:
+                from helius_fetcher import HeliusDataFetcher
+                helius = HeliusDataFetcher()
+                all_addresses = await self.database.get_tracked_wallet_addresses()
+
+                if all_addresses:
+                    import config
+                    base_url = getattr(config, 'RAILWAY_PUBLIC_URL', None) or getattr(config, 'WEBHOOK_BASE_URL', None)
+
+                    if base_url:
+                        webhook_url = f"{base_url}/webhook/smart-wallet"
+                        webhook_id = await helius.ensure_wallet_webhook(webhook_url, all_addresses)
+
+                        if webhook_id:
+                            webhook_msg = f"\n📡 Helius webhook updated ({len(all_addresses)} wallets)"
+            except Exception as e:
+                logger.error(f"Helius webhook error: {e}")
+                webhook_msg = f"\n⚠️ Helius webhook failed: {str(e)[:50]}"
+
+            value_label = "Volume" if source == 'volume' else "PnL"
+            pumpswap_note = " (incl. Pumpswap)" if config['includes_pumpswap'] else ""
+
+            response = f"✅ <b>Dune Refresh Complete!</b>\n\n"
+            response += f"<b>Source:</b> {config['name']}{pumpswap_note}\n"
+            response += f"<b>Added:</b> {added} new wallets\n"
+            response += f"<b>Updated:</b> {updated} existing\n"
+            response += f"<b>Unchanged:</b> {skipped}\n"
+            response += f"<b>Top {value_label}:</b> ${top_pnl:,.0f}\n"
+            response += f"<b>Total from Dune:</b> {len(rows)}"
+            response += webhook_msg
+
+            # Show hot wallets (big gainers since last check)
+            if hot_wallets:
+                hot_wallets.sort(key=lambda x: x['gain'], reverse=True)
+                response += f"\n\n🔥 <b>HOT WALLETS (gaining fast):</b>\n"
+                for hw in hot_wallets[:5]:  # Top 5 hot wallets
+                    response += f"• {hw['name']}: +${hw['gain']:,.0f} ({hw['gain_pct']:.0f}%)\n"
+
+            response += f"\n<b>Tip:</b> Run periodically to detect emerging winners!"
+
+            await self._send_response(update, context, response)
+
+        except Exception as e:
+            logger.error(f"❌ Error in /refreshwallets: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            await self._send_response(update, context, f"❌ Error: {str(e)}")

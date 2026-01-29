@@ -307,6 +307,22 @@ class Database:
                 )
             ''')
 
+            # Tracked wallets table - for wallet management via TG commands
+            await conn.execute('''
+                CREATE TABLE IF NOT EXISTS tracked_wallets (
+                    id SERIAL PRIMARY KEY,
+                    wallet_address TEXT UNIQUE NOT NULL,
+                    wallet_name TEXT NOT NULL,
+                    tier TEXT DEFAULT 'unknown',
+                    win_rate REAL,
+                    pnl REAL,
+                    source TEXT DEFAULT 'manual',
+                    active BOOLEAN DEFAULT TRUE,
+                    added_at TIMESTAMP DEFAULT NOW(),
+                    updated_at TIMESTAMP DEFAULT NOW()
+                )
+            ''')
+
             logger.info("✅ Database tables created/verified")
     
     async def insert_signal(self, signal_data: Dict):
@@ -1075,4 +1091,115 @@ class Database:
         """Get count of training tokens in database"""
         async with self.pool.acquire() as conn:
             return await conn.fetchval('SELECT COUNT(*) FROM ml_training_tokens')
+
+    # ================================================================
+    # TRACKED WALLETS MANAGEMENT
+    # ================================================================
+
+    async def add_tracked_wallet(self, address: str, name: str, tier: str = 'unknown',
+                                  win_rate: float = None, pnl: float = None,
+                                  source: str = 'manual') -> bool:
+        """Add a wallet to tracking list"""
+        try:
+            async with self.pool.acquire() as conn:
+                await conn.execute('''
+                    INSERT INTO tracked_wallets (wallet_address, wallet_name, tier, win_rate, pnl, source)
+                    VALUES ($1, $2, $3, $4, $5, $6)
+                    ON CONFLICT (wallet_address) DO UPDATE SET
+                        wallet_name = EXCLUDED.wallet_name,
+                        tier = EXCLUDED.tier,
+                        win_rate = COALESCE(EXCLUDED.win_rate, tracked_wallets.win_rate),
+                        pnl = COALESCE(EXCLUDED.pnl, tracked_wallets.pnl),
+                        source = EXCLUDED.source,
+                        active = TRUE,
+                        updated_at = NOW()
+                ''', address, name, tier, win_rate, pnl, source)
+                return True
+        except Exception as e:
+            logger.error(f"Error adding tracked wallet: {e}")
+            return False
+
+    async def remove_tracked_wallet(self, address: str) -> bool:
+        """Remove a wallet from tracking (soft delete - sets active=FALSE)"""
+        try:
+            async with self.pool.acquire() as conn:
+                result = await conn.execute('''
+                    UPDATE tracked_wallets SET active = FALSE, updated_at = NOW()
+                    WHERE wallet_address = $1
+                ''', address)
+                return 'UPDATE 1' in result
+        except Exception as e:
+            logger.error(f"Error removing tracked wallet: {e}")
+            return False
+
+    async def get_tracked_wallets(self, active_only: bool = True) -> list:
+        """Get all tracked wallets"""
+        try:
+            async with self.pool.acquire() as conn:
+                if active_only:
+                    rows = await conn.fetch('''
+                        SELECT * FROM tracked_wallets WHERE active = TRUE
+                        ORDER BY added_at DESC
+                    ''')
+                else:
+                    rows = await conn.fetch('''
+                        SELECT * FROM tracked_wallets ORDER BY added_at DESC
+                    ''')
+                return [dict(row) for row in rows]
+        except Exception as e:
+            logger.error(f"Error getting tracked wallets: {e}")
+            return []
+
+    async def get_tracked_wallet(self, address: str) -> dict:
+        """Get a specific tracked wallet"""
+        try:
+            async with self.pool.acquire() as conn:
+                row = await conn.fetchrow('''
+                    SELECT * FROM tracked_wallets WHERE wallet_address = $1
+                ''', address)
+                return dict(row) if row else None
+        except Exception as e:
+            logger.error(f"Error getting tracked wallet: {e}")
+            return None
+
+    async def update_wallet_stats(self, address: str, win_rate: float = None, pnl: float = None) -> bool:
+        """Update wallet stats (win rate, PnL)"""
+        try:
+            async with self.pool.acquire() as conn:
+                await conn.execute('''
+                    UPDATE tracked_wallets SET
+                        win_rate = COALESCE($2, win_rate),
+                        pnl = COALESCE($3, pnl),
+                        updated_at = NOW()
+                    WHERE wallet_address = $1
+                ''', address, win_rate, pnl)
+                return True
+        except Exception as e:
+            logger.error(f"Error updating wallet stats: {e}")
+            return False
+
+    async def rename_wallet(self, address: str, new_name: str) -> bool:
+        """Rename a tracked wallet"""
+        try:
+            async with self.pool.acquire() as conn:
+                result = await conn.execute('''
+                    UPDATE tracked_wallets SET wallet_name = $2, updated_at = NOW()
+                    WHERE wallet_address = $1
+                ''', address, new_name)
+                return 'UPDATE 1' in result
+        except Exception as e:
+            logger.error(f"Error renaming wallet: {e}")
+            return False
+
+    async def get_tracked_wallet_addresses(self) -> list:
+        """Get just the addresses of active tracked wallets (for Helius webhook)"""
+        try:
+            async with self.pool.acquire() as conn:
+                rows = await conn.fetch('''
+                    SELECT wallet_address FROM tracked_wallets WHERE active = TRUE
+                ''')
+                return [row['wallet_address'] for row in rows]
+        except Exception as e:
+            logger.error(f"Error getting wallet addresses: {e}")
+            return []
 
