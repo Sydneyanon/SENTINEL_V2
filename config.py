@@ -597,8 +597,8 @@ MILESTONE_POST_THRESHOLDS = [
 
 # Milestone video banner tiers (set file_ids in env vars when videos are ready)
 MILESTONE_BANNER_2X = os.getenv('MILESTONE_BANNER_2X')       # LET IT BURN (2-5x)
-MILESTONE_BANNER_10X = os.getenv('MILESTONE_BANNER_10X')     # SCORCHED EARTH (10-50x)
-MILESTONE_BANNER_100X = os.getenv('MILESTONE_BANNER_100X')   # HELL FIRE (100-500x)
+MILESTONE_BANNER_10X = os.getenv('MILESTONE_BANNER_10X')     # HELL FIRE (10-50x)
+MILESTONE_BANNER_100X = os.getenv('MILESTONE_BANNER_100X')   # SCORCHED EARTH (100-500x)
 MILESTONE_BANNER_1000X = os.getenv('MILESTONE_BANNER_1000X') # INFERNO (1000x)
 
 # How long to track token performance (hours)

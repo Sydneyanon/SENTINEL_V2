@@ -1281,8 +1281,8 @@ class AdminBot:
 
         tier_names = {
             '2x': '🔥 LET IT BURN (2-5x)',
-            '10x': '🌋 SCORCHED EARTH (10-50x)',
-            '100x': '☄️ HELL FIRE (100-500x)',
+            '10x': '☄️ HELL FIRE (10-50x)',
+            '100x': '🌋 SCORCHED EARTH (100-500x)',
             '1000x': '💀 INFERNO (1000x+)'
         }
 
@@ -1313,8 +1313,8 @@ class AdminBot:
         # Get the file_id for this tier
         tier_config = {
             '2x': (getattr(config, 'MILESTONE_BANNER_2X', None), '🔥 LET IT BURN', '2-5x'),
-            '10x': (getattr(config, 'MILESTONE_BANNER_10X', None), '🌋 SCORCHED EARTH', '5-10x'),
-            '100x': (getattr(config, 'MILESTONE_BANNER_100X', None), '☄️ HELL FIRE', '100-500x'),
+            '10x': (getattr(config, 'MILESTONE_BANNER_10X', None), '☄️ HELL FIRE', '10-50x'),
+            '100x': (getattr(config, 'MILESTONE_BANNER_100X', None), '🌋 SCORCHED EARTH', '100-500x'),
             '1000x': (getattr(config, 'MILESTONE_BANNER_1000X', None), '💀 INFERNO', '1000x+'),
         }
 
@@ -1401,8 +1401,8 @@ class AdminBot:
                 tier = pending.replace('multiplier_', '')
                 tier_map = {
                     '2x': ('MILESTONE_BANNER_2X', '2x (LET IT BURN)'),
-                    '10x': ('MILESTONE_BANNER_10X', '10x (SCORCHED EARTH)'),
-                    '100x': ('MILESTONE_BANNER_100X', '100x (HELL FIRE)'),
+                    '10x': ('MILESTONE_BANNER_10X', '10x (HELL FIRE)'),
+                    '100x': ('MILESTONE_BANNER_100X', '100x (SCORCHED EARTH)'),
                     '1000x': ('MILESTONE_BANNER_1000X', '1000x (INFERNO)'),
                 }
                 env_var, description = tier_map.get(tier, ('UNKNOWN', tier))
