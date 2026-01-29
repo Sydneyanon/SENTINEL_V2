@@ -1618,8 +1618,10 @@ class AdminBot:
 
             # Parse leaderboard data dynamically based on source
             added = 0
-            skipped_existing = 0
+            updated = 0
+            skipped = 0
             top_pnl = 0
+            hot_wallets = []  # Wallets with big gains since last check
             profit_field = config['profit_field']
             wallet_field = config['wallet_field']
 
@@ -1638,7 +1640,28 @@ class AdminBot:
                 # Check if already exists
                 existing = await self.database.get_tracked_wallet(wallet)
                 if existing:
-                    skipped_existing += 1
+                    old_pnl = existing.get('pnl', 0) or 0
+
+                    # Detect "hot" wallets - significant gains since last check
+                    if old_pnl > 0 and profit_value > old_pnl:
+                        gain = profit_value - old_pnl
+                        gain_pct = (gain / old_pnl) * 100
+
+                        # Flag if gained >20% or >$50K since last check
+                        if gain_pct > 20 or gain > 50000:
+                            hot_wallets.append({
+                                'name': existing.get('wallet_name', wallet[:8]),
+                                'gain': gain,
+                                'gain_pct': gain_pct,
+                                'new_pnl': profit_value
+                            })
+
+                    # Update stored PnL
+                    if profit_value != old_pnl:
+                        await self.database.update_wallet_stats(wallet, pnl=profit_value)
+                        updated += 1
+                    else:
+                        skipped += 1
                     continue
 
                 # Generate name with source prefix
@@ -1693,15 +1716,20 @@ class AdminBot:
             response = f"✅ <b>Dune Refresh Complete!</b>\n\n"
             response += f"<b>Source:</b> {config['name']}{pumpswap_note}\n"
             response += f"<b>Added:</b> {added} new wallets\n"
-            response += f"<b>Skipped (existing):</b> {skipped_existing}\n"
+            response += f"<b>Updated:</b> {updated} existing\n"
+            response += f"<b>Unchanged:</b> {skipped}\n"
             response += f"<b>Top {value_label}:</b> ${top_pnl:,.0f}\n"
             response += f"<b>Total from Dune:</b> {len(rows)}"
             response += webhook_msg
-            response += f"\n\n<b>Usage:</b>\n"
-            response += f"<code>/refreshwallets alltime 50</code> - All-time leaders\n"
-            response += f"<code>/refreshwallets pnl 50</code> - Net PnL leaders\n"
-            response += f"<code>/refreshwallets volume 50</code> - Pumpswap volume\n"
-            response += f"\nUse /wallets to see all tracked wallets."
+
+            # Show hot wallets (big gainers since last check)
+            if hot_wallets:
+                hot_wallets.sort(key=lambda x: x['gain'], reverse=True)
+                response += f"\n\n🔥 <b>HOT WALLETS (gaining fast):</b>\n"
+                for hw in hot_wallets[:5]:  # Top 5 hot wallets
+                    response += f"• {hw['name']}: +${hw['gain']:,.0f} ({hw['gain_pct']:.0f}%)\n"
+
+            response += f"\n<b>Tip:</b> Run periodically to detect emerging winners!"
 
             await self._send_response(update, context, response)
 
