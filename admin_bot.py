@@ -68,6 +68,7 @@ class AdminBot:
             self.app.add_handler(CommandHandler("winrate", self._cmd_winrate, filters=admin_filter))
             self.app.add_handler(CommandHandler("testbanner", self._cmd_testbanner, filters=admin_filter))
             self.app.add_handler(CommandHandler("setmultiplier", self._cmd_setmultiplier, filters=admin_filter))
+            self.app.add_handler(CommandHandler("testmultiplier", self._cmd_testmultiplier, filters=admin_filter))
             self.app.add_handler(CommandHandler("setbanner", self._cmd_setbanner, filters=admin_filter))
 
             # Wallet management commands
@@ -220,7 +221,12 @@ class AdminBot:
 <b>Control:</b>
 /pause - Pause signal posting
 /resume - Resume signal posting
-/testbanner - Test banner animation in channel
+/testbanner - Test signal banner in channel
+/setbanner - Set new signal banner (send video)
+
+<b>Multiplier Animations:</b>
+/setmultiplier &lt;tier&gt; - Set animation (2x/10x/100x/1000x)
+/testmultiplier &lt;tier&gt; - Test multiplier animation
 
 <b>Help:</b>
 /help - Show this message
@@ -1284,6 +1290,80 @@ class AdminBot:
             f"🎯 <b>{tier_names.get(tier, tier)} Animation Setup</b>\n\n"
             f"Send me the video/animation for the <b>{tier}</b> milestone alerts.\n\n"
             f"Supported: MP4 videos, GIFs, animations")
+
+    async def _cmd_testmultiplier(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Test multiplier animations: /testmultiplier <tier>"""
+        args = context.args
+        valid_tiers = ['2x', '10x', '100x', '1000x']
+
+        if not args or args[0].lower() not in valid_tiers:
+            # Show usage
+            await self._send_response(update, context,
+                "🎯 <b>Test Multiplier Animations</b>\n\n"
+                "<b>Usage:</b>\n"
+                "<code>/testmultiplier 2x</code>\n"
+                "<code>/testmultiplier 10x</code>\n"
+                "<code>/testmultiplier 100x</code>\n"
+                "<code>/testmultiplier 1000x</code>\n\n"
+                "This will post the animation to the channel for testing.")
+            return
+
+        tier = args[0].lower()
+
+        # Get the file_id for this tier
+        tier_config = {
+            '2x': (getattr(config, 'MILESTONE_BANNER_2X', None), '🔥 LET IT BURN', '2-5x'),
+            '10x': (getattr(config, 'MILESTONE_BANNER_10X', None), '🌋 SCORCHED EARTH', '5-10x'),
+            '100x': (getattr(config, 'MILESTONE_BANNER_100X', None), '☄️ HELL FIRE', '100-500x'),
+            '1000x': (getattr(config, 'MILESTONE_BANNER_1000X', None), '💀 INFERNO', '1000x+'),
+        }
+
+        file_id, title, range_text = tier_config.get(tier, (None, tier, tier))
+
+        if not file_id:
+            await self._send_response(update, context,
+                f"❌ No animation set for <b>{tier}</b> tier.\n\n"
+                f"Set it with: <code>/setmultiplier {tier}</code>")
+            return
+
+        try:
+            # Create test message
+            test_caption = (
+                f"<b>{title}</b>\n\n"
+                f"🧪 <b>TEST ALERT</b> 🧪\n\n"
+                f"This is what the <b>{tier}</b> milestone alert will look like.\n"
+                f"Range: {range_text}\n\n"
+                f"<i>Test by admin</i>"
+            )
+
+            # Try to send to channel
+            channel_id = config.TELEGRAM_CHANNEL_ID
+            if channel_id:
+                await context.bot.send_animation(
+                    chat_id=channel_id,
+                    animation=file_id,
+                    caption=test_caption,
+                    parse_mode='HTML'
+                )
+                await self._send_response(update, context,
+                    f"✅ <b>{tier}</b> animation posted to channel!")
+            else:
+                # No channel, send to admin
+                await update.message.reply_animation(
+                    animation=file_id,
+                    caption=test_caption,
+                    parse_mode='HTML'
+                )
+                await self._send_response(update, context,
+                    f"✅ <b>{tier}</b> animation sent!\n"
+                    f"<i>(No channel configured, sent to DM)</i>")
+
+        except Exception as e:
+            logger.error(f"Error testing multiplier animation: {e}")
+            await self._send_response(update, context,
+                f"❌ Error sending animation: {str(e)[:100]}\n\n"
+                f"The file_id may be invalid. Try setting it again with:\n"
+                f"<code>/setmultiplier {tier}</code>")
 
     async def _handle_media_upload(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Capture file_id when admin sends a video/animation"""
