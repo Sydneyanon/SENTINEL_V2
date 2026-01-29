@@ -1042,7 +1042,7 @@ class HeliusDataFetcher:
 
             async with aiohttp.ClientSession() as session:
                 async with session.post(api_url, json=payload, timeout=aiohttp.ClientTimeout(total=30)) as resp:
-                    if resp.status == 200:
+                    if resp.status in (200, 201):  # 201 = Created (success for POST)
                         result = await resp.json()
                         webhook_id = result.get('webhookID', 'unknown')
                         logger.info(f"✅ Registered wallet webhook: {webhook_id}")
