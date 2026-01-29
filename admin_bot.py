@@ -67,6 +67,12 @@ class AdminBot:
             self.app.add_handler(CommandHandler("winrate", self._cmd_winrate, filters=admin_filter))
             self.app.add_handler(CommandHandler("testbanner", self._cmd_testbanner, filters=admin_filter))
 
+            # Wallet management commands
+            self.app.add_handler(CommandHandler("wallets", self._cmd_wallets, filters=admin_filter))
+            self.app.add_handler(CommandHandler("addwallet", self._cmd_addwallet, filters=admin_filter))
+            self.app.add_handler(CommandHandler("removewallet", self._cmd_removewallet, filters=admin_filter))
+            self.app.add_handler(CommandHandler("renamewallet", self._cmd_renamewallet, filters=admin_filter))
+
             # Handle media uploads from admin (for banner file_id capture)
             self.app.add_handler(MessageHandler(
                 admin_filter & (filters.VIDEO | filters.ANIMATION | filters.Document.VIDEO),
@@ -77,7 +83,7 @@ class AdminBot:
             self.app.add_handler(MessageHandler(~admin_filter, self._handle_unauthorized))
 
             logger.info(f"✅ Admin bot initialized")
-            logger.info(f"   Commands registered: /help /stats /active /performance /winrate /health /cache /missed /whales /config /dataset /collect /ml /pause /resume /testbanner")
+            logger.info(f"   Commands registered: /help /stats /active /performance /winrate /health /cache /missed /whales /config /dataset /collect /ml /pause /resume /testbanner /wallets /addwallet /removewallet /renamewallet")
             logger.info(f"   Security: Only user {self.admin_user_id} can use commands")
             if self.admin_channel_id:
                 logger.info(f"   Response mode: Admin channel ({self.admin_channel_id})")
@@ -190,6 +196,12 @@ class AdminBot:
 /cache - Telegram calls cache status
 /whales - Discovered whale wallets
 /config - Live scoring config values
+
+<b>Wallet Management:</b>
+/wallets - View all tracked wallets
+/addwallet &lt;name&gt; &lt;address&gt; - Add wallet to tracking
+/removewallet &lt;address&gt; - Remove wallet from tracking
+/renamewallet &lt;address&gt; &lt;name&gt; - Rename a wallet
 
 <b>Data &amp; ML:</b>
 /dataset - ML training dataset stats
@@ -1250,3 +1262,256 @@ class AdminBot:
 
         except Exception as e:
             logger.error(f"❌ Error handling media upload: {e}")
+
+    # ================================================================
+    # WALLET MANAGEMENT COMMANDS
+    # ================================================================
+
+    async def _cmd_wallets(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Show all tracked wallets"""
+        try:
+            if not self.database:
+                await self._send_response(update, context, "❌ Database not available")
+                return
+
+            wallets = await self.database.get_tracked_wallets(active_only=True)
+
+            if not wallets:
+                await self._send_response(update, context,
+                    "👛 <b>TRACKED WALLETS</b>\n\n"
+                    "No wallets tracked yet.\n\n"
+                    "Add wallets with:\n"
+                    "<code>/addwallet Name Address</code>")
+                return
+
+            response = f"👛 <b>TRACKED WALLETS ({len(wallets)})</b>\n\n"
+
+            for i, w in enumerate(wallets[:30], 1):  # Limit to 30 to avoid message length issues
+                name = w.get('wallet_name', 'Unknown')
+                addr = w.get('wallet_address', '')
+                addr_short = f"{addr[:6]}...{addr[-4:]}" if len(addr) > 12 else addr
+                tier = w.get('tier', 'unknown')
+                win_rate = w.get('win_rate')
+                pnl = w.get('pnl')
+                source = w.get('source', 'manual')
+
+                # Status indicator
+                status = "🟢" if tier in ['elite', 'top_kol'] else "⚪"
+
+                response += f"{status} <b>{name}</b>\n"
+                response += f"   <code>{addr_short}</code>\n"
+
+                # Stats line
+                stats = []
+                if win_rate is not None:
+                    stats.append(f"WR: {win_rate*100:.0f}%")
+                if pnl is not None:
+                    pnl_str = f"+${pnl:,.0f}" if pnl >= 0 else f"-${abs(pnl):,.0f}"
+                    stats.append(f"PnL: {pnl_str}")
+                if stats:
+                    response += f"   {' | '.join(stats)}\n"
+
+                response += "\n"
+
+            if len(wallets) > 30:
+                response += f"<i>...and {len(wallets) - 30} more</i>\n\n"
+
+            response += "<b>Commands:</b>\n"
+            response += "<code>/addwallet Name Address</code>\n"
+            response += "<code>/removewallet Address</code>\n"
+            response += "<code>/renamewallet Address NewName</code>"
+
+            await self._send_response(update, context, response)
+
+        except Exception as e:
+            logger.error(f"❌ Error in /wallets: {e}")
+            await self._send_response(update, context, f"❌ Error: {str(e)}")
+
+    async def _cmd_addwallet(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Add a wallet to tracking: /addwallet <name> <address>"""
+        try:
+            if not self.database:
+                await self._send_response(update, context, "❌ Database not available")
+                return
+
+            args = context.args
+            if len(args) < 2:
+                await self._send_response(update, context,
+                    "❌ <b>Usage:</b> <code>/addwallet Name Address</code>\n\n"
+                    "Example:\n"
+                    "<code>/addwallet Ansem 9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM</code>")
+                return
+
+            name = args[0]
+            address = args[1]
+
+            # Validate address format (basic check)
+            if len(address) < 32 or len(address) > 50:
+                await self._send_response(update, context,
+                    "❌ Invalid Solana address format.\n"
+                    "Address should be 32-44 characters.")
+                return
+
+            # Check if already exists
+            existing = await self.database.get_tracked_wallet(address)
+
+            # Add to database
+            success = await self.database.add_tracked_wallet(
+                address=address,
+                name=name,
+                tier='unknown',
+                source='manual'
+            )
+
+            if success:
+                action = "updated" if existing else "added"
+                response = f"✅ <b>Wallet {action}!</b>\n\n"
+                response += f"<b>Name:</b> {name}\n"
+                response += f"<b>Address:</b>\n<code>{address}</code>\n\n"
+
+                # Try to register with Helius webhook
+                try:
+                    from helius_fetcher import HeliusDataFetcher
+                    helius = HeliusDataFetcher()
+
+                    # Get all wallet addresses
+                    all_addresses = await self.database.get_tracked_wallet_addresses()
+
+                    if all_addresses:
+                        # Get the webhook URL from config
+                        import config
+                        base_url = getattr(config, 'RAILWAY_PUBLIC_URL', None) or getattr(config, 'WEBHOOK_BASE_URL', None)
+
+                        if base_url:
+                            webhook_url = f"{base_url}/webhook/smart-wallet"
+                            webhook_id = await helius.ensure_wallet_webhook(webhook_url, all_addresses)
+
+                            if webhook_id:
+                                response += f"📡 <b>Helius webhook updated</b>\n"
+                                response += f"   Monitoring {len(all_addresses)} wallets\n"
+                            else:
+                                response += f"⚠️ Helius webhook update failed\n"
+                        else:
+                            response += f"⚠️ No webhook URL configured\n"
+                except Exception as e:
+                    logger.error(f"Helius webhook error: {e}")
+                    response += f"⚠️ Helius webhook: {str(e)[:50]}\n"
+
+                response += f"\n🔔 Wallet now tracked!"
+            else:
+                response = f"❌ Failed to add wallet. Check logs."
+
+            await self._send_response(update, context, response)
+
+        except Exception as e:
+            logger.error(f"❌ Error in /addwallet: {e}")
+            await self._send_response(update, context, f"❌ Error: {str(e)}")
+
+    async def _cmd_removewallet(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Remove a wallet from tracking: /removewallet <address>"""
+        try:
+            if not self.database:
+                await self._send_response(update, context, "❌ Database not available")
+                return
+
+            args = context.args
+            if len(args) < 1:
+                await self._send_response(update, context,
+                    "❌ <b>Usage:</b> <code>/removewallet Address</code>\n\n"
+                    "Example:\n"
+                    "<code>/removewallet 9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM</code>")
+                return
+
+            address = args[0]
+
+            # Check if exists
+            existing = await self.database.get_tracked_wallet(address)
+            if not existing:
+                await self._send_response(update, context,
+                    f"❌ Wallet not found:\n<code>{address}</code>")
+                return
+
+            wallet_name = existing.get('wallet_name', 'Unknown')
+
+            # Remove from database (soft delete)
+            success = await self.database.remove_tracked_wallet(address)
+
+            if success:
+                response = f"✅ <b>Wallet removed!</b>\n\n"
+                response += f"<b>Name:</b> {wallet_name}\n"
+                response += f"<b>Address:</b>\n<code>{address}</code>\n\n"
+
+                # Update Helius webhook
+                try:
+                    from helius_fetcher import HeliusDataFetcher
+                    helius = HeliusDataFetcher()
+
+                    all_addresses = await self.database.get_tracked_wallet_addresses()
+
+                    import config
+                    base_url = getattr(config, 'RAILWAY_PUBLIC_URL', None) or getattr(config, 'WEBHOOK_BASE_URL', None)
+
+                    if base_url and all_addresses:
+                        webhook_url = f"{base_url}/webhook/smart-wallet"
+                        webhook_id = await helius.ensure_wallet_webhook(webhook_url, all_addresses)
+
+                        if webhook_id:
+                            response += f"📡 <b>Helius webhook updated</b>\n"
+                            response += f"   Now monitoring {len(all_addresses)} wallets"
+                except Exception as e:
+                    logger.error(f"Helius webhook error: {e}")
+
+                response += f"\n\n🔕 Wallet no longer tracked."
+            else:
+                response = f"❌ Failed to remove wallet. Check logs."
+
+            await self._send_response(update, context, response)
+
+        except Exception as e:
+            logger.error(f"❌ Error in /removewallet: {e}")
+            await self._send_response(update, context, f"❌ Error: {str(e)}")
+
+    async def _cmd_renamewallet(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Rename a tracked wallet: /renamewallet <address> <newname>"""
+        try:
+            if not self.database:
+                await self._send_response(update, context, "❌ Database not available")
+                return
+
+            args = context.args
+            if len(args) < 2:
+                await self._send_response(update, context,
+                    "❌ <b>Usage:</b> <code>/renamewallet Address NewName</code>\n\n"
+                    "Example:\n"
+                    "<code>/renamewallet 9WzDXwBb... Ansem_Main</code>")
+                return
+
+            address = args[0]
+            new_name = ' '.join(args[1:])  # Allow spaces in name
+
+            # Check if exists
+            existing = await self.database.get_tracked_wallet(address)
+            if not existing:
+                await self._send_response(update, context,
+                    f"❌ Wallet not found:\n<code>{address}</code>")
+                return
+
+            old_name = existing.get('wallet_name', 'Unknown')
+
+            # Rename
+            success = await self.database.rename_wallet(address, new_name)
+
+            if success:
+                addr_short = f"{address[:6]}...{address[-4:]}"
+                response = f"✅ <b>Wallet renamed!</b>\n\n"
+                response += f"<b>Old name:</b> {old_name}\n"
+                response += f"<b>New name:</b> {new_name}\n"
+                response += f"<b>Address:</b> <code>{addr_short}</code>"
+            else:
+                response = f"❌ Failed to rename wallet. Check logs."
+
+            await self._send_response(update, context, response)
+
+        except Exception as e:
+            logger.error(f"❌ Error in /renamewallet: {e}")
+            await self._send_response(update, context, f"❌ Error: {str(e)}")

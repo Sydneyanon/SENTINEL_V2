@@ -1014,6 +1014,124 @@ class HeliusDataFetcher:
             return None
 
     # ================================================================
+    # SMART WALLET WEBHOOK MANAGEMENT
+    # ================================================================
+
+    async def register_wallet_webhook(self, webhook_url: str, wallet_addresses: List[str]) -> Optional[Dict]:
+        """
+        Register a Helius webhook for smart wallet monitoring.
+        Watches multiple wallet addresses for any transaction activity.
+
+        Args:
+            webhook_url: URL to receive webhook events
+            wallet_addresses: List of Solana wallet addresses to monitor
+
+        Returns:
+            Dict with webhook_id and url, or None on failure
+        """
+        try:
+            api_url = f"https://api.helius.xyz/v0/webhooks?api-key={self.api_key}"
+
+            payload = {
+                "webhookURL": webhook_url,
+                "transactionTypes": ["ANY"],  # Catch all transactions
+                "accountAddresses": wallet_addresses,
+                "webhookType": "enhanced",  # Get decoded transaction data
+                "txnStatus": "success",
+            }
+
+            async with aiohttp.ClientSession() as session:
+                async with session.post(api_url, json=payload, timeout=aiohttp.ClientTimeout(total=30)) as resp:
+                    if resp.status == 200:
+                        result = await resp.json()
+                        webhook_id = result.get('webhookID', 'unknown')
+                        logger.info(f"✅ Registered wallet webhook: {webhook_id}")
+                        logger.info(f"   Monitoring {len(wallet_addresses)} wallets")
+                        return {'webhook_id': webhook_id, 'url': webhook_url}
+                    else:
+                        error_text = await resp.text()
+                        logger.error(f"❌ Failed to register wallet webhook (HTTP {resp.status}): {error_text}")
+                        return None
+
+        except Exception as e:
+            logger.error(f"❌ Error registering wallet webhook: {e}")
+            return None
+
+    async def update_wallet_webhook(self, webhook_id: str, wallet_addresses: List[str]) -> bool:
+        """
+        Update an existing wallet webhook with new addresses.
+        Use this to add/remove wallets without recreating the webhook.
+
+        Args:
+            webhook_id: The Helius webhook ID to update
+            wallet_addresses: New complete list of wallet addresses
+
+        Returns:
+            True on success, False on failure
+        """
+        try:
+            api_url = f"https://api.helius.xyz/v0/webhooks/{webhook_id}?api-key={self.api_key}"
+
+            payload = {
+                "accountAddresses": wallet_addresses
+            }
+
+            async with aiohttp.ClientSession() as session:
+                async with session.put(api_url, json=payload, timeout=aiohttp.ClientTimeout(total=30)) as resp:
+                    if resp.status == 200:
+                        logger.info(f"✅ Updated wallet webhook: {webhook_id}")
+                        logger.info(f"   Now monitoring {len(wallet_addresses)} wallets")
+                        return True
+                    else:
+                        error_text = await resp.text()
+                        logger.error(f"❌ Failed to update wallet webhook (HTTP {resp.status}): {error_text}")
+                        return False
+
+        except Exception as e:
+            logger.error(f"❌ Error updating wallet webhook: {e}")
+            return False
+
+    async def get_wallet_webhook_id(self, webhook_url: str) -> Optional[str]:
+        """Find existing wallet webhook ID by URL"""
+        try:
+            existing = await self.get_webhooks()
+            for wh in existing:
+                if webhook_url in wh.get('webhookURL', ''):
+                    # Check it's not the pump program webhook
+                    addresses = wh.get('accountAddresses', [])
+                    pump_program = config.HELIUS_PUMP_WEBHOOK.get('program_id', '')
+                    if pump_program not in addresses:
+                        return wh.get('webhookID')
+            return None
+        except Exception as e:
+            logger.error(f"❌ Error finding wallet webhook: {e}")
+            return None
+
+    async def ensure_wallet_webhook(self, webhook_url: str, wallet_addresses: List[str]) -> Optional[str]:
+        """
+        Ensure wallet webhook exists with current addresses.
+        Creates new or updates existing webhook as needed.
+
+        Returns webhook_id or None
+        """
+        try:
+            # Check for existing wallet webhook
+            existing_id = await self.get_wallet_webhook_id(webhook_url)
+
+            if existing_id:
+                # Update existing webhook with current addresses
+                success = await self.update_wallet_webhook(existing_id, wallet_addresses)
+                return existing_id if success else None
+            else:
+                # Create new webhook
+                result = await self.register_wallet_webhook(webhook_url, wallet_addresses)
+                return result.get('webhook_id') if result else None
+
+        except Exception as e:
+            logger.error(f"❌ Error ensuring wallet webhook: {e}")
+            return None
+
+    # ================================================================
     # MINT/FREEZE AUTHORITY CHECK (Rug Protection)
     # ================================================================
 
