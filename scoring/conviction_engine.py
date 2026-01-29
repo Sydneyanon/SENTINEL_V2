@@ -89,7 +89,16 @@ class ConvictionEngine:
             token_symbol = token_data.get('token_symbol', 'UNKNOWN')
             token_name = token_data.get('token_name', token_symbol)
             bonding_pct = token_data.get('bonding_curve_pct', 0)
-            is_pre_grad = bonding_pct < 100
+            mcap = token_data.get('market_cap', 0)
+
+            # Determine graduation status
+            # FIX: If MCAP > $69K (pump.fun graduation), token IS graduated even if bonding_pct is missing/0
+            # DexScreener doesn't provide bonding_curve_pct, so we must infer from MCAP
+            GRADUATION_MCAP = 69000  # Pump.fun graduation threshold
+            is_pre_grad = bonding_pct < 100 and mcap < GRADUATION_MCAP
+
+            if mcap >= GRADUATION_MCAP and bonding_pct < 100:
+                logger.info(f"   📊 MCAP ${mcap/1000:.0f}K >= $69K — treating as POST-GRAD (bonding_pct was {bonding_pct}%)")
 
             # 🎬 SCENE 4: CONVICTION SCORING ENGINE
             print("\n" + "="*80)
@@ -1497,7 +1506,9 @@ class ConvictionEngine:
           - volume_24h and market_cap available from DEX pools
         """
         bonding_pct = token_data.get('bonding_curve_pct', 0)
-        is_pre_grad = bonding_pct < 100
+        mcap = token_data.get('market_cap', 0)
+        GRADUATION_MCAP = 69000
+        is_pre_grad = bonding_pct < 100 and mcap < GRADUATION_MCAP
 
         if is_pre_grad:
             return self._score_pre_grad_volume(token_data)
@@ -1611,7 +1622,9 @@ class ConvictionEngine:
         Post-grad gets +2 multi-timeframe bonus (max +8 total).
         """
         bonding_pct = token_data.get('bonding_curve_pct', 0)
-        is_pre_grad = bonding_pct < 100
+        mcap = token_data.get('market_cap', 0)
+        GRADUATION_MCAP = 69000
+        is_pre_grad = bonding_pct < 100 and mcap < GRADUATION_MCAP
 
         price_change_5m = token_data.get('price_change_5m', 0)
 
@@ -1957,7 +1970,9 @@ class ConvictionEngine:
         Only applies to pre-graduation tokens.
         """
         bonding_pct = token_data.get('bonding_curve_pct', 0)
-        is_pre_grad = bonding_pct < 100
+        mcap = token_data.get('market_cap', 0)
+        GRADUATION_MCAP = 69000
+        is_pre_grad = bonding_pct < 100 and mcap < GRADUATION_MCAP
 
         if not is_pre_grad:
             return 0  # Post-grad tokens don't have bonding curves
