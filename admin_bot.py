@@ -1381,11 +1381,10 @@ class AdminBot:
                     all_addresses = await self.database.get_tracked_wallet_addresses()
 
                     if all_addresses:
-                        # Get the webhook URL from config
-                        import config
-                        base_url = getattr(config, 'RAILWAY_PUBLIC_URL', None) or getattr(config, 'WEBHOOK_BASE_URL', None)
-
-                        if base_url:
+                        # Get Railway public domain from environment (auto-set by Railway)
+                        railway_domain = os.getenv('RAILWAY_PUBLIC_DOMAIN', '')
+                        if railway_domain:
+                            base_url = f"https://{railway_domain}" if not railway_domain.startswith('http') else railway_domain
                             webhook_url = f"{base_url}/webhook/smart-wallet"
                             webhook_id = await helius.ensure_wallet_webhook(webhook_url, all_addresses)
 
@@ -1395,7 +1394,7 @@ class AdminBot:
                             else:
                                 response += f"⚠️ Helius webhook update failed\n"
                         else:
-                            response += f"⚠️ No webhook URL configured\n"
+                            response += f"⚠️ RAILWAY_PUBLIC_DOMAIN not set - webhook not registered!\n"
                 except Exception as e:
                     logger.error(f"Helius webhook error: {e}")
                     response += f"⚠️ Helius webhook: {str(e)[:50]}\n"
@@ -1451,10 +1450,10 @@ class AdminBot:
 
                     all_addresses = await self.database.get_tracked_wallet_addresses()
 
-                    import config
-                    base_url = getattr(config, 'RAILWAY_PUBLIC_URL', None) or getattr(config, 'WEBHOOK_BASE_URL', None)
-
-                    if base_url and all_addresses:
+                    # Get Railway public domain from environment (auto-set by Railway)
+                    railway_domain = os.getenv('RAILWAY_PUBLIC_DOMAIN', '')
+                    if railway_domain and all_addresses:
+                        base_url = f"https://{railway_domain}" if not railway_domain.startswith('http') else railway_domain
                         webhook_url = f"{base_url}/webhook/smart-wallet"
                         webhook_id = await helius.ensure_wallet_webhook(webhook_url, all_addresses)
 
@@ -1704,15 +1703,20 @@ class AdminBot:
                 all_addresses = await self.database.get_tracked_wallet_addresses()
 
                 if all_addresses:
-                    import config
-                    base_url = getattr(config, 'RAILWAY_PUBLIC_URL', None) or getattr(config, 'WEBHOOK_BASE_URL', None)
-
-                    if base_url:
+                    # Get Railway public domain from environment (auto-set by Railway)
+                    railway_domain = os.getenv('RAILWAY_PUBLIC_DOMAIN', '')
+                    if railway_domain:
+                        base_url = f"https://{railway_domain}" if not railway_domain.startswith('http') else railway_domain
                         webhook_url = f"{base_url}/webhook/smart-wallet"
                         webhook_id = await helius.ensure_wallet_webhook(webhook_url, all_addresses)
 
                         if webhook_id:
                             webhook_msg = f"\n📡 Helius webhook updated ({len(all_addresses)} wallets)"
+                        else:
+                            webhook_msg = f"\n⚠️ Helius webhook registration failed"
+                    else:
+                        webhook_msg = f"\n⚠️ RAILWAY_PUBLIC_DOMAIN not set - webhook not registered!"
+                        logger.error("❌ RAILWAY_PUBLIC_DOMAIN not set - cannot register Helius webhook")
             except Exception as e:
                 logger.error(f"Helius webhook error: {e}")
                 webhook_msg = f"\n⚠️ Helius webhook failed: {str(e)[:50]}"
