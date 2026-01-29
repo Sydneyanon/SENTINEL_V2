@@ -75,8 +75,9 @@ class AdminBot:
             self.app.add_handler(CommandHandler("addwallet", self._cmd_addwallet, filters=admin_filter))
             self.app.add_handler(CommandHandler("removewallet", self._cmd_removewallet, filters=admin_filter))
             self.app.add_handler(CommandHandler("renamewallet", self._cmd_renamewallet, filters=admin_filter))
-            self.app.add_handler(CommandHandler("refreshwallets", self._cmd_refreshwallets, filters=admin_filter))
             self.app.add_handler(CommandHandler("syncwebhook", self._cmd_syncwebhook, filters=admin_filter))
+            self.app.add_handler(CommandHandler("listwebhooks", self._cmd_listwebhooks, filters=admin_filter))
+            self.app.add_handler(CommandHandler("clearwebhooks", self._cmd_clearwebhooks, filters=admin_filter))
 
             # Handle media uploads from admin (for banner file_id capture)
             self.app.add_handler(MessageHandler(
@@ -207,8 +208,9 @@ class AdminBot:
 /addwallet &lt;name&gt; &lt;address&gt; - Add wallet to tracking
 /removewallet &lt;address&gt; - Remove wallet from tracking
 /renamewallet &lt;address&gt; &lt;name&gt; - Rename a wallet
-/refreshwallets [source] [limit] - Pull wallets from Dune
-  Sources: alltime, 7day, pnl, volume
+/syncwebhook - Sync all wallets to Helius webhook
+/listwebhooks - Show all registered Helius webhooks
+/clearwebhooks - Delete all wallet webhooks (fresh start)
 
 <b>Data &amp; ML:</b>
 /dataset - ML training dataset stats
@@ -1603,234 +1605,128 @@ class AdminBot:
             logger.error(f"❌ Error in /renamewallet: {e}")
             await self._send_response(update, context, f"❌ Error: {str(e)}")
 
-    async def _cmd_refreshwallets(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Refresh wallets from Dune query: /refreshwallets [source] [limit]
-
-        Sources:
-        - alltime (default): adam_tehc's all-time pump.fun leaderboard (query 4032586)
-        - pnl: Net PnL leaderboard with recent activity (query 4925276)
-        - volume: Pumpfun + Pumpswap volume data (query 5232018)
-        """
+    async def _cmd_listwebhooks(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """List all registered Helius webhooks: /listwebhooks"""
         try:
-            if not self.database:
-                await self._send_response(update, context, "❌ Database not available")
-                return
+            await self._send_response(update, context, "🔍 Fetching Helius webhooks...")
 
-            # Parse arguments
-            args = context.args if context.args else []
-            source = 'alltime'
-            limit = 50  # Default limit
+            from helius_fetcher import HeliusDataFetcher
+            helius = HeliusDataFetcher()
+            webhooks = await helius.get_webhooks()
 
-            for arg in args:
-                if arg.lower() in ['alltime', '7day', 'pnl', 'volume']:
-                    source = arg.lower()
-                elif arg.isdigit():
-                    limit = min(int(arg), 200)  # Cap at 200
-
-            # Query configurations
-            QUERY_CONFIG = {
-                'alltime': {
-                    'id': '4032586',
-                    'name': 'adam_tehc All-Time Pump.fun Leaderboard',
-                    'profit_field': 'realized_profit',
-                    'wallet_field': 'wallet',
-                    'includes_pumpswap': False
-                },
-                '7day': {
-                    'id': '6613196',
-                    'name': '7-Day Top Performers (Emerging Winners)',
-                    'profit_field': 'realized_profit',
-                    'wallet_field': 'wallet',
-                    'includes_pumpswap': False
-                },
-                'pnl': {
-                    'id': '4925276',
-                    'name': 'Net PnL Leaderboard (Solana DEX)',
-                    'profit_field': 'net_pnl',
-                    'wallet_field': 'wallet_address',
-                    'includes_pumpswap': True
-                },
-                'volume': {
-                    'id': '5232018',
-                    'name': 'Pumpfun + Pumpswap Volume',
-                    'profit_field': 'total_volume_usd',  # Using volume as proxy
-                    'wallet_field': 'wallet',
-                    'includes_pumpswap': True
-                }
-            }
-
-            query_cfg = QUERY_CONFIG[source]
-
-            await self._send_response(update, context,
-                f"🔄 <b>Fetching wallets from Dune...</b>\n\n"
-                f"<b>Source:</b> {query_cfg['name']}\n"
-                f"<b>Limit:</b> {limit} wallets\n"
-                f"<b>Includes Pumpswap:</b> {'✅' if query_cfg['includes_pumpswap'] else '❌'}\n\n"
-                "This may take a moment.")
-
-            import aiohttp
-
-            # Dune API config
-            dune_api_key = os.getenv('DUNE_API_KEY', '')
-            dune_query_id = query_cfg['id']
-
-            if not dune_api_key:
+            if not webhooks:
                 await self._send_response(update, context,
-                    "❌ DUNE_API_KEY not set in environment.\n\n"
-                    "Add to Railway:\n"
-                    "<code>DUNE_API_KEY=your_key_here</code>")
+                    "📡 <b>No webhooks registered</b>\n\n"
+                    "Use /addwallet to add wallets and register webhooks.")
                 return
 
-            # Fetch from Dune API
-            api_url = f"https://api.dune.com/api/v1/query/{dune_query_id}/results?limit={limit}"
-            headers = {"X-Dune-API-Key": dune_api_key}
+            response = f"📡 <b>HELIUS WEBHOOKS ({len(webhooks)})</b>\n\n"
 
-            async with aiohttp.ClientSession() as session:
-                async with session.get(api_url, headers=headers, timeout=aiohttp.ClientTimeout(total=60)) as resp:
-                    if resp.status != 200:
-                        error = await resp.text()
-                        await self._send_response(update, context,
-                            f"❌ Dune API error: HTTP {resp.status}\n{error[:200]}")
-                        return
+            for idx, wh in enumerate(webhooks, 1):
+                webhook_id = wh.get('webhookID', 'unknown')
+                webhook_url = wh.get('webhookURL', 'unknown')
+                addresses = wh.get('accountAddresses', [])
+                webhook_type = wh.get('webhookType', 'unknown')
 
-                    data = await resp.json()
+                # Determine webhook purpose
+                pump_program = 'pump'
+                is_pump = any(pump_program in addr.lower() for addr in addresses[:5])
 
-            # Check if query finished
-            if not data.get('is_execution_finished'):
-                await self._send_response(update, context,
-                    "⏳ Query still running. Try again in a minute.")
-                return
-
-            rows = data.get('result', {}).get('rows', [])
-
-            if not rows:
-                await self._send_response(update, context, "❌ No results from Dune query.")
-                return
-
-            # Parse leaderboard data dynamically based on source
-            added = 0
-            updated = 0
-            skipped = 0
-            top_pnl = 0
-            hot_wallets = []  # Wallets with big gains since last check
-            profit_field = query_cfg['profit_field']
-            wallet_field = query_cfg['wallet_field']
-
-            for idx, row in enumerate(rows):
-                wallet = row.get(wallet_field, '')
-                rank = row.get('rank', row.get('position', idx + 1))
-                profit_value = row.get(profit_field, 0) or 0
-
-                if not wallet:
-                    continue
-
-                # Track top PnL for reporting
-                if profit_value > top_pnl:
-                    top_pnl = profit_value
-
-                # Check if already exists
-                existing = await self.database.get_tracked_wallet(wallet)
-                if existing:
-                    old_pnl = existing.get('pnl', 0) or 0
-
-                    # Detect "hot" wallets - significant gains since last check
-                    if old_pnl > 0 and profit_value > old_pnl:
-                        gain = profit_value - old_pnl
-                        gain_pct = (gain / old_pnl) * 100
-
-                        # Flag if gained >20% or >$50K since last check
-                        if gain_pct > 20 or gain > 50000:
-                            hot_wallets.append({
-                                'name': existing.get('wallet_name', wallet[:8]),
-                                'gain': gain,
-                                'gain_pct': gain_pct,
-                                'new_pnl': profit_value
-                            })
-
-                    # Update stored PnL
-                    if profit_value != old_pnl:
-                        await self.database.update_wallet_stats(wallet, pnl=profit_value)
-                        updated += 1
-                    else:
-                        skipped += 1
-                    continue
-
-                # Generate name with source prefix
-                source_prefix = {'alltime': 'AT', '7day': '7D', 'pnl': 'PnL', 'volume': 'Vol'}
-                name = f"{source_prefix[source]}{rank}_{wallet[:6]}"
-
-                # Determine tier based on profit/volume
-                if profit_value >= 10_000_000:
-                    tier = 'elite'  # $10M+
-                elif profit_value >= 1_000_000:
-                    tier = 'top_kol'  # $1M+
-                elif profit_value >= 100_000:
-                    tier = 'verified'  # $100K+
+                if is_pump:
+                    purpose = "🎰 Pump.fun Program"
                 else:
-                    tier = 'emerging'  # Smaller but active
+                    purpose = f"👛 Wallet Monitor ({len(addresses)} wallets)"
 
-                success = await self.database.add_tracked_wallet(
-                    address=wallet,
-                    name=name,
-                    tier=tier,
-                    pnl=profit_value,
-                    source=f'dune_{source}'
-                )
+                response += f"<b>{idx}. {purpose}</b>\n"
+                response += f"   ID: <code>{webhook_id[:20]}...</code>\n"
+                response += f"   Type: {webhook_type}\n"
+                response += f"   URL: ...{webhook_url[-30:]}\n"
 
-                if success:
-                    added += 1
+                # Show sample addresses for wallet webhooks
+                if not is_pump and addresses:
+                    response += f"   Sample: {addresses[0][:8]}...\n"
 
-            # Update Helius webhook with all addresses
-            webhook_msg = ""
-            try:
-                from helius_fetcher import HeliusDataFetcher
-                helius = HeliusDataFetcher()
-                all_addresses = await self.database.get_tracked_wallet_addresses()
+                response += "\n"
 
-                if all_addresses:
-                    # Get Railway public domain from environment (auto-set by Railway)
-                    railway_domain = os.getenv('RAILWAY_PUBLIC_DOMAIN', '')
-                    if railway_domain:
-                        base_url = f"https://{railway_domain}" if not railway_domain.startswith('http') else railway_domain
-                        webhook_url = f"{base_url}/webhook/smart-wallet"
-                        webhook_id = await helius.ensure_wallet_webhook(webhook_url, all_addresses)
-
-                        if webhook_id:
-                            webhook_msg = f"\n📡 Helius webhook updated ({len(all_addresses)} wallets)"
-                        else:
-                            webhook_msg = f"\n⚠️ Helius webhook registration failed"
-                    else:
-                        webhook_msg = f"\n⚠️ RAILWAY_PUBLIC_DOMAIN not set - webhook not registered!"
-                        logger.error("❌ RAILWAY_PUBLIC_DOMAIN not set - cannot register Helius webhook")
-            except Exception as e:
-                logger.error(f"Helius webhook error: {e}")
-                webhook_msg = f"\n⚠️ Helius webhook failed: {str(e)[:50]}"
-
-            value_label = "Volume" if source == 'volume' else "PnL"
-            pumpswap_note = " (incl. Pumpswap)" if query_cfg['includes_pumpswap'] else ""
-
-            response = f"✅ <b>Dune Refresh Complete!</b>\n\n"
-            response += f"<b>Source:</b> {query_cfg['name']}{pumpswap_note}\n"
-            response += f"<b>Added:</b> {added} new wallets\n"
-            response += f"<b>Updated:</b> {updated} existing\n"
-            response += f"<b>Unchanged:</b> {skipped}\n"
-            response += f"<b>Top {value_label}:</b> ${top_pnl:,.0f}\n"
-            response += f"<b>Total from Dune:</b> {len(rows)}"
-            response += webhook_msg
-
-            # Show hot wallets (big gainers since last check)
-            if hot_wallets:
-                hot_wallets.sort(key=lambda x: x['gain'], reverse=True)
-                response += f"\n\n🔥 <b>HOT WALLETS (gaining fast):</b>\n"
-                for hw in hot_wallets[:5]:  # Top 5 hot wallets
-                    response += f"• {hw['name']}: +${hw['gain']:,.0f} ({hw['gain_pct']:.0f}%)\n"
-
-            response += f"\n<b>Tip:</b> Use <code>/refreshwallets 7day 50</code> for emerging winners!"
+            response += "<b>Commands:</b>\n"
+            response += "/clearwebhooks - Delete all wallet webhooks\n"
+            response += "/syncwebhook - Re-sync wallets to webhook"
 
             await self._send_response(update, context, response)
 
         except Exception as e:
-            logger.error(f"❌ Error in /refreshwallets: {e}")
+            logger.error(f"❌ Error in /listwebhooks: {e}")
+            await self._send_response(update, context, f"❌ Error: {str(e)}")
+
+    async def _cmd_clearwebhooks(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Delete all wallet webhooks (fresh start): /clearwebhooks"""
+        try:
+            await self._send_response(update, context,
+                "🗑️ <b>Clearing wallet webhooks...</b>\n\n"
+                "This will delete all wallet monitoring webhooks.\n"
+                "Pump.fun program webhook will be preserved.")
+
+            from helius_fetcher import HeliusDataFetcher
+            import config
+
+            helius = HeliusDataFetcher()
+            webhooks = await helius.get_webhooks()
+
+            if not webhooks:
+                await self._send_response(update, context, "✅ No webhooks to delete.")
+                return
+
+            pump_program = config.HELIUS_PUMP_WEBHOOK.get('program_id', '')
+            deleted = 0
+            preserved = 0
+
+            for wh in webhooks:
+                webhook_id = wh.get('webhookID')
+                addresses = wh.get('accountAddresses', [])
+
+                # Skip pump.fun program webhook
+                if pump_program in addresses:
+                    preserved += 1
+                    logger.info(f"   Preserving pump.fun webhook: {webhook_id[:20]}...")
+                    continue
+
+                # Delete wallet webhook
+                success = await helius.delete_webhook(webhook_id)
+                if success:
+                    deleted += 1
+                    logger.info(f"   Deleted webhook: {webhook_id[:20]}...")
+
+            # Also clear database wallets if requested
+            clear_db = context.args and 'db' in [a.lower() for a in context.args]
+            db_cleared = 0
+
+            if clear_db and self.database:
+                try:
+                    # Get all wallets and remove them
+                    wallets = await self.database.get_tracked_wallet_addresses()
+                    for addr in wallets:
+                        await self.database.remove_tracked_wallet(addr)
+                        db_cleared += 1
+                except Exception as e:
+                    logger.error(f"Error clearing DB wallets: {e}")
+
+            response = f"✅ <b>Webhooks Cleared!</b>\n\n"
+            response += f"<b>Deleted:</b> {deleted} wallet webhook(s)\n"
+            response += f"<b>Preserved:</b> {preserved} (pump.fun program)\n"
+
+            if clear_db:
+                response += f"<b>DB Cleared:</b> {db_cleared} wallet(s)\n"
+
+            response += f"\n<b>Next steps:</b>\n"
+            response += f"1. Add wallets: <code>/addwallet Name Address</code>\n"
+            response += f"2. Get addresses from KOL scan or GMGN\n"
+            response += f"\n<i>Tip: Add 'db' to also clear database:</i>\n"
+            response += f"<code>/clearwebhooks db</code>"
+
+            await self._send_response(update, context, response)
+
+        except Exception as e:
+            logger.error(f"❌ Error in /clearwebhooks: {e}")
             import traceback
             logger.error(traceback.format_exc())
             await self._send_response(update, context, f"❌ Error: {str(e)}")
