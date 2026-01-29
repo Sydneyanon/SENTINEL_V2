@@ -204,7 +204,7 @@ class AdminBot:
 /removewallet &lt;address&gt; - Remove wallet from tracking
 /renamewallet &lt;address&gt; &lt;name&gt; - Rename a wallet
 /refreshwallets [source] [limit] - Pull wallets from Dune
-  Sources: alltime, pnl (net profit), volume (pumpswap)
+  Sources: alltime, 7day, pnl, volume
 
 <b>Data &amp; ML:</b>
 /dataset - ML training dataset stats
@@ -1538,7 +1538,7 @@ class AdminBot:
             limit = 50  # Default limit
 
             for arg in args:
-                if arg.lower() in ['alltime', 'pnl', 'volume']:
+                if arg.lower() in ['alltime', '7day', 'pnl', 'volume']:
                     source = arg.lower()
                 elif arg.isdigit():
                     limit = min(int(arg), 200)  # Cap at 200
@@ -1548,6 +1548,13 @@ class AdminBot:
                 'alltime': {
                     'id': '4032586',
                     'name': 'adam_tehc All-Time Pump.fun Leaderboard',
+                    'profit_field': 'realized_profit',
+                    'wallet_field': 'wallet',
+                    'includes_pumpswap': False
+                },
+                '7day': {
+                    'id': '6613196',
+                    'name': '7-Day Top Performers (Emerging Winners)',
                     'profit_field': 'realized_profit',
                     'wallet_field': 'wallet',
                     'includes_pumpswap': False
@@ -1665,7 +1672,7 @@ class AdminBot:
                     continue
 
                 # Generate name with source prefix
-                source_prefix = {'alltime': 'AT', 'pnl': 'PnL', 'volume': 'Vol'}
+                source_prefix = {'alltime': 'AT', '7day': '7D', 'pnl': 'PnL', 'volume': 'Vol'}
                 name = f"{source_prefix[source]}{rank}_{wallet[:6]}"
 
                 # Determine tier based on profit/volume
@@ -1729,7 +1736,7 @@ class AdminBot:
                 for hw in hot_wallets[:5]:  # Top 5 hot wallets
                     response += f"• {hw['name']}: +${hw['gain']:,.0f} ({hw['gain_pct']:.0f}%)\n"
 
-            response += f"\n<b>Tip:</b> Run periodically to detect emerging winners!"
+            response += f"\n<b>Tip:</b> Use <code>/refreshwallets 7day 50</code> for emerging winners!"
 
             await self._send_response(update, context, response)
 
