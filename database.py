@@ -1203,6 +1203,28 @@ class Database:
             logger.error(f"Error getting wallet addresses: {e}")
             return []
 
+    async def clear_all_tracked_wallets(self) -> int:
+        """Deactivate ALL tracked wallets in a single batch (for /clearwebhooks db)"""
+        try:
+            async with self.pool.acquire() as conn:
+                # First count how many are active
+                count = await conn.fetchval('''
+                    SELECT COUNT(*) FROM tracked_wallets WHERE active = TRUE
+                ''')
+
+                if count > 0:
+                    # Deactivate all in one query
+                    await conn.execute('''
+                        UPDATE tracked_wallets SET active = FALSE, updated_at = NOW()
+                        WHERE active = TRUE
+                    ''')
+                    logger.info(f"✅ Batch deactivated {count} wallets")
+
+                return count
+        except Exception as e:
+            logger.error(f"Error clearing all tracked wallets: {e}")
+            return -1  # Return -1 to indicate error
+
     async def get_tracked_wallets_for_conviction(self) -> dict:
         """Get tracked wallets in format for SmartWalletTracker (address -> wallet_info dict)"""
         try:

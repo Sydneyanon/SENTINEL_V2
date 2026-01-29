@@ -79,6 +79,7 @@ class AdminBot:
             self.app.add_handler(CommandHandler("syncwebhook", self._cmd_syncwebhook, filters=admin_filter))
             self.app.add_handler(CommandHandler("listwebhooks", self._cmd_listwebhooks, filters=admin_filter))
             self.app.add_handler(CommandHandler("clearwebhooks", self._cmd_clearwebhooks, filters=admin_filter))
+            self.app.add_handler(CommandHandler("countwallets", self._cmd_countwallets, filters=admin_filter))
 
             # Handle media uploads from admin (for banner file_id capture)
             self.app.add_handler(MessageHandler(
@@ -212,6 +213,7 @@ class AdminBot:
 /syncwebhook - Sync all wallets to Helius webhook
 /listwebhooks - Show all registered Helius webhooks
 /clearwebhooks - Delete all wallet webhooks (fresh start)
+/countwallets - Debug wallet counts (DB vs Helius)
 
 <b>Data &amp; ML:</b>
 /dataset - ML training dataset stats
@@ -1779,23 +1781,34 @@ class AdminBot:
             # Also clear database wallets if requested
             clear_db = context.args and 'db' in [a.lower() for a in context.args]
             db_cleared = 0
+            db_error = None
 
-            if clear_db and self.database:
-                try:
-                    # Get all wallets and remove them
-                    wallets = await self.database.get_tracked_wallet_addresses()
-                    for addr in wallets:
-                        await self.database.remove_tracked_wallet(addr)
-                        db_cleared += 1
-                except Exception as e:
-                    logger.error(f"Error clearing DB wallets: {e}")
+            if clear_db:
+                if self.database:
+                    try:
+                        # Use batch clear for reliability
+                        db_cleared = await self.database.clear_all_tracked_wallets()
+                        if db_cleared == -1:
+                            db_error = "Database error during clear"
+                            db_cleared = 0
+                        else:
+                            logger.info(f"✅ Cleared {db_cleared} wallets from database")
+                    except Exception as e:
+                        db_error = str(e)
+                        logger.error(f"Error clearing DB wallets: {e}")
+                else:
+                    db_error = "Database not available"
+                    logger.error("Cannot clear DB wallets: self.database is None")
 
             response = f"✅ <b>Webhooks Cleared!</b>\n\n"
             response += f"<b>Deleted:</b> {deleted} wallet webhook(s)\n"
             response += f"<b>Preserved:</b> {preserved} (pump.fun program)\n"
 
             if clear_db:
-                response += f"<b>DB Cleared:</b> {db_cleared} wallet(s)\n"
+                if db_error:
+                    response += f"<b>DB Clear:</b> ❌ {db_error}\n"
+                else:
+                    response += f"<b>DB Cleared:</b> {db_cleared} wallet(s) deactivated\n"
 
             response += f"\n<b>Next steps:</b>\n"
             response += f"1. Add wallets: <code>/addwallet Name Address</code>\n"
@@ -1809,6 +1822,62 @@ class AdminBot:
             logger.error(f"❌ Error in /clearwebhooks: {e}")
             import traceback
             logger.error(traceback.format_exc())
+            await self._send_response(update, context, f"❌ Error: {str(e)}")
+
+    async def _cmd_countwallets(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Debug command to check wallet counts: /countwallets"""
+        try:
+            import config
+
+            response = "📊 <b>Wallet Count Debug</b>\n\n"
+
+            # Config wallets
+            config_wallets = getattr(config, 'SMART_WALLETS', [])
+            response += f"<b>Config:</b> {len(config_wallets)} wallets\n"
+
+            # Database wallets
+            if self.database:
+                try:
+                    # Active wallets
+                    active = await self.database.get_tracked_wallet_addresses()
+                    response += f"<b>DB Active:</b> {len(active)} wallets\n"
+
+                    # Total wallets (including inactive)
+                    all_wallets = await self.database.get_tracked_wallets(active_only=False)
+                    inactive = len(all_wallets) - len(active)
+                    response += f"<b>DB Inactive:</b> {inactive} wallets\n"
+                    response += f"<b>DB Total:</b> {len(all_wallets)} wallets\n"
+                except Exception as e:
+                    response += f"<b>DB Error:</b> {str(e)}\n"
+            else:
+                response += f"<b>DB:</b> Not connected\n"
+
+            # Helius webhooks
+            try:
+                from helius_fetcher import HeliusDataFetcher
+                helius = HeliusDataFetcher()
+                webhooks = await helius.get_webhooks()
+
+                pump_program = config.HELIUS_PUMP_WEBHOOK.get('program_id', '')
+                wallet_webhook_count = 0
+                wallet_addresses_total = 0
+
+                for wh in webhooks:
+                    addresses = wh.get('accountAddresses', [])
+                    if pump_program not in addresses:
+                        wallet_webhook_count += 1
+                        wallet_addresses_total += len(addresses)
+
+                response += f"\n<b>Helius Webhooks:</b> {len(webhooks)} total\n"
+                response += f"   Wallet webhooks: {wallet_webhook_count}\n"
+                response += f"   Addresses in webhooks: {wallet_addresses_total}\n"
+            except Exception as e:
+                response += f"\n<b>Helius Error:</b> {str(e)}\n"
+
+            await self._send_response(update, context, response)
+
+        except Exception as e:
+            logger.error(f"❌ Error in /countwallets: {e}")
             await self._send_response(update, context, f"❌ Error: {str(e)}")
 
     async def _cmd_syncwebhook(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
