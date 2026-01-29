@@ -375,13 +375,20 @@ class HeliusBackfillCollector:
         step = 1
 
         # Calculate total steps
+        # NOTE: Helius searchAssets and program scan find PRE-BOND tokens (still on pump.fun curve)
+        # These are useless for runner discovery - only use DexScreener which finds GRADUATED tokens
         runner_cfg = self.backfill_cfg.get('runner_discovery', {})
         use_runner_discovery = runner_cfg.get('enabled', True)
+        use_dexscreener = self.backfill_cfg.get('use_dexscreener_discovery', True)
+        # Default FALSE for Helius - it finds pre-bond tokens which pollutes runner data
+        use_helius_search = self.backfill_cfg.get('use_search_assets', False)
+        use_helius_scan = self.backfill_cfg.get('use_program_scan', False)
+
         total_steps = sum([
             use_runner_discovery,
-            self.backfill_cfg.get('use_dexscreener_discovery', True),
-            self.backfill_cfg.get('use_search_assets', True),
-            self.backfill_cfg.get('use_program_scan', True),
+            use_dexscreener,
+            use_helius_search,
+            use_helius_scan,
         ])
 
         # =====================================================================
@@ -411,23 +418,26 @@ class HeliusBackfillCollector:
                 return new_mints
 
         # =====================================================================
-        # FALLBACK: Generic Discovery (only if not enough runners)
+        # FALLBACK: Generic DexScreener Discovery (only if not enough runners)
+        # NOTE: We do NOT use Helius for fallback - it finds PRE-BOND tokens
         # =====================================================================
         need_fallback = runner_cfg.get('fallback_to_generic', True) and len(runner_mints) < 20
         if need_fallback:
-            logger.info(f"\n   📢 Only {len(runner_mints)} runners found, using fallback discovery...")
+            logger.info(f"\n   📢 Only {len(runner_mints)} runners found, using DexScreener fallback...")
 
-            # Generic DexScreener endpoints (FREE - guaranteed to have pairs)
-            if self.backfill_cfg.get('use_dexscreener_discovery', True):
+            # Generic DexScreener endpoints (FREE - finds GRADUATED tokens with pairs)
+            if use_dexscreener:
                 logger.info(f"\n   [{step}/{total_steps}] Discovering tokens via DexScreener endpoints (FREE)...")
                 dex_mints = await self.discover_from_dexscreener()
                 all_mints.update(dex_mints)
                 logger.info(f"   DexScreener found: {len(dex_mints)} mints")
                 step += 1
 
-            # DAS searchAssets (finds pump.fun program tokens)
-            if self.backfill_cfg.get('use_search_assets', True):
+            # DISABLED: Helius searchAssets finds PRE-BOND tokens (pump.fun still authority)
+            # These pollute runner data with tokens that haven't graduated yet
+            if use_helius_search:
                 logger.info(f"\n   [{step}/{total_steps}] Discovering tokens via Helius DAS searchAssets...")
+                logger.warning("   ⚠️ Helius searchAssets finds PRE-BOND tokens - consider disabling")
                 pages = self.backfill_cfg.get('search_pages', 5)
                 search_mints = await self.helius.search_pump_graduates(
                     limit_per_page=200,
@@ -435,18 +445,19 @@ class HeliusBackfillCollector:
                 )
                 new_from_search = len(set(search_mints) - all_mints)
                 all_mints.update(search_mints)
-                self.stats['credits_used_estimate'] += pages  # ~1 credit per page
+                self.stats['credits_used_estimate'] += pages
                 logger.info(f"   searchAssets found: {len(search_mints)} mints ({new_from_search} new)")
                 step += 1
 
-            # Program TX scanning
-            if self.backfill_cfg.get('use_program_scan', True):
+            # DISABLED: Program TX scanning also finds PRE-BOND tokens
+            if use_helius_scan:
                 logger.info(f"\n   [{step}/{total_steps}] Discovering tokens via program TX scanning...")
+                logger.warning("   ⚠️ Program scan finds PRE-BOND tokens - consider disabling")
                 tx_limit = self.backfill_cfg.get('program_scan_tx_limit', 500)
                 program_mints = await self.helius.scan_program_graduates(tx_limit=tx_limit)
                 new_from_scan = len(set(program_mints) - all_mints)
                 all_mints.update(program_mints)
-                self.stats['credits_used_estimate'] += 10  # ~5-10 credits
+                self.stats['credits_used_estimate'] += 10
                 logger.info(f"   Program scan found: {len(program_mints)} mints ({new_from_scan} new)")
 
         # Deduplicate against existing dataset
