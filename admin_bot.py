@@ -1782,10 +1782,17 @@ class AdminBot:
             clear_db = context.args and 'db' in [a.lower() for a in context.args]
             db_cleared = 0
             db_error = None
+            db_before = 0
+            db_after = 0
 
             if clear_db:
                 if self.database:
                     try:
+                        # Check count BEFORE clear
+                        before_wallets = await self.database.get_tracked_wallet_addresses()
+                        db_before = len(before_wallets)
+                        logger.info(f"📊 Before clear: {db_before} active wallets")
+
                         # Use batch clear for reliability
                         db_cleared = await self.database.clear_all_tracked_wallets()
                         if db_cleared == -1:
@@ -1793,6 +1800,14 @@ class AdminBot:
                             db_cleared = 0
                         else:
                             logger.info(f"✅ Cleared {db_cleared} wallets from database")
+
+                        # Check count AFTER clear to verify
+                        after_wallets = await self.database.get_tracked_wallet_addresses()
+                        db_after = len(after_wallets)
+                        logger.info(f"📊 After clear: {db_after} active wallets")
+
+                        if db_after > 0 and db_cleared > 0:
+                            db_error = f"Clear reported {db_cleared} but {db_after} still active!"
                     except Exception as e:
                         db_error = str(e)
                         logger.error(f"Error clearing DB wallets: {e}")
@@ -1807,8 +1822,10 @@ class AdminBot:
             if clear_db:
                 if db_error:
                     response += f"<b>DB Clear:</b> ❌ {db_error}\n"
+                    response += f"<b>Debug:</b> Before={db_before}, After={db_after}\n"
                 else:
                     response += f"<b>DB Cleared:</b> {db_cleared} wallet(s) deactivated\n"
+                    response += f"<b>Verified:</b> {db_before} → {db_after} active\n"
 
             response += f"\n<b>Next steps:</b>\n"
             response += f"1. Add wallets: <code>/addwallet Name Address</code>\n"
