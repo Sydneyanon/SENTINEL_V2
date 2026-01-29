@@ -1965,7 +1965,7 @@ class AdminBot:
             await self._send_response(update, context, f"❌ Error: {str(e)}")
 
     async def _cmd_syncwebhook(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Register Helius webhook with all tracked wallets (no Dune needed)"""
+        """Register Helius webhook with all tracked wallets (force recreate)"""
         try:
             await self._send_response(update, context, "🔄 Syncing Helius webhook...")
 
@@ -2001,13 +2001,29 @@ class AdminBot:
             base_url = f"https://{railway_domain}" if not railway_domain.startswith('http') else railway_domain
             webhook_url = f"{base_url}/webhook/smart-wallet"
 
-            # Register with Helius
             from helius_fetcher import HeliusDataFetcher
             helius = HeliusDataFetcher()
-            webhook_id = await helius.ensure_wallet_webhook(webhook_url, all_wallets)
 
-            if webhook_id:
+            # Delete existing wallet webhooks first (force fresh start)
+            pump_program = config.HELIUS_PUMP_WEBHOOK.get('program_id', '')
+            existing = await helius.get_webhooks()
+            deleted = 0
+            for wh in (existing or []):
+                addresses = wh.get('accountAddresses', [])
+                webhook_id = wh.get('webhookID')
+                if webhook_id and pump_program not in addresses:
+                    await helius.delete_webhook(webhook_id)
+                    deleted += 1
+                    logger.info(f"   Deleted old wallet webhook: {webhook_id[:20]}...")
+
+            # Create fresh webhook with all wallets
+            result = await helius.register_wallet_webhook(webhook_url, all_wallets)
+
+            if result and result.get('webhook_id'):
+                webhook_id = result['webhook_id']
                 response = f"✅ <b>Helius Webhook Synced!</b>\n\n"
+                if deleted > 0:
+                    response += f"🗑️ Deleted {deleted} old webhook(s)\n"
                 response += f"📡 Webhook ID: <code>{webhook_id[:20]}...</code>\n"
                 response += f"🔗 URL: <code>{webhook_url}</code>\n"
                 response += f"👛 Monitoring: {len(all_wallets)} wallets\n"
