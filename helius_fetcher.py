@@ -807,10 +807,18 @@ class HeliusDataFetcher:
                     buy_pressure_6h = ((buys_6h - sells_6h) / (buys_6h + sells_6h)) if (buys_6h + sells_6h) > 0 else 0
                     momentum_score = (price_change_1h * volume_1h) / liquidity_usd if liquidity_usd > 0 else 0
 
+                    # Get DEX ID to determine graduation status
+                    dex_id = pair.get('dexId', '').lower()
+                    is_graduated = 'raydium' in dex_id  # Raydium = graduated from pump.fun
+
                     result = {
                         # Price & Market Cap
                         'price_usd': float(pair.get('priceUsd', 0)),
                         'market_cap': float(pair.get('fdv', 0)),
+
+                        # DEX info (for graduation detection)
+                        'dex_id': dex_id,
+                        'is_graduated': is_graduated,  # True if on Raydium (graduated from pump.fun)
 
                         # Liquidity
                         'liquidity': liquidity_usd,

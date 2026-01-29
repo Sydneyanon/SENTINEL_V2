@@ -91,14 +91,30 @@ class ConvictionEngine:
             bonding_pct = token_data.get('bonding_curve_pct', 0)
             mcap = token_data.get('market_cap', 0)
 
-            # Determine graduation status
-            # FIX: If MCAP > $69K (pump.fun graduation), token IS graduated even if bonding_pct is missing/0
-            # DexScreener doesn't provide bonding_curve_pct, so we must infer from MCAP
+            # Determine graduation status - multiple detection methods
+            # Priority: 1) DexScreener is_graduated, 2) bonding_pct, 3) MCAP fallback
             GRADUATION_MCAP = 69000  # Pump.fun graduation threshold
-            is_pre_grad = bonding_pct < 100 and mcap < GRADUATION_MCAP
 
-            if mcap >= GRADUATION_MCAP and bonding_pct < 100:
-                logger.info(f"   📊 MCAP ${mcap/1000:.0f}K >= $69K — treating as POST-GRAD (bonding_pct was {bonding_pct}%)")
+            # Method 1: DexScreener tells us directly (most reliable)
+            dex_is_graduated = token_data.get('is_graduated', False)
+
+            # Method 2: bonding_pct >= 100 from PumpPortal
+            bonding_graduated = bonding_pct >= 100
+
+            # Method 3: MCAP fallback (graduated tokens can dump below $69K, so this is last resort)
+            mcap_graduated = mcap >= GRADUATION_MCAP
+
+            # Token is graduated if ANY method confirms it
+            is_graduated = dex_is_graduated or bonding_graduated or mcap_graduated
+            is_pre_grad = not is_graduated
+
+            # Log graduation detection method
+            if is_graduated and not bonding_graduated:
+                if dex_is_graduated:
+                    dex_id = token_data.get('dex_id', 'unknown')
+                    logger.info(f"   📊 GRADUATED: On Raydium DEX (dex_id={dex_id})")
+                elif mcap_graduated:
+                    logger.info(f"   📊 MCAP ${mcap/1000:.0f}K >= $69K — treating as POST-GRAD")
 
             # 🎬 SCENE 4: CONVICTION SCORING ENGINE
             print("\n" + "="*80)
@@ -1505,12 +1521,14 @@ class ConvictionEngine:
         Post-Graduation: Uses DexScreener volume/mcap ratio (existing logic)
           - volume_24h and market_cap available from DEX pools
         """
-        bonding_pct = token_data.get('bonding_curve_pct', 0)
-        mcap = token_data.get('market_cap', 0)
-        GRADUATION_MCAP = 69000
-        is_pre_grad = bonding_pct < 100 and mcap < GRADUATION_MCAP
+        # Use is_graduated from DexScreener, fallback to MCAP check
+        is_graduated = token_data.get('is_graduated', False)
+        if not is_graduated:
+            mcap = token_data.get('market_cap', 0)
+            bonding_pct = token_data.get('bonding_curve_pct', 0)
+            is_graduated = bonding_pct >= 100 or mcap >= 69000
 
-        if is_pre_grad:
+        if not is_graduated:
             return self._score_pre_grad_volume(token_data)
         else:
             return self._score_post_grad_volume(token_data)
@@ -1621,10 +1639,13 @@ class ConvictionEngine:
         Phase-aware: pre-grad dumps are more fatal.
         Post-grad gets +2 multi-timeframe bonus (max +8 total).
         """
-        bonding_pct = token_data.get('bonding_curve_pct', 0)
-        mcap = token_data.get('market_cap', 0)
-        GRADUATION_MCAP = 69000
-        is_pre_grad = bonding_pct < 100 and mcap < GRADUATION_MCAP
+        # Use is_graduated from DexScreener, fallback to MCAP check
+        is_graduated = token_data.get('is_graduated', False)
+        if not is_graduated:
+            mcap = token_data.get('market_cap', 0)
+            bonding_pct = token_data.get('bonding_curve_pct', 0)
+            is_graduated = bonding_pct >= 100 or mcap >= 69000
+        is_pre_grad = not is_graduated
 
         price_change_5m = token_data.get('price_change_5m', 0)
 
@@ -1969,12 +1990,14 @@ class ConvictionEngine:
         Uses bonding_velocity from PumpPortal milestone tracking (FREE).
         Only applies to pre-graduation tokens.
         """
-        bonding_pct = token_data.get('bonding_curve_pct', 0)
-        mcap = token_data.get('market_cap', 0)
-        GRADUATION_MCAP = 69000
-        is_pre_grad = bonding_pct < 100 and mcap < GRADUATION_MCAP
+        # Use is_graduated from DexScreener, fallback to MCAP check
+        is_graduated = token_data.get('is_graduated', False)
+        if not is_graduated:
+            mcap = token_data.get('market_cap', 0)
+            bonding_pct = token_data.get('bonding_curve_pct', 0)
+            is_graduated = bonding_pct >= 100 or mcap >= 69000
 
-        if not is_pre_grad:
+        if is_graduated:
             return 0  # Post-grad tokens don't have bonding curves
 
         weights = config.BONDING_SPEED_WEIGHTS
