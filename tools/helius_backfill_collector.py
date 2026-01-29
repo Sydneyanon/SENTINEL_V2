@@ -54,6 +54,7 @@ class HeliusBackfillCollector:
         self.data_file = 'data/historical_training_data.json'
         self.database = database  # Persistent storage across Railway deploys
         self.existing_addresses = set()
+        self.runner_data = {}  # Stores runner discovery data for classification
         self.stats = {
             'discovered': 0,
             'graduated': 0,
@@ -97,6 +98,180 @@ class HeliusBackfillCollector:
                 self.existing_addresses.add(addr)
 
         return {'tokens': tokens, 'total_tokens': len(tokens)}
+
+    async def discover_runners_from_dexscreener(self) -> List[Dict]:
+        """
+        Discover PROVEN RUNNERS from DexScreener - tokens with high price gains.
+
+        This method specifically targets tokens that have ALREADY shown they can run,
+        which provides much better ML training data than random tokens.
+
+        Filters:
+        - Min +50% price change in 24h OR +30% in 6h
+        - Min $50K MCAP (graduated, not dust)
+        - Max $10M MCAP (catch before mega run)
+        - Min $10K volume (real trading)
+        - Prefers Raydium pairs (graduated from pump.fun)
+
+        Returns:
+            List of dicts with token address and performance data
+        """
+        runner_cfg = self.backfill_cfg.get('runner_discovery', {})
+        if not runner_cfg.get('enabled', True):
+            return []
+
+        min_change_24h = runner_cfg.get('min_price_change_24h', 50)
+        min_change_6h = runner_cfg.get('min_price_change_6h', 30)
+        min_mcap = runner_cfg.get('min_mcap', 50_000)
+        max_mcap = runner_cfg.get('max_mcap', 10_000_000)
+        min_volume = runner_cfg.get('min_volume_24h', 10_000)
+        min_liq = runner_cfg.get('min_liquidity', 5_000)
+        prefer_raydium = runner_cfg.get('prefer_raydium', True)
+        max_age_hours = runner_cfg.get('max_age_hours', 48)
+
+        runners = []
+        seen_addresses = set()
+
+        logger.info(f"   Runner filters: +{min_change_24h}% 24h OR +{min_change_6h}% 6h, "
+                    f"MCAP ${min_mcap/1000:.0f}K-${max_mcap/1000000:.0f}M, Vol ${min_volume/1000:.0f}K+")
+
+        async with aiohttp.ClientSession() as session:
+            # Search multiple queries to find Solana gainers
+            search_queries = [
+                "solana",
+                "pump",
+                "sol",
+                "raydium",
+            ]
+
+            for query in search_queries:
+                try:
+                    search_url = f"https://api.dexscreener.com/latest/dex/search?q={query}"
+                    async with session.get(
+                        search_url, timeout=aiohttp.ClientTimeout(total=20)
+                    ) as resp:
+                        if resp.status != 200:
+                            continue
+                        data = await resp.json()
+
+                        for pair in data.get('pairs', []):
+                            # Only Solana
+                            if pair.get('chainId') != 'solana':
+                                continue
+
+                            addr = pair.get('baseToken', {}).get('address', '')
+                            if not addr or addr in seen_addresses:
+                                continue
+
+                            # Get metrics
+                            mcap = pair.get('marketCap') or pair.get('fdv') or 0
+                            liquidity = pair.get('liquidity', {}).get('usd', 0) or 0
+                            volume_24h = pair.get('volume', {}).get('h24', 0) or 0
+                            price_change_24h = pair.get('priceChange', {}).get('h24', 0) or 0
+                            price_change_6h = pair.get('priceChange', {}).get('h6', 0) or 0
+                            dex_id = pair.get('dexId', '').lower()
+
+                            # Apply filters
+                            if mcap < min_mcap or mcap > max_mcap:
+                                continue
+                            if liquidity < min_liq:
+                                continue
+                            if volume_24h < min_volume:
+                                continue
+
+                            # Check if it's a runner (high price gain)
+                            is_runner = (price_change_24h >= min_change_24h or
+                                         price_change_6h >= min_change_6h)
+                            if not is_runner:
+                                continue
+
+                            # Prefer Raydium (graduated from pump.fun)
+                            if prefer_raydium and 'raydium' not in dex_id:
+                                # Still include but mark as non-raydium
+                                pass
+
+                            # Check age if available
+                            pair_created = pair.get('pairCreatedAt', 0)
+                            if pair_created and max_age_hours:
+                                age_hours = (datetime.utcnow().timestamp() * 1000 - pair_created) / (1000 * 3600)
+                                if age_hours > max_age_hours:
+                                    continue
+
+                            seen_addresses.add(addr)
+                            runners.append({
+                                'address': addr,
+                                'symbol': pair.get('baseToken', {}).get('symbol', '?'),
+                                'mcap': mcap,
+                                'price_change_24h': price_change_24h,
+                                'price_change_6h': price_change_6h,
+                                'volume_24h': volume_24h,
+                                'liquidity': liquidity,
+                                'dex_id': dex_id,
+                                'is_raydium': 'raydium' in dex_id,
+                            })
+
+                except Exception as e:
+                    logger.debug(f"   DexScreener search '{query}' error: {e}")
+                await asyncio.sleep(0.5)
+
+            # Also check recent Solana pairs for runners
+            try:
+                pairs_url = "https://api.dexscreener.com/latest/dex/pairs/solana"
+                async with session.get(
+                    pairs_url, timeout=aiohttp.ClientTimeout(total=20)
+                ) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        for pair in data.get('pairs', []):
+                            addr = pair.get('baseToken', {}).get('address', '')
+                            if not addr or addr in seen_addresses:
+                                continue
+
+                            mcap = pair.get('marketCap') or pair.get('fdv') or 0
+                            liquidity = pair.get('liquidity', {}).get('usd', 0) or 0
+                            volume_24h = pair.get('volume', {}).get('h24', 0) or 0
+                            price_change_24h = pair.get('priceChange', {}).get('h24', 0) or 0
+                            price_change_6h = pair.get('priceChange', {}).get('h6', 0) or 0
+                            dex_id = pair.get('dexId', '').lower()
+
+                            if mcap < min_mcap or mcap > max_mcap:
+                                continue
+                            if liquidity < min_liq:
+                                continue
+                            if volume_24h < min_volume:
+                                continue
+
+                            is_runner = (price_change_24h >= min_change_24h or
+                                         price_change_6h >= min_change_6h)
+                            if not is_runner:
+                                continue
+
+                            seen_addresses.add(addr)
+                            runners.append({
+                                'address': addr,
+                                'symbol': pair.get('baseToken', {}).get('symbol', '?'),
+                                'mcap': mcap,
+                                'price_change_24h': price_change_24h,
+                                'price_change_6h': price_change_6h,
+                                'volume_24h': volume_24h,
+                                'liquidity': liquidity,
+                                'dex_id': dex_id,
+                                'is_raydium': 'raydium' in dex_id,
+                            })
+            except Exception as e:
+                logger.debug(f"   DexScreener pairs error: {e}")
+
+        # Sort by best performance (highest 24h gain)
+        runners.sort(key=lambda x: x.get('price_change_24h', 0), reverse=True)
+
+        logger.info(f"   🏃 Runner discovery: {len(runners)} tokens with {min_change_24h}%+ gains")
+
+        # Log top 5 runners
+        for r in runners[:5]:
+            logger.info(f"      {r['symbol']}: +{r['price_change_24h']:.0f}% 24h, "
+                        f"${r['mcap']/1000:.0f}K MCAP, ${r['volume_24h']/1000:.0f}K vol")
+
+        return runners
 
     async def discover_from_dexscreener(self) -> List[str]:
         """
@@ -184,8 +359,9 @@ class HeliusBackfillCollector:
         """
         Discover pump.fun token mints using Helius APIs + DexScreener endpoints.
 
-        Pipeline:
-        1. DexScreener discovery (FREE) - finds tokens WITH trading pairs
+        Pipeline (NEW - Runner-First):
+        0. RUNNER DISCOVERY (primary) - finds tokens that have ALREADY proven they can run
+        1. DexScreener discovery (fallback) - finds tokens WITH trading pairs
         2. Helius searchAssets (DAS) - broader on-chain discovery
         3. Helius program TX scanning - finds recent program activity
 
@@ -195,44 +371,83 @@ class HeliusBackfillCollector:
             List of new token mint addresses to process
         """
         all_mints = set()
+        runner_mints = []
         step = 1
+
+        # Calculate total steps
+        runner_cfg = self.backfill_cfg.get('runner_discovery', {})
+        use_runner_discovery = runner_cfg.get('enabled', True)
         total_steps = sum([
+            use_runner_discovery,
             self.backfill_cfg.get('use_dexscreener_discovery', True),
             self.backfill_cfg.get('use_search_assets', True),
             self.backfill_cfg.get('use_program_scan', True),
         ])
 
-        # Primary: DexScreener endpoints (FREE - guaranteed to have pairs)
-        if self.backfill_cfg.get('use_dexscreener_discovery', True):
-            logger.info(f"\n   [{step}/{total_steps}] Discovering tokens via DexScreener endpoints (FREE)...")
-            dex_mints = await self.discover_from_dexscreener()
-            all_mints.update(dex_mints)
-            logger.info(f"   DexScreener found: {len(dex_mints)} mints")
+        # =====================================================================
+        # PRIMARY: Runner Discovery (tokens that have ALREADY shown they can run)
+        # =====================================================================
+        if use_runner_discovery:
+            logger.info(f"\n   [{step}/{total_steps}] 🏃 RUNNER DISCOVERY (proven gainers)...")
+            runners = await self.discover_runners_from_dexscreener()
+
+            # Store runner data for later use (classification)
+            self.runner_data = {r['address']: r for r in runners}
+
+            # Extract just the addresses
+            runner_mints = [r['address'] for r in runners if r['address'] not in self.existing_addresses]
+            all_mints.update(runner_mints)
+
+            logger.info(f"   Runners found: {len(runners)}, new to process: {len(runner_mints)}")
             step += 1
 
-        # Secondary: DAS searchAssets (finds pump.fun program tokens)
-        if self.backfill_cfg.get('use_search_assets', True):
-            logger.info(f"\n   [{step}/{total_steps}] Discovering tokens via Helius DAS searchAssets...")
-            pages = self.backfill_cfg.get('search_pages', 5)
-            search_mints = await self.helius.search_pump_graduates(
-                limit_per_page=200,
-                pages=pages
-            )
-            new_from_search = len(set(search_mints) - all_mints)
-            all_mints.update(search_mints)
-            self.stats['credits_used_estimate'] += pages  # ~1 credit per page
-            logger.info(f"   searchAssets found: {len(search_mints)} mints ({new_from_search} new)")
-            step += 1
+            # If we found enough runners, skip generic discovery
+            max_tokens = self.backfill_cfg.get('max_tokens_per_run', 200)
+            if len(runner_mints) >= max_tokens:
+                logger.info(f"   ✅ Found {len(runner_mints)} runners - skipping generic discovery")
+                new_mints = runner_mints[:max_tokens]
+                self.stats['discovered'] = len(all_mints)
+                self.stats['skipped_existing'] = len(runners) - len(runner_mints)
+                return new_mints
 
-        # Tertiary: Program TX scanning
-        if self.backfill_cfg.get('use_program_scan', True):
-            logger.info(f"\n   [{step}/{total_steps}] Discovering tokens via program TX scanning...")
-            tx_limit = self.backfill_cfg.get('program_scan_tx_limit', 500)
-            program_mints = await self.helius.scan_program_graduates(tx_limit=tx_limit)
-            new_from_scan = len(set(program_mints) - all_mints)
-            all_mints.update(program_mints)
-            self.stats['credits_used_estimate'] += 10  # ~5-10 credits
-            logger.info(f"   Program scan found: {len(program_mints)} mints ({new_from_scan} new)")
+        # =====================================================================
+        # FALLBACK: Generic Discovery (only if not enough runners)
+        # =====================================================================
+        need_fallback = runner_cfg.get('fallback_to_generic', True) and len(runner_mints) < 20
+        if need_fallback:
+            logger.info(f"\n   📢 Only {len(runner_mints)} runners found, using fallback discovery...")
+
+            # Generic DexScreener endpoints (FREE - guaranteed to have pairs)
+            if self.backfill_cfg.get('use_dexscreener_discovery', True):
+                logger.info(f"\n   [{step}/{total_steps}] Discovering tokens via DexScreener endpoints (FREE)...")
+                dex_mints = await self.discover_from_dexscreener()
+                all_mints.update(dex_mints)
+                logger.info(f"   DexScreener found: {len(dex_mints)} mints")
+                step += 1
+
+            # DAS searchAssets (finds pump.fun program tokens)
+            if self.backfill_cfg.get('use_search_assets', True):
+                logger.info(f"\n   [{step}/{total_steps}] Discovering tokens via Helius DAS searchAssets...")
+                pages = self.backfill_cfg.get('search_pages', 5)
+                search_mints = await self.helius.search_pump_graduates(
+                    limit_per_page=200,
+                    pages=pages
+                )
+                new_from_search = len(set(search_mints) - all_mints)
+                all_mints.update(search_mints)
+                self.stats['credits_used_estimate'] += pages  # ~1 credit per page
+                logger.info(f"   searchAssets found: {len(search_mints)} mints ({new_from_search} new)")
+                step += 1
+
+            # Program TX scanning
+            if self.backfill_cfg.get('use_program_scan', True):
+                logger.info(f"\n   [{step}/{total_steps}] Discovering tokens via program TX scanning...")
+                tx_limit = self.backfill_cfg.get('program_scan_tx_limit', 500)
+                program_mints = await self.helius.scan_program_graduates(tx_limit=tx_limit)
+                new_from_scan = len(set(program_mints) - all_mints)
+                all_mints.update(program_mints)
+                self.stats['credits_used_estimate'] += 10  # ~5-10 credits
+                logger.info(f"   Program scan found: {len(program_mints)} mints ({new_from_scan} new)")
 
         # Deduplicate against existing dataset
         new_mints = [m for m in all_mints if m not in self.existing_addresses]
@@ -524,33 +739,59 @@ class HeliusBackfillCollector:
         """
         Classify token outcome for ML training.
 
-        Uses market cap as primary signal (more reliable than price_change_24h
-        for historical data since we're looking at current state).
+        NEW (2026-01-29): Uses PRICE PERFORMANCE as primary signal.
+        This is more relevant for ML training because we want to learn
+        what patterns lead to big price moves, not just absolute MCAP.
 
-        Classification:
-        - 100x+: $100M+ MCAP (mega runner)
-        - 50x:   $50M-100M MCAP
-        - 10x:   $10M-50M MCAP
-        - 2x:    $2M-10M MCAP (solid graduate)
-        - small:  $50K-2M MCAP (graduated but didn't run)
+        Classification by price_change_24h:
+        - mega_runner: +500%+ (5x in 24h - rare)
+        - big_runner:  +200-500% (3-5x in 24h)
+        - runner:      +100-200% (2-3x in 24h)
+        - gainer:      +50-100% (1.5-2x in 24h)
+        - flat:        0-50% (minimal movement)
+        - dumper:      <0% (negative movement)
+
+        Falls back to MCAP if discovered via non-runner method.
         """
-        mcap = token_data.get('market_cap', 0)
+        # Check if we have runner data from discovery
+        token_address = token_data.get('token_address', '')
+        runner_data = getattr(self, 'runner_data', {}).get(token_address)
+
+        # Use price_change from runner data or token_data
+        if runner_data:
+            price_change_24h = runner_data.get('price_change_24h', 0)
+        else:
+            price_change_24h = token_data.get('price_change_24h', 0)
 
         # Also check security for potential rug classification
         risk_flags = token_data.get('authority_risk_flags', [])
         if 'MINT_ACTIVE' in risk_flags and 'FREEZE_ACTIVE' in risk_flags:
             return 'rug_risk'
 
-        if mcap >= 100_000_000:
-            return '100x+'
-        elif mcap >= 50_000_000:
-            return '50x'
-        elif mcap >= 10_000_000:
-            return '10x'
-        elif mcap >= 2_000_000:
-            return '2x'
+        # PRIMARY: Classify by price performance (what we actually care about)
+        if price_change_24h >= 500:
+            return 'mega_runner'  # 5x+ in 24h
+        elif price_change_24h >= 200:
+            return 'big_runner'   # 3-5x in 24h
+        elif price_change_24h >= 100:
+            return 'runner'       # 2-3x in 24h
+        elif price_change_24h >= 50:
+            return 'gainer'       # 1.5-2x in 24h
+        elif price_change_24h > 0:
+            return 'flat'         # Minimal positive movement
+        elif price_change_24h < -20:
+            return 'dumper'       # Significant dump
         else:
-            return 'small'
+            # FALLBACK: Use MCAP for tokens without price data
+            mcap = token_data.get('market_cap', 0)
+            if mcap >= 50_000_000:
+                return 'big_runner'
+            elif mcap >= 10_000_000:
+                return 'runner'
+            elif mcap >= 2_000_000:
+                return 'gainer'
+            else:
+                return 'flat'
 
     def _buy_pct(self, buys: int, sells: int) -> float:
         """Calculate buy percentage"""
@@ -680,12 +921,18 @@ class HeliusBackfillCollector:
         logger.info(f"      Total tokens:          {len(all_tokens)}")
 
         dist = self._get_outcome_distribution(all_tokens)
-        logger.info(f"\n   Outcome Distribution:")
-        for outcome in ['100x+', '50x', '10x', '2x', 'small', 'rug_risk', 'unknown']:
+        logger.info(f"\n   Outcome Distribution (by price performance):")
+        # New performance-based categories
+        for outcome in ['mega_runner', 'big_runner', 'runner', 'gainer', 'flat', 'dumper', 'rug_risk', 'unknown']:
             count = dist.get(outcome, 0)
             if count > 0:
                 pct = count / len(all_tokens) * 100 if all_tokens else 0
-                logger.info(f"      {outcome:10s}: {count:4d} ({pct:.1f}%)")
+                logger.info(f"      {outcome:12s}: {count:4d} ({pct:.1f}%)")
+        # Legacy categories (for backwards compatibility)
+        legacy_cats = ['100x+', '50x', '10x', '2x', 'small']
+        legacy_count = sum(dist.get(c, 0) for c in legacy_cats)
+        if legacy_count > 0:
+            logger.info(f"\n   (Legacy MCAP categories: {legacy_count} tokens)")
 
         logger.info(f"\n   Credits:")
         logger.info(f"      Estimated used:        ~{self.stats['credits_used_estimate']}")
