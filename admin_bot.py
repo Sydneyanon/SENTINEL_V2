@@ -1531,9 +1531,9 @@ class AdminBot:
 
             import aiohttp
 
-            # Dune API config
+            # Dune API config - adam_tehc's pump fun leaderboard
             dune_api_key = os.getenv('DUNE_API_KEY', '')
-            dune_query_id = os.getenv('DUNE_WALLET_QUERY_ID', '6612826')  # User's query
+            dune_query_id = os.getenv('DUNE_WALLET_QUERY_ID', '4032586')  # adam_tehc's pump fun leaderboard with PnL
 
             if not dune_api_key:
                 await self._send_response(update, context,
@@ -1542,8 +1542,8 @@ class AdminBot:
                     "<code>DUNE_API_KEY=your_key_here</code>")
                 return
 
-            # Fetch from Dune API
-            api_url = f"https://api.dune.com/api/v1/query/{dune_query_id}/results?limit=50"
+            # Fetch from Dune API - get top 100 wallets by profit
+            api_url = f"https://api.dune.com/api/v1/query/{dune_query_id}/results?limit=100"
             headers = {"X-Dune-API-Key": dune_api_key}
 
             async with aiohttp.ClientSession() as session:
@@ -1568,22 +1568,22 @@ class AdminBot:
                 await self._send_response(update, context, "❌ No results from Dune query.")
                 return
 
-            # Filter out obvious bots (>500k txs) and add wallets
+            # Parse adam_tehc leaderboard data (has realized_profit and rank)
             added = 0
-            skipped_bots = 0
             skipped_existing = 0
+            top_pnl = 0
 
             for row in rows:
                 wallet = row.get('wallet', '')
-                tx_count = row.get('tx_count', 0)
+                rank = row.get('rank', 0)
+                realized_profit = row.get('realized_profit', 0)
 
                 if not wallet:
                     continue
 
-                # Skip obvious bots (>500k transactions in 24h is not human)
-                if tx_count > 500000:
-                    skipped_bots += 1
-                    continue
+                # Track top PnL for reporting
+                if realized_profit > top_pnl:
+                    top_pnl = realized_profit
 
                 # Check if already exists
                 existing = await self.database.get_tracked_wallet(wallet)
@@ -1591,13 +1591,23 @@ class AdminBot:
                     skipped_existing += 1
                     continue
 
-                # Add wallet with auto-generated name
-                name = f"Dune_{wallet[:6]}"
+                # Generate name with rank
+                name = f"Rank{rank}_{wallet[:6]}"
+
+                # Determine tier based on profit
+                if realized_profit >= 10_000_000:
+                    tier = 'elite'  # $10M+
+                elif realized_profit >= 1_000_000:
+                    tier = 'top_kol'  # $1M+
+                else:
+                    tier = 'verified'  # Rest of top 100
+
                 success = await self.database.add_tracked_wallet(
                     address=wallet,
                     name=name,
-                    tier='unknown',
-                    source='dune'
+                    tier=tier,
+                    pnl=realized_profit,
+                    source='dune_adam_tehc'
                 )
 
                 if success:
@@ -1625,9 +1635,10 @@ class AdminBot:
                 webhook_msg = f"\n⚠️ Helius webhook failed: {str(e)[:50]}"
 
             response = f"✅ <b>Dune Refresh Complete!</b>\n\n"
+            response += f"<b>Source:</b> adam_tehc pump.fun leaderboard\n"
             response += f"<b>Added:</b> {added} new wallets\n"
-            response += f"<b>Skipped (bots):</b> {skipped_bots}\n"
             response += f"<b>Skipped (existing):</b> {skipped_existing}\n"
+            response += f"<b>Top PnL:</b> ${top_pnl:,.0f}\n"
             response += f"<b>Total from Dune:</b> {len(rows)}"
             response += webhook_msg
             response += f"\n\nUse /wallets to see all tracked wallets."
