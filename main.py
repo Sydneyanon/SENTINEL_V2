@@ -746,8 +746,6 @@ async def smart_wallet_webhook(request: Request):
     try:
         data = await request.json()
 
-        logger.info("📥 Received smart wallet webhook")
-
         # Process through smart wallet tracker (saves to DB)
         await smart_wallet_tracker.process_webhook(data)
 
@@ -755,15 +753,14 @@ async def smart_wallet_webhook(request: Request):
         token_addresses = extract_token_addresses_from_webhook(data)
 
         if token_addresses:
+            # Only log when actual token purchase detected
             logger.info(f"🎯 KOL bought {len(token_addresses)} token(s): {[t[:8] for t in token_addresses]}")
 
-            # Start tracking each token
             for token_address in token_addresses:
                 await active_tracker.start_tracking(token_address)
                 active_tracker.track_buyers_from_webhook(token_address, data)
-        else:
-            logger.debug("📥 Webhook received but no new token purchases detected")
 
+        # Non-purchase webhooks are silent (no log spam)
         return {"status": "success"}
 
     except Exception as e:
