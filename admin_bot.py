@@ -25,6 +25,7 @@ class AdminBot:
         self.app: Optional[Application] = None
         self.admin_user_id = config.ADMIN_TELEGRAM_USER_ID
         self.admin_channel_id = config.ADMIN_CHANNEL_ID  # Optional: post to channel instead of DM
+        self.pending_media_type = None  # Tracks what type of media is expected next (banner, 2x, 10x, etc.)
 
     async def initialize(self):
         """Initialize admin bot"""
@@ -66,6 +67,8 @@ class AdminBot:
             self.app.add_handler(CommandHandler("resume", self._cmd_resume, filters=admin_filter))
             self.app.add_handler(CommandHandler("winrate", self._cmd_winrate, filters=admin_filter))
             self.app.add_handler(CommandHandler("testbanner", self._cmd_testbanner, filters=admin_filter))
+            self.app.add_handler(CommandHandler("setmultiplier", self._cmd_setmultiplier, filters=admin_filter))
+            self.app.add_handler(CommandHandler("setbanner", self._cmd_setbanner, filters=admin_filter))
 
             # Wallet management commands
             self.app.add_handler(CommandHandler("wallets", self._cmd_wallets, filters=admin_filter))
@@ -1229,8 +1232,59 @@ class AdminBot:
             logger.error(traceback.format_exc())
             await self._send_response(update, context, f"❌ Error: {str(e)}")
 
+    async def _cmd_setbanner(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Set the signal banner: /setbanner (then send video)"""
+        self.pending_media_type = 'banner'
+        await self._send_response(update, context,
+            "🎬 <b>Banner Setup Mode</b>\n\n"
+            "Send me the video/animation you want to use as the signal banner.\n\n"
+            "Supported: MP4 videos, GIFs, animations")
+
+    async def _cmd_setmultiplier(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Set multiplier animations: /setmultiplier <tier>"""
+        args = context.args
+        valid_tiers = ['2x', '10x', '100x', '1000x']
+
+        if not args or args[0].lower() not in valid_tiers:
+            # Show current config
+            current = {
+                '2x': getattr(config, 'MILESTONE_BANNER_2X', None),
+                '10x': getattr(config, 'MILESTONE_BANNER_10X', None),
+                '100x': getattr(config, 'MILESTONE_BANNER_100X', None),
+                '1000x': getattr(config, 'MILESTONE_BANNER_1000X', None),
+            }
+
+            response = "🎯 <b>Multiplier Animations</b>\n\n"
+            for tier, val in current.items():
+                status = "✅" if val else "❌"
+                response += f"{status} <b>{tier}</b>: {'Set' if val else 'Not set'}\n"
+
+            response += "\n<b>Usage:</b>\n"
+            response += "<code>/setmultiplier 2x</code> - then send video\n"
+            response += "<code>/setmultiplier 10x</code> - then send video\n"
+            response += "<code>/setmultiplier 100x</code> - then send video\n"
+            response += "<code>/setmultiplier 1000x</code> - then send video"
+
+            await self._send_response(update, context, response)
+            return
+
+        tier = args[0].lower()
+        self.pending_media_type = f'multiplier_{tier}'
+
+        tier_names = {
+            '2x': '🔥 LET IT BURN (2-5x)',
+            '10x': '🌋 SCORCHED EARTH (10-50x)',
+            '100x': '☄️ HELL FIRE (100-500x)',
+            '1000x': '💀 INFERNO (1000x+)'
+        }
+
+        await self._send_response(update, context,
+            f"🎯 <b>{tier_names.get(tier, tier)} Animation Setup</b>\n\n"
+            f"Send me the video/animation for the <b>{tier}</b> milestone alerts.\n\n"
+            f"Supported: MP4 videos, GIFs, animations")
+
     async def _handle_media_upload(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Capture file_id when admin sends a video/animation (for banner setup)"""
+        """Capture file_id when admin sends a video/animation"""
         try:
             msg = update.message
             file_id = None
@@ -1251,16 +1305,46 @@ class AdminBot:
 
             logger.info(f"🎬 Admin uploaded {media_type}, file_id: {file_id}")
 
-            # Apply immediately in memory (no redeploy needed)
-            config.TELEGRAM_BANNER_FILE_ID = file_id
+            # Determine what type of media this is for
+            pending = self.pending_media_type
+            self.pending_media_type = None  # Reset state
+
+            if pending == 'banner' or pending is None:
+                # Default: signal banner
+                config.TELEGRAM_BANNER_FILE_ID = file_id
+                env_var = 'TELEGRAM_BANNER_FILE_ID'
+                description = "Signal Banner"
+
+            elif pending.startswith('multiplier_'):
+                tier = pending.replace('multiplier_', '')
+                tier_map = {
+                    '2x': ('MILESTONE_BANNER_2X', '2x (LET IT BURN)'),
+                    '10x': ('MILESTONE_BANNER_10X', '10x (SCORCHED EARTH)'),
+                    '100x': ('MILESTONE_BANNER_100X', '100x (HELL FIRE)'),
+                    '1000x': ('MILESTONE_BANNER_1000X', '1000x (INFERNO)'),
+                }
+                env_var, description = tier_map.get(tier, ('UNKNOWN', tier))
+
+                # Set in config memory
+                if tier == '2x':
+                    config.MILESTONE_BANNER_2X = file_id
+                elif tier == '10x':
+                    config.MILESTONE_BANNER_10X = file_id
+                elif tier == '100x':
+                    config.MILESTONE_BANNER_100X = file_id
+                elif tier == '1000x':
+                    config.MILESTONE_BANNER_1000X = file_id
+            else:
+                env_var = 'TELEGRAM_BANNER_FILE_ID'
+                description = "Banner (default)"
 
             await msg.reply_text(
-                f"🎬 <b>Banner File ID Captured!</b>\n\n"
+                f"🎬 <b>{description} Captured!</b>\n\n"
                 f"Type: <code>{media_type}</code>\n"
                 f"File ID:\n<code>{file_id}</code>\n\n"
-                f"✅ <b>Applied in memory</b> — use /testbanner to verify.\n\n"
+                f"✅ <b>Applied in memory</b>\n\n"
                 f"For persistence across restarts, set env var:\n"
-                f"<code>TELEGRAM_BANNER_FILE_ID={file_id}</code>",
+                f"<code>{env_var}={file_id}</code>",
                 parse_mode=ParseMode.HTML
             )
 

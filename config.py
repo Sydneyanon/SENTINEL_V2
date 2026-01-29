@@ -816,6 +816,23 @@ HELIUS_BACKFILL = {
     'dexscreener_rate_limit': 0.4,      # Seconds between DexScreener calls
     'helius_rate_limit': 0.3,           # Seconds between Helius calls
     'estimated_credits_per_run': 2200,  # ~11 credits/token (authority+holders) for enrichment only
+
+    # =========================================================================
+    # RUNNER DISCOVERY (2026-01-29): Focus on PROVEN RUNNERS for ML training
+    # Instead of random tokens, collect tokens that have ALREADY shown they can run
+    # =========================================================================
+    'runner_discovery': {
+        'enabled': True,                    # Use runner-focused discovery
+        'min_price_change_24h': 50,         # Min +50% in 24h (1.5x minimum)
+        'min_price_change_6h': 30,          # OR min +30% in 6h (faster movers)
+        'min_mcap': 50_000,                 # Min $50K MCAP (graduated, not dust)
+        'max_mcap': 10_000_000,             # Max $10M MCAP (catch before mega run)
+        'min_volume_24h': 10_000,           # Min $10K volume (real trading activity)
+        'min_liquidity': 5_000,             # Min $5K liquidity (can actually trade)
+        'prefer_raydium': True,             # Prefer Raydium pairs (graduated from pump)
+        'max_age_hours': 48,                # Max 48h old (recent launches)
+        'fallback_to_generic': True,        # Fall back to generic discovery if no runners
+    },
 }
 
 # =============================================================================
