@@ -66,6 +66,7 @@ class AdminBot:
             self.app.add_handler(CommandHandler("pause", self._cmd_pause, filters=admin_filter))
             self.app.add_handler(CommandHandler("resume", self._cmd_resume, filters=admin_filter))
             self.app.add_handler(CommandHandler("winrate", self._cmd_winrate, filters=admin_filter))
+            self.app.add_handler(CommandHandler("winratekol", self._cmd_winrate_kol, filters=admin_filter))
             self.app.add_handler(CommandHandler("testbanner", self._cmd_testbanner, filters=admin_filter))
             self.app.add_handler(CommandHandler("setmultiplier", self._cmd_setmultiplier, filters=admin_filter))
             self.app.add_handler(CommandHandler("testmultiplier", self._cmd_testmultiplier, filters=admin_filter))
@@ -197,6 +198,7 @@ class AdminBot:
 /stats - Overall system statistics
 /performance - Recent signal performance
 /winrate - KOL vs On-Chain win rate comparison
+/winratekol - Organic vs Organic+KOL win rate
 /missed - Tracked tokens not signaled (potential missed runners)
 
 <b>Monitoring:</b>
@@ -1151,6 +1153,128 @@ class AdminBot:
 
         except Exception as e:
             logger.error(f"❌ Error in /winrate: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            await self._send_response(update, context, f"❌ Error: {str(e)}")
+
+    async def _cmd_winrate_kol(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Compare win rates: Pure Organic vs Organic + KOL backing"""
+        try:
+            if not self.database or not self.database.pool:
+                await self._send_response(update, context, "❌ Database not available")
+                return
+
+            async with self.database.pool.acquire() as conn:
+                # Get signals with KOL activity (JOIN with smart_wallet_activity)
+                kol_backed_stats = await conn.fetchrow("""
+                    SELECT
+                        COUNT(DISTINCT s.token_address) as total,
+                        SUM(CASE WHEN s.outcome IN ('2x','5x','10x','50x','100x') THEN 1 ELSE 0 END) as wins,
+                        SUM(CASE WHEN s.outcome = 'rug' THEN 1 ELSE 0 END) as rugs,
+                        SUM(CASE WHEN s.outcome = 'loss' THEN 1 ELSE 0 END) as losses,
+                        SUM(CASE WHEN s.outcome IS NULL THEN 1 ELSE 0 END) as pending,
+                        ROUND(AVG(CASE WHEN s.max_roi IS NOT NULL THEN s.max_roi END)::numeric, 2) as avg_roi,
+                        ROUND(MAX(CASE WHEN s.max_roi IS NOT NULL THEN s.max_roi END)::numeric, 1) as best_roi,
+                        ROUND(AVG(s.conviction_score)::numeric, 0) as avg_score
+                    FROM signals s
+                    WHERE s.signal_posted = TRUE
+                      AND EXISTS (
+                          SELECT 1 FROM smart_wallet_activity swa
+                          WHERE swa.token_address = s.token_address
+                      )
+                """)
+
+                # Get signals WITHOUT KOL activity (pure organic)
+                organic_only_stats = await conn.fetchrow("""
+                    SELECT
+                        COUNT(*) as total,
+                        SUM(CASE WHEN outcome IN ('2x','5x','10x','50x','100x') THEN 1 ELSE 0 END) as wins,
+                        SUM(CASE WHEN outcome = 'rug' THEN 1 ELSE 0 END) as rugs,
+                        SUM(CASE WHEN outcome = 'loss' THEN 1 ELSE 0 END) as losses,
+                        SUM(CASE WHEN outcome IS NULL THEN 1 ELSE 0 END) as pending,
+                        ROUND(AVG(CASE WHEN max_roi IS NOT NULL THEN max_roi END)::numeric, 2) as avg_roi,
+                        ROUND(MAX(CASE WHEN max_roi IS NOT NULL THEN max_roi END)::numeric, 1) as best_roi,
+                        ROUND(AVG(conviction_score)::numeric, 0) as avg_score
+                    FROM signals s
+                    WHERE signal_posted = TRUE
+                      AND NOT EXISTS (
+                          SELECT 1 FROM smart_wallet_activity swa
+                          WHERE swa.token_address = s.token_address
+                      )
+                """)
+
+                # Get top KOLs by win rate
+                top_kols = await conn.fetch("""
+                    SELECT
+                        swa.wallet_name,
+                        COUNT(DISTINCT swa.token_address) as tokens,
+                        SUM(CASE WHEN s.outcome IN ('2x','5x','10x','50x','100x') THEN 1 ELSE 0 END) as wins,
+                        SUM(CASE WHEN s.outcome IN ('rug','loss') THEN 1 ELSE 0 END) as losses
+                    FROM smart_wallet_activity swa
+                    LEFT JOIN signals s ON s.token_address = swa.token_address AND s.signal_posted = TRUE
+                    WHERE swa.transaction_type = 'buy'
+                    GROUP BY swa.wallet_name
+                    HAVING COUNT(DISTINCT swa.token_address) >= 2
+                    ORDER BY
+                        CASE WHEN SUM(CASE WHEN s.outcome IN ('2x','5x','10x','50x','100x') THEN 1 ELSE 0 END) +
+                             SUM(CASE WHEN s.outcome IN ('rug','loss') THEN 1 ELSE 0 END) > 0
+                        THEN SUM(CASE WHEN s.outcome IN ('2x','5x','10x','50x','100x') THEN 1 ELSE 0 END)::float /
+                             (SUM(CASE WHEN s.outcome IN ('2x','5x','10x','50x','100x') THEN 1 ELSE 0 END) +
+                              SUM(CASE WHEN s.outcome IN ('rug','loss') THEN 1 ELSE 0 END))
+                        ELSE 0 END DESC
+                    LIMIT 5
+                """)
+
+            # Build response
+            r = "📊 <b>WIN RATE: ORGANIC vs ORGANIC+KOL</b>\n\n"
+
+            # Pure Organic
+            org = organic_only_stats
+            if org and org['total'] > 0:
+                decided = org['total'] - org['pending']
+                wr = (org['wins'] / decided * 100) if decided > 0 else 0
+                rr = (org['rugs'] / decided * 100) if decided > 0 else 0
+                emoji = "🟢" if wr >= 40 else "🟡" if wr >= 25 else "🔴"
+
+                r += f"<b>⛓ PURE ORGANIC</b> (no KOL)\n"
+                r += f"{emoji} Win Rate: <b>{wr:.0f}%</b> ({org['wins']}W / {org['losses']}L / {org['rugs']}R)\n"
+                r += f"   Signals: {org['total']} ({org['pending']} pending)\n"
+                r += f"   Avg ROI: {org['avg_roi'] or 0}x | Best: {org['best_roi'] or 0}x\n"
+                r += f"   Avg Score: {org['avg_score'] or 0}/100\n\n"
+            else:
+                r += "<b>⛓ PURE ORGANIC</b>\n   No data yet\n\n"
+
+            # Organic + KOL
+            kol = kol_backed_stats
+            if kol and kol['total'] > 0:
+                decided = kol['total'] - kol['pending']
+                wr = (kol['wins'] / decided * 100) if decided > 0 else 0
+                rr = (kol['rugs'] / decided * 100) if decided > 0 else 0
+                emoji = "🟢" if wr >= 40 else "🟡" if wr >= 25 else "🔴"
+
+                r += f"<b>👑 ORGANIC + KOL</b> (KOL backed)\n"
+                r += f"{emoji} Win Rate: <b>{wr:.0f}%</b> ({kol['wins']}W / {kol['losses']}L / {kol['rugs']}R)\n"
+                r += f"   Signals: {kol['total']} ({kol['pending']} pending)\n"
+                r += f"   Avg ROI: {kol['avg_roi'] or 0}x | Best: {kol['best_roi'] or 0}x\n"
+                r += f"   Avg Score: {kol['avg_score'] or 0}/100\n\n"
+            else:
+                r += "<b>👑 ORGANIC + KOL</b>\n   No data yet\n\n"
+
+            # Top KOLs
+            if top_kols:
+                r += "<b>🏆 TOP KOLs (by win rate)</b>\n"
+                for row in top_kols:
+                    decided = row['wins'] + row['losses']
+                    wr = (row['wins'] / decided * 100) if decided > 0 else 0
+                    name = (row['wallet_name'] or 'Unknown')[:12]
+                    r += f"• {name}: {wr:.0f}% ({row['wins']}W/{row['losses']}L, {row['tokens']} tokens)\n"
+
+            r += f"\n<i>KOL backing = tracked wallet bought the token</i>"
+
+            await self._send_response(update, context, r)
+
+        except Exception as e:
+            logger.error(f"❌ Error in /winratekol: {e}")
             import traceback
             logger.error(traceback.format_exc())
             await self._send_response(update, context, f"❌ Error: {str(e)}")
