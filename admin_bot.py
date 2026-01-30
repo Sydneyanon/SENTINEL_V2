@@ -564,10 +564,6 @@ class AdminBot:
 
                 response += f"{emoji} <b>${w['symbol']}</b> → <b>{w['multiple']:.1f}x</b> (score {w['score']})\n"
 
-            # Win rate
-            win_rate = (len(winners) / len(signals)) * 100
-            response += f"\n📊 <b>Win Rate: {win_rate:.0f}%</b>"
-
             await self._send_response(update, context, response)
 
         except Exception as e:
