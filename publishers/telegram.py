@@ -29,15 +29,20 @@ class TelegramPublisher:
         if not self.enabled:
             logger.info("ℹ️ Telegram publishing disabled")
             return False
-            
+
         if not config.TELEGRAM_BOT_TOKEN:
             logger.warning("⚠️ TELEGRAM_BOT_TOKEN not set")
             return False
-            
+
         if not config.TELEGRAM_CHANNEL_ID:
             logger.warning("⚠️ TELEGRAM_CHANNEL_ID not set")
             return False
-            
+
+        # Re-read config values (may have been None at import time)
+        self.channel_id = config.TELEGRAM_CHANNEL_ID
+        self.enabled = config.ENABLE_TELEGRAM
+        self.banner_file_id = getattr(config, 'TELEGRAM_BANNER_FILE_ID', None)
+
         try:
             self.bot = Bot(token=config.TELEGRAM_BOT_TOKEN)
             me = await self.bot.get_me()
