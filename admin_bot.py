@@ -1375,7 +1375,7 @@ class AdminBot:
                 "70-79": {"wins": 0, "total": 0, "rois": []},
                 "60-69": {"wins": 0, "total": 0, "rois": []},
                 "50-59": {"wins": 0, "total": 0, "rois": []},
-                "<50": {"wins": 0, "total": 0, "rois": []},
+                "0-49": {"wins": 0, "total": 0, "rois": []},
             }
 
             kol_data = {"wins": 0, "total": 0, "rois": []}
@@ -1401,7 +1401,7 @@ class AdminBot:
                 elif score >= 50:
                     bucket = "50-59"
                 else:
-                    bucket = "<50"
+                    bucket = "0-49"
 
                 conviction_buckets[bucket]["total"] += 1
                 conviction_buckets[bucket]["rois"].append(roi)
