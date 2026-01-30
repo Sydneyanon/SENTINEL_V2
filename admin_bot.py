@@ -68,6 +68,7 @@ class AdminBot:
             self.app.add_handler(CommandHandler("resume", self._cmd_resume, filters=admin_filter))
             self.app.add_handler(CommandHandler("winrate", self._cmd_winrate, filters=admin_filter))
             self.app.add_handler(CommandHandler("winratekol", self._cmd_winrate_kol, filters=admin_filter))
+            self.app.add_handler(CommandHandler("analyze", self._cmd_analyze, filters=admin_filter))
             self.app.add_handler(CommandHandler("testbanner", self._cmd_testbanner, filters=admin_filter))
             self.app.add_handler(CommandHandler("setmultiplier", self._cmd_setmultiplier, filters=admin_filter))
             self.app.add_handler(CommandHandler("testmultiplier", self._cmd_testmultiplier, filters=admin_filter))
@@ -1347,6 +1348,176 @@ class AdminBot:
 
         except Exception as e:
             logger.error(f"❌ Error in /winratekol: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            await self._send_response(update, context, f"❌ Error: {str(e)}")
+
+    async def _cmd_analyze(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Deep analysis of conviction scores, KOL impact, and recommendations"""
+        try:
+            if not self.database or not self.database.pool:
+                await self._send_response(update, context, "❌ Database not available")
+                return
+
+            await self._send_response(update, context, "🔍 Running deep analysis (7 days)...")
+
+            # Get all signals from last 7 days
+            signals = await self.database.get_signals_in_last_hours(168)
+
+            if not signals:
+                await self._send_response(update, context, "ℹ️ No signals found in last 7 days")
+                return
+
+            # ===== CONVICTION SCORE ANALYSIS =====
+            conviction_buckets = {
+                "90-100": {"wins": 0, "total": 0, "rois": []},
+                "80-89": {"wins": 0, "total": 0, "rois": []},
+                "70-79": {"wins": 0, "total": 0, "rois": []},
+                "60-69": {"wins": 0, "total": 0, "rois": []},
+                "50-59": {"wins": 0, "total": 0, "rois": []},
+                "<50": {"wins": 0, "total": 0, "rois": []},
+            }
+
+            kol_data = {"wins": 0, "total": 0, "rois": []}
+            non_kol_data = {"wins": 0, "total": 0, "rois": []}
+
+            for s in signals:
+                score = s.get('conviction_score') or 0
+                entry = s.get('entry_price') or 0
+                peak = s.get('max_price_reached') or 0
+                kol_wallets = s.get('kol_wallets') or []
+
+                roi = peak / entry if entry > 0 and peak > 0 else 0
+
+                # Conviction bucket
+                if score >= 90:
+                    bucket = "90-100"
+                elif score >= 80:
+                    bucket = "80-89"
+                elif score >= 70:
+                    bucket = "70-79"
+                elif score >= 60:
+                    bucket = "60-69"
+                elif score >= 50:
+                    bucket = "50-59"
+                else:
+                    bucket = "<50"
+
+                conviction_buckets[bucket]["total"] += 1
+                conviction_buckets[bucket]["rois"].append(roi)
+                if roi >= 2.0:
+                    conviction_buckets[bucket]["wins"] += 1
+
+                # KOL tracking
+                if kol_wallets and len(kol_wallets) > 0:
+                    kol_data["total"] += 1
+                    kol_data["rois"].append(roi)
+                    if roi >= 2.0:
+                        kol_data["wins"] += 1
+                else:
+                    non_kol_data["total"] += 1
+                    non_kol_data["rois"].append(roi)
+                    if roi >= 2.0:
+                        non_kol_data["wins"] += 1
+
+            # Build Part 1: Conviction Analysis
+            msg1 = f"📊 <b>CONVICTION SCORE ANALYSIS</b>\n"
+            msg1 += f"<i>{len(signals)} signals in 7 days</i>\n\n"
+            msg1 += f"{'Score':<10} {'Sigs':<6} {'Wins':<6} {'WR':<8} {'Avg ROI':<8}\n"
+            msg1 += "-" * 40 + "\n"
+
+            for bucket, data in conviction_buckets.items():
+                if data["total"] > 0:
+                    wr = (data["wins"] / data["total"]) * 100
+                    avg_roi = sum(data["rois"]) / len(data["rois"]) if data["rois"] else 0
+                    emoji = "🟢" if wr >= 30 else "🟡" if wr >= 20 else "🔴"
+                    msg1 += f"{emoji} {bucket:<8} {data['total']:<6} {data['wins']:<6} {wr:<7.0f}% {avg_roi:<.1f}x\n"
+
+            await self._send_response(update, context, msg1)
+
+            # Build Part 2: KOL Analysis
+            msg2 = "📊 <b>KOL vs ORGANIC ANALYSIS</b>\n\n"
+
+            if kol_data["total"] > 0:
+                kol_wr = (kol_data["wins"] / kol_data["total"]) * 100
+                kol_avg = sum(kol_data["rois"]) / len(kol_data["rois"]) if kol_data["rois"] else 0
+                emoji = "🟢" if kol_wr >= 30 else "🟡" if kol_wr >= 20 else "🔴"
+                msg2 += f"<b>👑 KOL-BACKED</b>\n"
+                msg2 += f"{emoji} {kol_data['total']} signals | {kol_data['wins']} wins | {kol_wr:.0f}% WR | {kol_avg:.1f}x avg\n\n"
+
+            if non_kol_data["total"] > 0:
+                org_wr = (non_kol_data["wins"] / non_kol_data["total"]) * 100
+                org_avg = sum(non_kol_data["rois"]) / len(non_kol_data["rois"]) if non_kol_data["rois"] else 0
+                emoji = "🟢" if org_wr >= 30 else "🟡" if org_wr >= 20 else "🔴"
+                msg2 += f"<b>⛓ PURE ORGANIC</b>\n"
+                msg2 += f"{emoji} {non_kol_data['total']} signals | {non_kol_data['wins']} wins | {org_wr:.0f}% WR | {org_avg:.1f}x avg\n\n"
+
+            if kol_data["total"] > 0 and non_kol_data["total"] > 0:
+                kol_wr = (kol_data["wins"] / kol_data["total"]) * 100
+                org_wr = (non_kol_data["wins"] / non_kol_data["total"]) * 100
+                if org_wr > 0:
+                    diff = ((kol_wr / org_wr) - 1) * 100
+                    msg2 += f"💡 KOL signals are <b>{diff:+.0f}%</b> more likely to win\n"
+
+            await self._send_response(update, context, msg2)
+
+            # Build Part 3: Optimal Threshold
+            msg3 = "📊 <b>OPTIMAL THRESHOLD ANALYSIS</b>\n\n"
+            msg3 += f"{'Threshold':<12} {'Sigs':<6} {'Wins':<6} {'WR':<8}\n"
+            msg3 += "-" * 35 + "\n"
+
+            best_threshold = 60
+            best_wr = 0
+            for threshold in [50, 55, 60, 65, 70, 75, 80, 85, 90]:
+                wins = 0
+                total = 0
+                for s in signals:
+                    if (s.get('conviction_score') or 0) >= threshold:
+                        entry = s.get('entry_price') or 0
+                        peak = s.get('max_price_reached') or 0
+                        if entry > 0 and peak > 0:
+                            total += 1
+                            if peak / entry >= 2.0:
+                                wins += 1
+                if total >= 5:
+                    wr = (wins / total) * 100
+                    emoji = "🟢" if wr >= 30 else "🟡" if wr >= 20 else "🔴"
+                    msg3 += f"{emoji} {threshold}+          {total:<6} {wins:<6} {wr:<.0f}%\n"
+                    if wr > best_wr:
+                        best_wr = wr
+                        best_threshold = threshold
+
+            msg3 += f"\n💡 <b>RECOMMENDED: {best_threshold}+ conviction</b> ({best_wr:.0f}% WR)"
+
+            await self._send_response(update, context, msg3)
+
+            # Build Part 4: Worst performers
+            rugs = []
+            for s in signals:
+                entry = s.get('entry_price') or 0
+                peak = s.get('max_price_reached') or 0
+                if entry > 0 and peak > 0:
+                    roi = peak / entry
+                    if roi < 1.2:
+                        rugs.append({
+                            'symbol': s.get('token_symbol', '???'),
+                            'score': s.get('conviction_score', 0),
+                            'roi': roi
+                        })
+            rugs.sort(key=lambda x: x['roi'])
+
+            msg4 = "💀 <b>WORST PERFORMERS</b> (never hit 1.2x)\n\n"
+            for r in rugs[:10]:
+                msg4 += f"🔴 ${r['symbol']} → {r['roi']:.2f}x (score {r['score']})\n"
+
+            if rugs:
+                avg_rug_score = sum(r['score'] for r in rugs) / len(rugs)
+                msg4 += f"\n📉 Avg score of rugs: <b>{avg_rug_score:.0f}</b>"
+
+            await self._send_response(update, context, msg4)
+
+        except Exception as e:
+            logger.error(f"❌ Error in /analyze: {e}")
             import traceback
             logger.error(traceback.format_exc())
             await self._send_response(update, context, f"❌ Error: {str(e)}")
