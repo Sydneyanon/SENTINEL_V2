@@ -55,6 +55,7 @@ class AdminBot:
             self.app.add_handler(CommandHandler("stats", self._cmd_stats, filters=admin_filter))
             self.app.add_handler(CommandHandler("active", self._cmd_active, filters=admin_filter))
             self.app.add_handler(CommandHandler("performance", self._cmd_performance, filters=admin_filter))
+            self.app.add_handler(CommandHandler("toprunners", self._cmd_toprunners, filters=admin_filter))
             self.app.add_handler(CommandHandler("health", self._cmd_health, filters=admin_filter))
             self.app.add_handler(CommandHandler("cache", self._cmd_cache, filters=admin_filter))
             self.app.add_handler(CommandHandler("missed", self._cmd_missed, filters=admin_filter))
@@ -499,6 +500,77 @@ class AdminBot:
             import traceback
             logger.error(traceback.format_exc())
             await self._send_response(update, context, f"❌ Error getting performance: {str(e)}")
+
+    async def _cmd_toprunners(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Show all 2x+ winners from last 24 hours, sorted by peak ROI"""
+        try:
+            if not self.database:
+                await self._send_response(update, context, "❌ Database not available")
+                return
+
+            # Get signals from last 24 hours
+            signals = await self.database.get_signals_in_last_hours(24)
+
+            if not signals:
+                await self._send_response(update, context, "ℹ️ No signals in last 24 hours")
+                return
+
+            # Filter for 2x+ winners and collect their data
+            winners = []
+            for signal in signals:
+                symbol = signal.get('token_symbol', 'UNKNOWN')
+                entry = signal.get('entry_price', 0)
+                token_address = signal.get('token_address', '')
+                score = signal.get('conviction_score', 0)
+
+                # Get peak from max_price_reached
+                peak_price = signal.get('max_price_reached')
+                if peak_price and entry and entry > 0:
+                    peak_multiple = peak_price / entry
+                else:
+                    # Fall back to milestone table
+                    peak_multiple = await self.database.get_highest_milestone(token_address) if token_address else None
+
+                if peak_multiple and peak_multiple >= 2.0:
+                    winners.append({
+                        'symbol': symbol,
+                        'multiple': peak_multiple,
+                        'score': score,
+                        'address': token_address
+                    })
+
+            if not winners:
+                await self._send_response(update, context, f"ℹ️ No 2x+ winners in last 24h ({len(signals)} signals total)")
+                return
+
+            # Sort by multiple descending
+            winners.sort(key=lambda x: x['multiple'], reverse=True)
+
+            # Build response
+            response = f"🏆 <b>TOP RUNNERS (24H)</b>\n"
+            response += f"<i>{len(winners)} winners out of {len(signals)} signals</i>\n\n"
+
+            for i, w in enumerate(winners, 1):
+                if i == 1:
+                    emoji = "🥇"
+                elif i == 2:
+                    emoji = "🥈"
+                elif i == 3:
+                    emoji = "🥉"
+                elif w['multiple'] >= 5.0:
+                    emoji = "🔥"
+                else:
+                    emoji = "✅"
+
+                response += f"{emoji} <b>${w['symbol']}</b> → <b>{w['multiple']:.1f}x</b> (score {w['score']})\n"
+
+            await self._send_response(update, context, response)
+
+        except Exception as e:
+            logger.error(f"❌ Error in /toprunners: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            await self._send_response(update, context, f"❌ Error getting top runners: {str(e)}")
 
     async def _cmd_health(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Show system health"""

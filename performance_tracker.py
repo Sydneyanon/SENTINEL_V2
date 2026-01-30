@@ -363,80 +363,74 @@ class PerformanceTracker:
             logger.error(f"   Traceback: {traceback.format_exc()}")
     
     async def post_daily_report(self):
-        """Post daily performance report"""
+        """Post daily performance report - Top 10 performers"""
         try:
             logger.info("📊 Generating daily report...")
-            
+
+            # Check telegram is ready
+            if not self.telegram or not self.telegram.bot or not self.telegram.channel_id:
+                logger.error("❌ Cannot post daily report: Telegram not initialized")
+                return
+
             # Get today's signals
             signals = await self.db.get_signals_today()
-            
+
             if not signals:
                 logger.info("No signals posted today, skipping daily report")
                 return
-            
-            # Calculate stats
+
             total_signals = len(signals)
-            
-            # Get performance for each signal
+
+            # Get performance using peak ROI
             signal_performance = []
             for signal in signals:
-                current_price = signal.get('current_price')
                 entry_price = signal.get('entry_price')
-                
-                if current_price and entry_price and entry_price > 0:
-                    multiple = current_price / entry_price
-                    gain_pct = (multiple - 1) * 100
-                    
-                    signal_performance.append({
-                        'symbol': signal['token_symbol'],
-                        'signal_type': signal['signal_type'],
-                        'multiple': multiple,
-                        'gain_pct': gain_pct,
-                        'conviction': signal['conviction_score']
-                    })
-            
-            # Sort by gain
-            signal_performance.sort(key=lambda x: x['gain_pct'], reverse=True)
-            
-            # Calculate win rate (2x+ is a real win)
-            winners = [s for s in signal_performance if s['multiple'] >= 2.0]
-            flat = [s for s in signal_performance if 1.0 <= s['multiple'] < 2.0]
-            win_rate = (len(winners) / len(signal_performance) * 100) if signal_performance else 0
-            
-            # Calculate average gain
-            avg_gain = sum(s['gain_pct'] for s in signal_performance) / len(signal_performance) if signal_performance else 0
-            
-            # Get top 10
-            top_10 = signal_performance[:10]
-            
-            # Build message
-            message = f"""📊 <b>DAILY PERFORMANCE REPORT</b>
+                max_roi = signal.get('max_roi')
+                current_price = signal.get('current_price')
 
-📅 {datetime.utcnow().strftime('%B %d, %Y')}
+                if entry_price and entry_price > 0:
+                    # Use max_roi (peak) if available, otherwise current price
+                    if max_roi and max_roi > 0:
+                        multiple = max_roi
+                    elif current_price:
+                        multiple = current_price / entry_price
+                    else:
+                        continue
 
-📈 <b>Overview:</b>
-🔔 Total Signals: {total_signals}
-✅ Winners (2x+): {len(winners)}
-🟡 Flat: {len(flat)}
-❌ Losers: {len(signal_performance) - len(winners) - len(flat)}
-📊 Win Rate: <b>{win_rate:.1f}%</b>
-💰 Avg Gain: <b>{avg_gain:+.1f}%</b>
+                    if multiple > 0:
+                        signal_performance.append({
+                            'symbol': signal['token_symbol'],
+                            'multiple': multiple,
+                        })
 
-🏆 <b>TOP 10 PERFORMERS:</b>
+            # Sort by multiple and get top 10 winners
+            signal_performance.sort(key=lambda x: x['multiple'], reverse=True)
+            top_10 = [s for s in signal_performance[:10] if s['multiple'] >= 1.0]
+
+            if not top_10:
+                logger.info("No positive performers today, skipping daily report")
+                return
+
+            # Build clean message - just top 10
+            message = f"""🔥 <b>24H TOP PERFORMERS</b>
+
 """
-            
+
             for i, perf in enumerate(top_10, 1):
-                emoji = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else f"{i}."
-                signal_emoji = "⚡" if perf['signal_type'] == 'PRE_GRADUATION' else "🎓"
-                
-                message += f"\n{emoji} ${perf['symbol']} {signal_emoji}\n"
-                message += f"   Gain: <b>{perf['gain_pct']:+.1f}%</b> ({perf['multiple']:.2f}x)\n"
-                message += f"   Conviction: {perf['conviction']}/100\n"
-            
-            message += "\n⚡ = Pre-graduation signal (40-60%)\n"
-            message += "🎓 = Post-graduation signal (100%)\n\n"
-            message += "⚠️ <i>Past performance ≠ future results</i>"
-            
+                if i == 1:
+                    emoji = "🥇"
+                elif i == 2:
+                    emoji = "🥈"
+                elif i == 3:
+                    emoji = "🥉"
+                else:
+                    emoji = f"{i}."
+
+                message += f"{emoji} <b>${perf['symbol']}</b> → <b>{perf['multiple']:.1f}x</b>\n"
+
+            message += f"\n📊 {total_signals} signals today\n"
+            message += f"🔥 <i>Prometheus</i>"
+
             result = await self.telegram.bot.send_message(
                 chat_id=self.telegram.channel_id,
                 text=message,
@@ -448,14 +442,14 @@ class PerformanceTracker:
                 await self.telegram.bot.pin_chat_message(
                     chat_id=self.telegram.channel_id,
                     message_id=result.message_id,
-                    disable_notification=False  # Notify subscribers
+                    disable_notification=False
                 )
                 logger.info("📌 Daily report pinned")
             except Exception as pin_error:
                 logger.warning(f"⚠️ Could not pin daily report: {pin_error}")
 
             logger.info("✅ Daily report posted")
-            
+
         except Exception as e:
             logger.error(f"❌ Failed to post daily report: {e}")
     
