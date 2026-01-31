@@ -176,7 +176,9 @@ async def process_potential_signal(token_address: str, wallet: dict):
         liquidity=data.get('liquidity', 0),
         price_change_1h=data.get('price_change_1h', 0),
         holders=data.get('holders', 0),
-        mcap=data.get('mcap', 0)
+        mcap=data.get('mcap', 0),
+        buys_1h=data.get('buys_1h', 0),
+        sells_1h=data.get('sells_1h', 0)
     )
 
     if not should_signal:

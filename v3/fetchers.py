@@ -52,6 +52,13 @@ async def fetch_dexscreener(token_address: str) -> Optional[Dict]:
                 else:
                     pair = max(pairs, key=lambda p: float(p.get('liquidity', {}).get('usd', 0) or 0))
 
+                # Extract transaction counts (buys/sells)
+                txns = pair.get('txns', {})
+                buys_1h = int(txns.get('h1', {}).get('buys', 0) or 0)
+                sells_1h = int(txns.get('h1', {}).get('sells', 0) or 0)
+                buys_24h = int(txns.get('h24', {}).get('buys', 0) or 0)
+                sells_24h = int(txns.get('h24', {}).get('sells', 0) or 0)
+
                 return {
                     'symbol': pair.get('baseToken', {}).get('symbol', 'UNKNOWN'),
                     'name': pair.get('baseToken', {}).get('name', 'Unknown'),
@@ -62,6 +69,10 @@ async def fetch_dexscreener(token_address: str) -> Optional[Dict]:
                     'volume_24h': float(pair.get('volume', {}).get('h24', 0) or 0),
                     'price_change_1h': float(pair.get('priceChange', {}).get('h1', 0) or 0),
                     'price_change_24h': float(pair.get('priceChange', {}).get('h24', 0) or 0),
+                    'buys_1h': buys_1h,
+                    'sells_1h': sells_1h,
+                    'buys_24h': buys_24h,
+                    'sells_24h': sells_24h,
                     'holders': 0,  # DexScreener doesn't provide this
                 }
 
@@ -116,6 +127,10 @@ async def fetch_pumpportal(token_address: str) -> Optional[Dict]:
                     'volume_24h': 0,
                     'price_change_1h': 0,
                     'price_change_24h': 0,
+                    'buys_1h': 0,  # Not available from PumpPortal REST
+                    'sells_1h': 0,
+                    'buys_24h': 0,
+                    'sells_24h': 0,
                     'holders': 0,
                     'bonding_pct': bonding_pct,
                     'virtual_sol': virtual_sol,
