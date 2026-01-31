@@ -2300,8 +2300,10 @@ class AdminBot:
                 r += f"• Symbol: {signal['token_symbol']}\n"
                 r += f"• Posted: {'✅ YES' if signal['signal_posted'] else '❌ NO'}\n"
                 r += f"• Entry Price: ${signal['entry_price']:.8f}\n"
-                r += f"• Current Price: ${signal['current_price']:.8f if signal['current_price'] else 'NULL'}\n"
-                r += f"• Max Price: ${signal['max_price_reached']:.8f if signal['max_price_reached'] else 'NULL'}\n"
+                curr_price = signal['current_price']
+                max_price = signal['max_price_reached']
+                r += f"• Current Price: {f'${curr_price:.8f}' if curr_price else 'NULL'}\n"
+                r += f"• Max Price: {f'${max_price:.8f}' if max_price else 'NULL'}\n"
 
                 # Calculate multiplier
                 if signal['entry_price'] and signal['entry_price'] > 0 and signal['max_price_reached']:
