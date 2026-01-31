@@ -2177,6 +2177,9 @@ class AdminBot:
             import main
             revival_scanner = main.revival_scanner
 
+            # Debug: log what we got
+            logger.info(f"🔍 /revivals: revival_scanner = {revival_scanner}, type = {type(revival_scanner)}")
+
             if not revival_scanner:
                 await self._send_response(update, context,
                     "⏭️ Revival scanner not enabled.\n\n"
