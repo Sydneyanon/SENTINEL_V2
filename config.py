@@ -218,6 +218,32 @@ ORGANIC_SCANNER = {
 }
 
 # =============================================================================
+# TIME-BASED FILTERING (Ralph Discovery 2026-01-31)
+# Analysis shows HUGE win rate differences by hour:
+# - Best: 16:00 UTC (71% WR), 8:00 UTC (50% WR)
+# - Worst: 9:00 UTC (10% WR), 22:00 UTC (12% WR)
+# That's a 7x difference between best and worst hours!
+# =============================================================================
+TIME_FILTER = {
+    'enabled': True,
+    'mode': 'block_worst',  # 'block_worst' = skip worst hours, 'boost_best' = add points for best hours
+
+    # Hours to SKIP signals (UTC) - these have <15% win rate
+    'blocked_hours': [9, 22],  # 9:00 UTC (10% WR), 22:00 UTC (12% WR)
+
+    # Hours with BONUS points (UTC) - these have >45% win rate
+    'best_hours': [16, 8],     # 16:00 UTC (71% WR), 8:00 UTC (50% WR)
+    'best_hour_bonus': 10,     # +10 pts during best hours
+
+    # Hours with PENALTY (UTC) - these have <20% win rate
+    'worst_hours': [9, 22, 3, 4, 5],  # Early morning UTC
+    'worst_hour_penalty': -15,  # -15 pts during worst hours (if not blocked)
+
+    # Log skipped signals
+    'log_skipped': True,
+}
+
+# =============================================================================
 # NEW: GRADUATION SPEED BONUS (Post-grad only)
 # Rewards fast graduations (strong demand) and penalizes slow ones
 # =============================================================================
