@@ -78,6 +78,7 @@ class AdminBot:
             self.app.add_handler(CommandHandler("winrate", self._cmd_winrate, filters=admin_filter))
             self.app.add_handler(CommandHandler("winratekol", self._cmd_winrate_kol, filters=admin_filter))
             self.app.add_handler(CommandHandler("sources", self._cmd_sources, filters=admin_filter))
+            self.app.add_handler(CommandHandler("revivals", self._cmd_revivals, filters=admin_filter))
             self.app.add_handler(CommandHandler("kolstats", self._cmd_kolstats, filters=admin_filter))
             self.app.add_handler(CommandHandler("analyze", self._cmd_analyze, filters=admin_filter))
             self.app.add_handler(CommandHandler("testbanner", self._cmd_testbanner, filters=admin_filter))
@@ -221,6 +222,7 @@ class AdminBot:
 
 <b>Monitoring:</b>
 /active - Currently tracked tokens
+/revivals - Post-grad revival scanner watchlist
 /health - System health check
 /config - Live scoring config values
 
@@ -2132,6 +2134,62 @@ class AdminBot:
 
         except Exception as e:
             logger.error(f"❌ Error in /sources: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            await self._send_response(update, context, f"❌ Error: {str(e)}")
+
+    async def _cmd_revivals(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Show post-grad revival scanner watchlist"""
+        try:
+            # Get revival scanner from main module
+            from main import revival_scanner
+
+            if not revival_scanner:
+                await self._send_response(update, context,
+                    "⏭️ Revival scanner not enabled.\n\n"
+                    "Enable in config.py:\n"
+                    "<code>POST_GRAD_REVIVAL_SCANNER['enabled'] = True</code>")
+                return
+
+            stats = revival_scanner.get_stats()
+            watchlist = revival_scanner.get_watchlist_summary()
+
+            r = "🔄 <b>POST-GRAD REVIVAL SCANNER</b>\n\n"
+
+            # Stats
+            r += "<b>📊 STATS</b>\n"
+            r += f"• Graduations tracked: {stats['graduations_tracked']}\n"
+            r += f"• Revivals detected: {stats['revivals_detected']}\n"
+            r += f"• Tokens expired: {stats['tokens_expired']}\n"
+            r += f"• Current watchlist: {stats['watchlist_size']}\n\n"
+
+            # Watchlist
+            if watchlist:
+                r += "<b>👀 WATCHLIST (by age)</b>\n"
+                for token in watchlist[:15]:
+                    drop_emoji = "🔻" if token['drop_pct'] > 50 else "📉"
+                    r += f"{drop_emoji} ${token['symbol']} — {token['drop_pct']:.0f}% down\n"
+                    r += f"   Grad: ${token['grad_mcap']:,.0f} → Low: ${token['lowest_mcap']:,.0f}\n"
+                    r += f"   Age: {token['age_hours']:.1f}h | <code>{token['address']}...</code>\n"
+
+                if len(watchlist) > 15:
+                    r += f"\n<i>...and {len(watchlist) - 15} more</i>\n"
+            else:
+                r += "<i>No tokens in watchlist yet.\n"
+                r += "Tokens are added when they graduate from pump.fun.</i>\n"
+
+            # Config
+            cfg = revival_scanner.config
+            r += f"\n<b>⚙️ CONFIG</b>\n"
+            r += f"• Watch duration: {cfg['watchlist_hours']}h\n"
+            r += f"• Min drop to watch: {cfg['min_drop_pct']}%\n"
+            r += f"• Min recovery to trigger: {cfg['min_recovery_pct']}%\n"
+            r += f"• MCAP range: ${cfg['min_mcap']:,} - ${cfg['max_mcap']:,}\n"
+
+            await self._send_response(update, context, r)
+
+        except Exception as e:
+            logger.error(f"❌ Error in /revivals: {e}")
             import traceback
             logger.error(traceback.format_exc())
             await self._send_response(update, context, f"❌ Error: {str(e)}")

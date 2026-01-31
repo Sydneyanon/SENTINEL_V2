@@ -63,6 +63,7 @@ smart_wallet_tracker = None  # ← FIXED: Will initialize with enriched wallets 
 narrative_detector = NarrativeDetector()
 active_tracker = None  # NEW: Tracks KOL-bought tokens
 helius_fetcher = None  # NEW: Fetches data from Helius
+revival_scanner = None  # NEW: Monitors post-grad tokens for revival patterns
 
 # Scoring
 conviction_engine = None
@@ -559,7 +560,7 @@ async def run_daily_pipeline():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Initialize all components on startup and cleanup on shutdown"""
-    global conviction_engine, pumpportal_monitor, db, performance_tracker, active_tracker, helius_fetcher, smart_wallet_tracker, telegram_monitor
+    global conviction_engine, pumpportal_monitor, db, performance_tracker, active_tracker, helius_fetcher, smart_wallet_tracker, telegram_monitor, revival_scanner
 
     # ========== STARTUP ==========
     
@@ -801,6 +802,23 @@ async def lifespan(app: FastAPI):
     )
     active_tracker.post_call_monitor = post_call_monitor
     logger.info("✅ Post-call monitor initialized (10min fade detection)")
+
+    # Initialize Post-Grad Revival Scanner (NEW!)
+    # Monitors graduated tokens for bottom reversal patterns
+    if config.POST_GRAD_REVIVAL_SCANNER.get('enabled', True):
+        logger.info("🔄 Initializing post-grad revival scanner...")
+        from trackers.post_grad_revival_scanner import PostGradRevivalScanner
+        revival_scanner = PostGradRevivalScanner(active_tracker=active_tracker)
+
+        # Link to pump monitor so graduations are added to watchlist
+        if pumpportal_monitor:
+            pumpportal_monitor.revival_scanner = revival_scanner
+
+        # Start revival scanner polling in background
+        asyncio.create_task(revival_scanner.start())
+        logger.info("✅ Revival scanner started (watching post-grad tokens for bottoms)")
+    else:
+        logger.info("⏭️ Revival scanner disabled in config")
 
     # Helius Pump.fun program webhook
     if config.HELIUS_PUMP_WEBHOOK.get('enabled', False) and config.HELIUS_PUMP_WEBHOOK.get('auto_register', False):
