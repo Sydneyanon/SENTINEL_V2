@@ -92,35 +92,48 @@ class PostGradRevivalScanner:
         logger.info(f"   Min drop to watch: {self.config['min_drop_pct']}%")
         logger.info(f"   Min recovery to trigger: {self.config['min_recovery_pct']}%")
         logger.info(f"   MCAP range: ${self.config['min_mcap']:,} - ${self.config['max_mcap']:,}")
+        if self.config.get('graduation_momentum_enabled', True):
+            logger.info(f"   Graduation momentum: ENABLED (vol>${self.config.get('momentum_min_volume_1h', 50000):,})")
 
     async def add_graduation(self, token_address: str, symbol: str, graduation_price: float = None, graduation_mcap: float = None):
         """
-        Add a newly graduated token to the watchlist.
-        Called when PumpPortal sends a migration/graduation event.
+        Handle a newly graduated token.
+        1. Check if it has strong momentum → track immediately
+        2. Otherwise → add to watchlist for revival monitoring
         """
         if not self.config.get('enabled', True):
+            return
+
+        if token_address in self.triggered_tokens:
+            logger.debug(f"🔄 {symbol} already triggered, skipping")
             return
 
         if token_address in self.watchlist:
             logger.debug(f"🔄 {symbol} already in revival watchlist")
             return
 
-        if token_address in self.triggered_tokens:
-            logger.debug(f"🔄 {symbol} already triggered revival, skipping")
-            return
-
-        # Limit watchlist size
-        if len(self.watchlist) >= self.config['max_watchlist_size']:
-            # Remove oldest
-            oldest = min(self.watchlist.values(), key=lambda x: x.graduation_time)
-            del self.watchlist[oldest.token_address]
-            logger.debug(f"🔄 Removed oldest from watchlist: {oldest.symbol}")
-
         # Default graduation MCAP (~$69K for pump.fun)
         if not graduation_mcap:
             graduation_mcap = 69000
         if not graduation_price:
             graduation_price = graduation_mcap / 1_000_000_000  # Assume 1B supply
+
+        self.stats['graduations_tracked'] += 1
+
+        # CHECK GRADUATION MOMENTUM: Track hot tokens immediately
+        if self.config.get('graduation_momentum_enabled', True):
+            momentum_triggered = await self._check_graduation_momentum(
+                token_address, symbol, graduation_mcap
+            )
+            if momentum_triggered:
+                return  # Already triggered tracking, don't add to watchlist
+
+        # No momentum → add to watchlist for revival monitoring
+        # Limit watchlist size
+        if len(self.watchlist) >= self.config['max_watchlist_size']:
+            oldest = min(self.watchlist.values(), key=lambda x: x.graduation_time)
+            del self.watchlist[oldest.token_address]
+            logger.debug(f"🔄 Removed oldest from watchlist: {oldest.symbol}")
 
         token = GraduatedToken(
             token_address=token_address,
@@ -134,10 +147,72 @@ class PostGradRevivalScanner:
         )
 
         self.watchlist[token_address] = token
-        self.stats['graduations_tracked'] += 1
-
         logger.info(f"🎓 Added to revival watchlist: ${symbol} (graduated at ${graduation_mcap:,.0f} MCAP)")
         logger.debug(f"   Watchlist size: {len(self.watchlist)}")
+
+    async def _check_graduation_momentum(self, token_address: str, symbol: str, graduation_mcap: float) -> bool:
+        """
+        Check if a newly graduated token has strong momentum.
+        If yes, track immediately instead of waiting for a dump.
+
+        Returns True if momentum triggered tracking.
+        """
+        cfg = self.config
+        try:
+            # Fetch current data from DexScreener
+            data = await self._fetch_dexscreener_batch([token_address])
+            if not data or token_address not in data:
+                return False
+
+            pair = data[token_address]
+            mcap = float(pair.get('marketCap', 0) or 0)
+            volume_1h = float(pair.get('volume', {}).get('h1', 0) or 0)
+            price_change_1h = float(pair.get('priceChange', {}).get('h1', 0) or 0)
+
+            # Check momentum criteria
+            min_volume = cfg.get('momentum_min_volume_1h', 50000)
+            min_price_change = cfg.get('momentum_min_price_change', 5)
+            max_mcap = cfg.get('momentum_max_mcap', 300000)
+
+            has_volume = volume_1h >= min_volume
+            has_momentum = price_change_1h >= min_price_change
+            mcap_ok = mcap <= max_mcap
+
+            if has_volume and has_momentum and mcap_ok:
+                # HOT GRADUATION - track immediately!
+                self.triggered_tokens.add(token_address)
+                self.stats['momentum_triggers'] = self.stats.get('momentum_triggers', 0) + 1
+
+                logger.info("=" * 60)
+                logger.info(f"🔥 GRADUATION MOMENTUM: ${symbol}")
+                logger.info(f"   💰 Volume 1h: ${volume_1h:,.0f} (min: ${min_volume:,})")
+                logger.info(f"   📈 Price change: +{price_change_1h:.1f}% (min: {min_price_change}%)")
+                logger.info(f"   💎 MCAP: ${mcap:,.0f}")
+                logger.info(f"   🎯 Triggering immediate tracking...")
+                logger.info("=" * 60)
+
+                # Trigger tracking
+                if self.active_tracker:
+                    try:
+                        await self.active_tracker.start_tracking(
+                            token_address,
+                            initial_data={
+                                'token_symbol': symbol,
+                                'token_name': symbol,
+                                'market_cap': mcap,
+                                'bonding_curve_pct': 100,
+                            },
+                            source='graduation_momentum'
+                        )
+                    except Exception as e:
+                        logger.error(f"❌ Failed to start tracking: {e}")
+
+                return True
+
+        except Exception as e:
+            logger.debug(f"Momentum check error for {symbol}: {e}")
+
+        return False
 
     async def start(self):
         """Start the revival scanner background task"""

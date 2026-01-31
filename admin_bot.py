@@ -2159,7 +2159,8 @@ class AdminBot:
             # Stats
             r += "<b>📊 STATS</b>\n"
             r += f"• Graduations tracked: {stats['graduations_tracked']}\n"
-            r += f"• Revivals detected: {stats['revivals_detected']}\n"
+            r += f"• 🔥 Momentum triggers: {stats.get('momentum_triggers', 0)}\n"
+            r += f"• 🔄 Revivals detected: {stats['revivals_detected']}\n"
             r += f"• Tokens expired: {stats['tokens_expired']}\n"
             r += f"• Current watchlist: {stats['watchlist_size']}\n\n"
 

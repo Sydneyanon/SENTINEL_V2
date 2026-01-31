@@ -233,6 +233,13 @@ POST_GRAD_REVIVAL_SCANNER = {
     'max_mcap': 200000,              # Max MCAP to consider ($200K - still early)
     'poll_interval': 60,             # Seconds between DexScreener polls
     'max_watchlist_size': 100,       # Limit watchlist to prevent API spam
+
+    # GRADUATION MOMENTUM: Track hot tokens immediately (no dump required)
+    # For tokens that graduate and keep pumping without a pullback
+    'graduation_momentum_enabled': True,
+    'momentum_min_volume_1h': 50000,    # Min 1h volume (USD) for immediate tracking
+    'momentum_min_price_change': 5,     # Min % price above graduation to trigger
+    'momentum_max_mcap': 300000,        # Max MCAP for momentum tracking ($300K)
 }
 
 # =============================================================================
