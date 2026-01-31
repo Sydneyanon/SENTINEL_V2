@@ -33,8 +33,8 @@ class AutomatedMLRetrainer:
         self.pipeline = MLPipeline()
         self.data_file = 'data/historical_training_data.json'
         self.metrics_file = 'data/ml_training_metrics.json'
-        self.min_tokens_for_retrain = 200  # Minimum dataset size
-        self.min_new_tokens_for_retrain = 50  # Minimum new data since last train
+        self.min_tokens_for_retrain = 75  # Minimum dataset size (lowered from 200)
+        self.min_new_tokens_for_retrain = 20  # Minimum new data since last train
 
     async def should_retrain(self) -> bool:
         """

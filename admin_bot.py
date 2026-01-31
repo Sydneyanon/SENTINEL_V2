@@ -64,6 +64,7 @@ class AdminBot:
             self.app.add_handler(CommandHandler("dataset", self._cmd_dataset, filters=admin_filter))
             self.app.add_handler(CommandHandler("collect", self._cmd_collect, filters=admin_filter))
             self.app.add_handler(CommandHandler("ml", self._cmd_ml_retrain, filters=admin_filter))
+            self.app.add_handler(CommandHandler("syncmldata", self._cmd_sync_ml_data, filters=admin_filter))
             self.app.add_handler(CommandHandler("pause", self._cmd_pause, filters=admin_filter))
             self.app.add_handler(CommandHandler("resume", self._cmd_resume, filters=admin_filter))
             self.app.add_handler(CommandHandler("winrate", self._cmd_winrate, filters=admin_filter))
@@ -947,7 +948,7 @@ class AdminBot:
             discovery_method = data.get('discovery_method', 'dexscreener')
 
             # ML readiness
-            ml_threshold = 200
+            ml_threshold = 75
             progress_pct = min(100, (total / ml_threshold) * 100)
             tokens_needed = max(0, ml_threshold - total)
             bar_filled = int(progress_pct / 5)  # 20 char bar
@@ -1050,7 +1051,7 @@ class AdminBot:
                 f"<b>Skipped:</b> {existing} existing, {no_dex} no DEX pair, {filtered} filtered\n"
                 f"<b>Dataset total:</b> {total} tokens\n"
                 f"<b>Credits used:</b> ~{credits}\n\n"
-                f"{'✅ Ready for ML training!' if total >= 200 else f'Need {200 - total} more tokens for ML training.'}")
+                f"{'✅ Ready for ML training!' if total >= 75 else f'Need {75 - total} more tokens for ML training.'}")
         except Exception as e:
             logger.error(f"❌ Background collection failed: {e}")
             await self._send_response(update, context, f"❌ Collection failed: {str(e)}")
@@ -1100,6 +1101,130 @@ class AdminBot:
         except Exception as e:
             logger.error(f"❌ ML retraining failed: {e}")
             await self._send_response(update, context, f"❌ ML retraining failed: {str(e)}")
+
+    async def _cmd_sync_ml_data(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Sync database signals to ML training data file"""
+        try:
+            if not self.database or not self.database.pool:
+                await self._send_response(update, context, "❌ Database not available")
+                return
+
+            await self._send_response(update, context,
+                "🔄 <b>Syncing database signals to ML training data...</b>")
+
+            # Get all signals from database
+            signals = await self.database.get_all_signals_for_ml()
+
+            if not signals:
+                await self._send_response(update, context, "ℹ️ No signals found in database")
+                return
+
+            # Convert to ML training format
+            training_tokens = []
+            outcome_dist = {'rug': 0, '2x': 0, '10x': 0, '50x': 0, '100x': 0, 'loss': 0}
+
+            for s in signals:
+                if not s.get('entry_price') or s['entry_price'] <= 0:
+                    continue
+
+                # Calculate ROI and outcome
+                peak = s.get('max_price_reached') or 0
+                entry = s['entry_price']
+                roi = peak / entry if peak > 0 else 0
+
+                if roi >= 100:
+                    outcome = '100x+'
+                    outcome_dist['100x'] += 1
+                elif roi >= 50:
+                    outcome = '50x'
+                    outcome_dist['50x'] += 1
+                elif roi >= 10:
+                    outcome = '10x'
+                    outcome_dist['10x'] += 1
+                elif roi >= 2:
+                    outcome = '2x'
+                    outcome_dist['2x'] += 1
+                elif roi < 0.5:
+                    outcome = 'rug'
+                    outcome_dist['rug'] += 1
+                else:
+                    outcome = 'small'
+                    outcome_dist['loss'] += 1
+
+                token_data = {
+                    'address': s.get('token_address', ''),
+                    'symbol': s.get('token_symbol', ''),
+                    'conviction_score': s.get('conviction_score', 0),
+                    'entry_price': entry,
+                    'max_price': peak,
+                    'roi': roi,
+                    'outcome': outcome,
+                    'bonding_curve_pct': s.get('bonding_curve_pct', 0),
+                    'buy_percentage': s.get('buy_percentage', 0),
+                    'liquidity_usd': s.get('liquidity', 0),
+                    'volume_24h': s.get('volume_24h', 0),
+                    'market_cap': s.get('market_cap', 0),
+                    'kol_count': len(s.get('kol_wallets') or []),
+                    'has_kol': bool(s.get('kol_wallets')),
+                    'created_at': str(s.get('created_at', ''))
+                }
+                training_tokens.append(token_data)
+
+            # Load existing external data
+            data_file = 'data/historical_training_data.json'
+            try:
+                import json
+                with open(data_file, 'r') as f:
+                    existing = json.load(f)
+                external_tokens = existing.get('tokens', [])
+            except:
+                external_tokens = []
+
+            # Merge (database signals take priority - more recent/accurate)
+            existing_addresses = {t['address'] for t in training_tokens}
+            for ext in external_tokens:
+                if ext.get('address') not in existing_addresses:
+                    training_tokens.append(ext)
+
+            # Save merged data
+            import json
+            from datetime import datetime
+            merged_data = {
+                'total_tokens': len(training_tokens),
+                'tokens': training_tokens,
+                'outcome_distribution': outcome_dist,
+                'last_sync': datetime.utcnow().isoformat(),
+                'source': 'database + external',
+                'db_signals': len(signals),
+                'external_tokens': len(external_tokens)
+            }
+
+            with open(data_file, 'w') as f:
+                json.dump(merged_data, f, indent=2, default=str)
+
+            # Summary
+            ready = "✅ Ready for ML training!" if len(training_tokens) >= 75 else f"Need {75 - len(training_tokens)} more tokens"
+
+            await self._send_response(update, context,
+                f"✅ <b>ML Data Synced!</b>\n\n"
+                f"<b>Database signals:</b> {len(signals)}\n"
+                f"<b>External tokens:</b> {len(external_tokens)}\n"
+                f"<b>Total merged:</b> {len(training_tokens)}\n\n"
+                f"<b>Outcomes:</b>\n"
+                f"  🔴 Rug: {outcome_dist['rug']}\n"
+                f"  🟡 Loss: {outcome_dist['loss']}\n"
+                f"  🟢 2x: {outcome_dist['2x']}\n"
+                f"  🟢 10x: {outcome_dist['10x']}\n"
+                f"  🟢 50x: {outcome_dist['50x']}\n"
+                f"  🔥 100x+: {outcome_dist['100x']}\n\n"
+                f"{ready}\n\n"
+                f"Run /ml to train the model.")
+
+        except Exception as e:
+            logger.error(f"❌ Error in /syncmldata: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            await self._send_response(update, context, f"❌ Error: {str(e)}")
 
     async def _cmd_winrate(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Compare win rates: KOL-based era vs On-Chain-first era"""
