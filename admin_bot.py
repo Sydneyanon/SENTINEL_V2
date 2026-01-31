@@ -135,6 +135,33 @@ class AdminBot:
             await self.app.initialize()
             await self.app.start()
 
+            # Register commands with Telegram menu
+            from telegram import BotCommand
+            commands = [
+                BotCommand("help", "Show all commands"),
+                BotCommand("data", "All data stats in one place"),
+                BotCommand("ralph", "Full analysis + recommendations"),
+                BotCommand("stats", "System statistics"),
+                BotCommand("performance", "Recent signal performance"),
+                BotCommand("toprunners", "All 2x+ winners"),
+                BotCommand("active", "Currently tracked tokens"),
+                BotCommand("revivals", "Post-grad revival watchlist"),
+                BotCommand("sources", "KOL vs Organic comparison"),
+                BotCommand("checksignal", "Debug signal status"),
+                BotCommand("kolstats", "KOL performance breakdown"),
+                BotCommand("health", "System health check"),
+                BotCommand("config", "Live config values"),
+                BotCommand("wallets", "View tracked wallets"),
+                BotCommand("ml", "Retrain ML model"),
+                BotCommand("pause", "Pause signal posting"),
+                BotCommand("resume", "Resume signal posting"),
+            ]
+            try:
+                await self.app.bot.set_my_commands(commands)
+                logger.info(f"✅ Registered {len(commands)} commands with Telegram menu")
+            except Exception as e:
+                logger.warning(f"⚠️ Could not set Telegram commands: {e}")
+
             # Start polling (this will run in background)
             await self.app.updater.start_polling(
                 drop_pending_updates=True,
@@ -254,6 +281,10 @@ class AdminBot:
 <b>Multiplier Animations:</b>
 /setmultiplier &lt;tier&gt; - Set animation (2x/10x/100x/1000x)
 /testmultiplier &lt;tier&gt; - Test multiplier animation
+
+<b>Debug:</b>
+/checksignal &lt;address&gt; - Check signal status for token
+/checksignal fix - Fix orphaned signals
 
 <b>Help:</b>
 /help - Show this message
