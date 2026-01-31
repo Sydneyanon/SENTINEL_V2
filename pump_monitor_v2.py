@@ -465,7 +465,10 @@ class PumpMonitorV2:
         # Route to active tracker
         if self.active_tracker:
             try:
-                await self.active_tracker.start_tracking(token_address, source='organic_scanner')
+                # Extract full token data from WebSocket so it's not lost during tracking
+                initial_data = await self._extract_token_data(data)
+                initial_data['unique_buyers'] = buyer_count
+                await self.active_tracker.start_tracking(token_address, initial_data=initial_data, source='organic_scanner')
                 logger.info(f"   ✅ ${symbol} now being tracked (organic discovery)")
             except Exception as e:
                 logger.error(f"   ❌ Failed to start tracking ${symbol}: {e}")
