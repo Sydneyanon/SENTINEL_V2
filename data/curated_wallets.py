@@ -19,11 +19,8 @@ KOL_WALLETS = {
         'tier': 'top_kol',
         'fetch_metadata': True  # ← Test direct fetcher
     },
-    '57rXqaQsvgyBKwebP2StfqQeCBjBS4jsrZFJN5aU2V9b': {
-        'name': 'Ram',
-        'tier': 'top_kol',
-        'fetch_metadata': False
-    },
+    # REMOVED: Ram (100% rug rate - flagged by Ralph 2026-01-31)
+    # '57rXqaQsvgyBKwebP2StfqQeCBjBS4jsrZFJN5aU2V9b': {...},
     'FAicXNV5FVqtfbpn4Zccs71XcfGeyxBSGbqLDyDJZjke': {
         'name': 'Radiance',
         'tier': 'top_kol',
@@ -144,11 +141,8 @@ KOL_WALLETS = {
         'tier': 'top_kol',
         'fetch_metadata': False
     },
-    'sAdNbe1cKNMDqDsa4npB3TfL62T14uAo2MsUQfLvzLT': {
-        'name': None,
-        'tier': 'top_kol',
-        'fetch_metadata': False
-    },
+    # REMOVED: sAdNbe1c (92% rug rate - flagged by Ralph 2026-01-31)
+    # 'sAdNbe1cKNMDqDsa4npB3TfL62T14uAo2MsUQfLvzLT': {...},
     'GNrmKZCxYyNiSUsjduwwPJzhed3LATjciiKVuSGrsHEC': {
         'name': None,
         'tier': 'top_kol',
@@ -174,11 +168,8 @@ KOL_WALLETS = {
         'tier': 'top_kol',
         'fetch_metadata': False
     },
-    '8oQoMhfBQnRspn7QtNAq2aPThRE4q94kLSTwaaFQvRgs': {
-        'name': None,
-        'tier': 'top_kol',
-        'fetch_metadata': False
-    },
+    # REMOVED: 8oQoMh (65% rug rate - flagged by Ralph 2026-01-31)
+    # '8oQoMhfBQnRspn7QtNAq2aPThRE4q94kLSTwaaFQvRgs': {...},
     '87rRdssFiTJKY4MGARa4G5vQ31hmR7MxSmhzeaJ5AAxJ': {
         'name': None,
         'tier': 'top_kol',
