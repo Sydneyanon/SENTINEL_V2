@@ -11,7 +11,8 @@ from loguru import logger
 from config import HELIUS_API_KEY, LOG_LEVEL
 import database as db
 from scoring import calculate_score, format_breakdown
-from tracker import TokenTracker, fetch_token_data
+from tracker import TokenTracker
+from fetchers import fetch_token_data
 from telegram import TelegramPoster
 from admin import AdminBot
 

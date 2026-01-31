@@ -3,13 +3,13 @@ SENTINEL V3 - Token Tracker
 Monitors active signals, checks milestones, determines outcomes.
 """
 import asyncio
-import aiohttp
 from datetime import datetime, timedelta
 from loguru import logger
 from typing import Optional, Dict, List
 
 from config import MILESTONES, TRACKING_DURATION_HOURS, POLL_INTERVAL_SECONDS
 import database as db
+from fetchers import fetch_token_data
 
 
 class TokenTracker:
@@ -71,8 +71,8 @@ class TokenTracker:
         """Check a single signal for updates."""
         token_address = signal['token_address']
 
-        # Fetch current price from DexScreener
-        data = await self._fetch_dexscreener(token_address)
+        # Fetch current price (DexScreener for post-grad, PumpPortal for pre-grad)
+        data = await fetch_token_data(token_address)
         if not data:
             return
 
@@ -132,62 +132,3 @@ class TokenTracker:
             f"(final: {final_multiplier:.2f}x, max: {signal['max_multiplier']:.2f}x)"
         )
 
-    async def _fetch_dexscreener(self, token_address: str) -> Optional[Dict]:
-        """Fetch token data from DexScreener."""
-        try:
-            url = f"https://api.dexscreener.com/latest/dex/tokens/{token_address}"
-
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url, timeout=10) as resp:
-                    if resp.status != 200:
-                        return None
-
-                    data = await resp.json()
-                    pairs = data.get('pairs', [])
-
-                    if not pairs:
-                        return None
-
-                    # Get the pair with highest liquidity
-                    pair = max(pairs, key=lambda p: float(p.get('liquidity', {}).get('usd', 0) or 0))
-
-                    return {
-                        'price': float(pair.get('priceUsd', 0) or 0),
-                        'mcap': float(pair.get('marketCap', 0) or 0),
-                        'liquidity': float(pair.get('liquidity', {}).get('usd', 0) or 0),
-                        'volume_1h': float(pair.get('volume', {}).get('h1', 0) or 0),
-                        'volume_24h': float(pair.get('volume', {}).get('h24', 0) or 0),
-                        'price_change_1h': float(pair.get('priceChange', {}).get('h1', 0) or 0),
-                        'price_change_24h': float(pair.get('priceChange', {}).get('h24', 0) or 0),
-                    }
-
-        except Exception as e:
-            logger.warning(f"DexScreener fetch error for {token_address[:8]}: {e}")
-            return None
-
-
-async def fetch_token_data(token_address: str) -> Optional[Dict]:
-    """Standalone function to fetch token data from DexScreener."""
-    tracker = TokenTracker()
-    data = await tracker._fetch_dexscreener(token_address)
-
-    if not data:
-        return None
-
-    # Also try to get symbol/name
-    try:
-        url = f"https://api.dexscreener.com/latest/dex/tokens/{token_address}"
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, timeout=10) as resp:
-                if resp.status == 200:
-                    result = await resp.json()
-                    pairs = result.get('pairs', [])
-                    if pairs:
-                        pair = pairs[0]
-                        data['symbol'] = pair.get('baseToken', {}).get('symbol', 'UNKNOWN')
-                        data['name'] = pair.get('baseToken', {}).get('name', 'Unknown')
-                        data['holders'] = 0  # DexScreener doesn't provide this
-    except Exception:
-        pass
-
-    return data
