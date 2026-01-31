@@ -437,25 +437,85 @@ async def run_daily_pipeline():
     logger.info("")
 
     try:
-        # Step 1: Sync data from database to training file
-        logger.info("📊 STEP 1: Syncing data from database...")
+        # Step 1: Merge database signals with external data
+        logger.info("📊 STEP 1: Merging database signals with external data...")
         try:
-            from ralph.data_manager import DataManager
-            dm = DataManager(db)
-            data = await dm.get_training_data()
-
-            # Write to training file
             import json
+            import os
+            from ralph.data_manager import DataManager
+
             training_file = 'data/historical_training_data.json'
+
+            # Load existing external data (if any)
+            existing_tokens = []
+            existing_addresses = set()
+            if os.path.exists(training_file):
+                try:
+                    with open(training_file, 'r') as f:
+                        existing_data = json.load(f)
+                        existing_tokens = existing_data.get('tokens', [])
+                        existing_addresses = {t.get('token_address') for t in existing_tokens}
+                        logger.info(f"   📂 Loaded {len(existing_tokens)} existing tokens from file")
+                except Exception as e:
+                    logger.warning(f"   ⚠️ Could not load existing data: {e}")
+
+            # Get database signals
+            dm = DataManager(db)
+            db_signals = await dm.get_training_data()
+            logger.info(f"   🗄️ Fetched {len(db_signals)} signals from database")
+
+            # Convert DB signals to training format and merge
+            db_tokens = []
+            for d in db_signals:
+                token = {
+                    'token_address': d.get('token_address'),
+                    'symbol': d.get('token_symbol'),
+                    'outcome': d.get('outcome'),
+                    'conviction_score': d.get('conviction_score'),
+                    'entry_price': d.get('entry_price'),
+                    'max_price_reached': d.get('max_price_reached'),
+                    'max_roi': d.get('max_roi') or d.get('roi'),
+                    'market_cap': d.get('market_cap'),
+                    'liquidity': d.get('liquidity'),
+                    'volume_24h': d.get('volume_24h'),
+                    'unique_buyers': d.get('unique_buyers'),
+                    'buys_24h': d.get('buys_24h'),
+                    'sells_24h': d.get('sells_24h'),
+                    'bonding_curve_pct': d.get('bonding_curve_pct'),
+                    'buy_percentage': d.get('buy_percentage'),
+                    'kol_wallets': d.get('kol_wallets'),
+                    'kol_count': len(d.get('kol_wallets') or []),
+                    'narrative_tags': d.get('narrative_tags'),
+                    'created_at': str(d.get('created_at')),
+                    'source': 'database'
+                }
+                db_tokens.append(token)
+
+            # Merge: DB signals take priority (fresher data)
+            db_addresses = {t['token_address'] for t in db_tokens}
+
+            # Keep external tokens that aren't in our DB
+            external_only = [t for t in existing_tokens if t.get('token_address') not in db_addresses]
+
+            # Combined: our signals + external data we don't have
+            combined_tokens = db_tokens + external_only
+
+            # Write merged data
+            os.makedirs('data', exist_ok=True)
             with open(training_file, 'w') as f:
                 json.dump({
-                    'tokens': [{'outcome': d['outcome'], **{k: v for k, v in d.items() if k != 'outcome'}} for d in data],
-                    'total_tokens': len(data),
+                    'tokens': combined_tokens,
+                    'total_tokens': len(combined_tokens),
+                    'db_signals': len(db_tokens),
+                    'external_tokens': len(external_only),
                     'last_sync': datetime.utcnow().isoformat()
                 }, f, indent=2, default=str)
-            logger.info(f"   ✅ Synced {len(data)} signals from database")
+
+            logger.info(f"   ✅ Merged: {len(db_tokens)} DB signals + {len(external_only)} external = {len(combined_tokens)} total")
         except Exception as e:
             logger.warning(f"   ⚠️ Data sync skipped: {e}")
+            import traceback
+            logger.warning(traceback.format_exc())
         logger.info("")
 
         # Step 2: ML model retraining (if enough data)
