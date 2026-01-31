@@ -322,17 +322,15 @@ class ConvictionEngine:
             twitter_data = {}
 
             # ================================================================
-            # PHASE 3.5: TELEGRAM CALLS - FREE (moved before early exit)
+            # PHASE 3.5: TELEGRAM CALLS - DISABLED (2026-01-31)
             # ================================================================
-            # FIX: Was Phase 3.7 AFTER early exit - $STARTUP missed because
-            # TG groups called it but early exit at mid_total < 20 skipped the check
-            # Check Telegram calls as soon as KOL buys any token
-            # Variable scoring based on mention intensity and recency
+            # TG calls removed from scoring - too easily gamed by coordinated
+            # groups shilling rugs. All weights set to 0 in config.
 
             social_confirmation_score = 0
             telegram_call_data = {}
 
-            if config.ENABLE_TELEGRAM_SCRAPER:
+            if config.ENABLE_TELEGRAM_SCRAPER:  # DISABLED in config
                 try:
                     # Import from main
                     from main import telegram_calls_cache
@@ -416,14 +414,13 @@ class ConvictionEngine:
             mid_total += social_confirmation_score
 
             # ================================================================
-            # PHASE 3.6: MULTI-CALL BONUS (persistent telegram data)
+            # PHASE 3.6: MULTI-CALL BONUS - DISABLED (2026-01-31)
             # ================================================================
-            # Award bonus points for repeated calls from multiple groups
-            # This indicates coordinated/organic buzz across the community
+            # Removed - multi-call from TG groups was being gamed
 
             multi_call_bonus = 0
 
-            if config.ENABLE_TELEGRAM_SCRAPER and self.database:
+            if config.ENABLE_TELEGRAM_SCRAPER and self.database:  # DISABLED
                 try:
                     # Query persistent database for call stats (last 30 min)
                     call_stats = await self.database.get_telegram_call_stats(
@@ -461,14 +458,13 @@ class ConvictionEngine:
 
             mid_total += multi_call_bonus
 
-            # Early exit if mid score too low (now includes Telegram call boost)
-            # FIX: Moved after Telegram calls so called tokens don't get early-exited
+            # Early exit if mid score too low
             if mid_total < 20:
                 logger.info(f"   ⏭️  Mid Score: {mid_total} - Too low for further analysis")
                 return {
                     'score': mid_total,
                     'passed': False,
-                    'reason': 'Score too low after Telegram calls',
+                    'reason': 'Score too low for further analysis',
                     'token_address': token_address,
                     'token_data': token_data,
                     'narrative_data': narrative_data,
