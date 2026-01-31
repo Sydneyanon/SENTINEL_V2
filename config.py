@@ -670,7 +670,7 @@ BUYER_TRACKING_WINDOW = 15  # Minutes to track unique buyers
 # LOGGING
 # =============================================================================
 
-LOG_LEVEL = "INFO"          # Options: DEBUG, INFO, WARNING, ERROR
+LOG_LEVEL = "DEBUG"         # Options: DEBUG, INFO, WARNING, ERROR (DEBUG enabled for organic scanner diagnostics)
 LOG_TO_FILE = True
 LOG_FILE = "prometheus.log"
 
