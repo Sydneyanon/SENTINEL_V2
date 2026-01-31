@@ -71,6 +71,7 @@ class AdminBot:
             self.app.add_handler(CommandHandler("resume", self._cmd_resume, filters=admin_filter))
             self.app.add_handler(CommandHandler("winrate", self._cmd_winrate, filters=admin_filter))
             self.app.add_handler(CommandHandler("winratekol", self._cmd_winrate_kol, filters=admin_filter))
+            self.app.add_handler(CommandHandler("kolstats", self._cmd_kolstats, filters=admin_filter))
             self.app.add_handler(CommandHandler("analyze", self._cmd_analyze, filters=admin_filter))
             self.app.add_handler(CommandHandler("testbanner", self._cmd_testbanner, filters=admin_filter))
             self.app.add_handler(CommandHandler("setmultiplier", self._cmd_setmultiplier, filters=admin_filter))
@@ -204,6 +205,7 @@ class AdminBot:
 /performance - Recent signal performance
 /winrate - KOL vs On-Chain win rate comparison
 /winratekol - Organic vs Organic+KOL win rate
+/kolstats - ALL KOLs ranked by performance (find bad ones)
 /missed - Tracked tokens not signaled (potential missed runners)
 
 <b>Monitoring:</b>
@@ -225,8 +227,11 @@ class AdminBot:
 
 <b>Data &amp; ML:</b>
 /dataset - ML training dataset stats
-/collect - Run daily token collection now
+/collect - Collect yesterday's missed winners
+/syncmldata - Sync database signals to ML training
 /ml - Retrain ML model with latest data
+/automl - Toggle auto ML retraining (daily 2AM UTC)
+/analyze - Deep performance analysis with recommendations
 
 <b>Control:</b>
 /pause - Pause signal posting
@@ -1535,6 +1540,110 @@ class AdminBot:
 
         except Exception as e:
             logger.error(f"❌ Error in /winratekol: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            await self._send_response(update, context, f"❌ Error: {str(e)}")
+
+    async def _cmd_kolstats(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Show ALL KOLs ranked by performance (best to worst)"""
+        try:
+            if not self.database or not self.database.pool:
+                await self._send_response(update, context, "❌ Database not available")
+                return
+
+            await self._send_response(update, context, "📊 Analyzing KOL performance...")
+
+            async with self.database.pool.acquire() as conn:
+                # Get ALL KOLs with their performance stats
+                all_kols = await conn.fetch("""
+                    SELECT
+                        swa.wallet_name,
+                        swa.wallet_address,
+                        COUNT(DISTINCT swa.token_address) as tokens,
+                        SUM(CASE WHEN s.outcome IN ('2x','5x','10x','50x','100x') THEN 1 ELSE 0 END) as wins,
+                        SUM(CASE WHEN s.outcome = 'rug' THEN 1 ELSE 0 END) as rugs,
+                        SUM(CASE WHEN s.outcome = 'loss' THEN 1 ELSE 0 END) as losses,
+                        SUM(CASE WHEN s.outcome IS NULL THEN 1 ELSE 0 END) as pending,
+                        ROUND(AVG(CASE WHEN s.max_roi IS NOT NULL THEN s.max_roi END)::numeric, 2) as avg_roi
+                    FROM smart_wallet_activity swa
+                    LEFT JOIN signals s ON s.token_address = swa.token_address AND s.signal_posted = TRUE
+                    WHERE swa.transaction_type = 'buy'
+                    GROUP BY swa.wallet_name, swa.wallet_address
+                    HAVING COUNT(DISTINCT swa.token_address) >= 1
+                    ORDER BY
+                        CASE WHEN SUM(CASE WHEN s.outcome IN ('2x','5x','10x','50x','100x') THEN 1 ELSE 0 END) +
+                             SUM(CASE WHEN s.outcome IN ('rug','loss') THEN 1 ELSE 0 END) > 0
+                        THEN SUM(CASE WHEN s.outcome IN ('2x','5x','10x','50x','100x') THEN 1 ELSE 0 END)::float /
+                             (SUM(CASE WHEN s.outcome IN ('2x','5x','10x','50x','100x') THEN 1 ELSE 0 END) +
+                              SUM(CASE WHEN s.outcome IN ('rug','loss') THEN 1 ELSE 0 END))
+                        ELSE 0 END DESC
+                """)
+
+            if not all_kols:
+                await self._send_response(update, context, "ℹ️ No KOL activity found in database")
+                return
+
+            # Build response
+            r = "📊 <b>ALL KOL PERFORMANCE</b>\n"
+            r += "<i>Ranked by win rate (best to worst)</i>\n\n"
+
+            # Separate into tiers
+            good_kols = []
+            bad_kols = []
+            no_data = []
+
+            for row in all_kols:
+                decided = row['wins'] + row['losses'] + row['rugs']
+                if decided == 0:
+                    no_data.append(row)
+                else:
+                    wr = (row['wins'] / decided * 100)
+                    row_data = {**dict(row), 'wr': wr, 'decided': decided}
+                    if wr >= 30:
+                        good_kols.append(row_data)
+                    else:
+                        bad_kols.append(row_data)
+
+            # Good performers
+            if good_kols:
+                r += "<b>✅ GOOD PERFORMERS (30%+ WR)</b>\n"
+                for kol in good_kols[:10]:
+                    name = (kol['wallet_name'] or 'Unknown')[:15]
+                    emoji = "🟢" if kol['wr'] >= 50 else "🟡"
+                    r += f"{emoji} {name}: {kol['wr']:.0f}% ({kol['wins']}W/{kol['losses']}L/{kol['rugs']}R)\n"
+                r += "\n"
+
+            # Bad performers (the ones dragging down WR)
+            if bad_kols:
+                r += "<b>❌ UNDERPERFORMERS (under 30% WR)</b>\n"
+                # Sort by most damage (most losses/rugs)
+                bad_kols.sort(key=lambda x: x['losses'] + x['rugs'], reverse=True)
+                for kol in bad_kols[:10]:
+                    name = (kol['wallet_name'] or 'Unknown')[:15]
+                    addr = kol['wallet_address'][:8] if kol['wallet_address'] else ''
+                    r += f"🔴 {name}: {kol['wr']:.0f}% ({kol['wins']}W/{kol['losses']}L/{kol['rugs']}R)\n"
+                    r += f"   <code>{addr}...</code>\n"
+                r += "\n"
+
+            # Summary
+            total_kols = len(good_kols) + len(bad_kols) + len(no_data)
+            total_wins = sum(k.get('wins', 0) for k in good_kols + bad_kols)
+            total_losses = sum(k.get('losses', 0) + k.get('rugs', 0) for k in good_kols + bad_kols)
+
+            r += f"<b>📈 SUMMARY</b>\n"
+            r += f"Total KOLs tracked: {total_kols}\n"
+            r += f"Good performers: {len(good_kols)} | Bad: {len(bad_kols)} | No data: {len(no_data)}\n"
+            if total_wins + total_losses > 0:
+                overall_wr = total_wins / (total_wins + total_losses) * 100
+                r += f"Overall KOL win rate: {overall_wr:.0f}%\n"
+
+            if bad_kols:
+                r += f"\n💡 <i>Consider removing underperformers with /removewallet</i>"
+
+            await self._send_response(update, context, r)
+
+        except Exception as e:
+            logger.error(f"❌ Error in /kolstats: {e}")
             import traceback
             logger.error(traceback.format_exc())
             await self._send_response(update, context, f"❌ Error: {str(e)}")
