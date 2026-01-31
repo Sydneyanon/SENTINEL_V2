@@ -466,32 +466,71 @@ class AdminBot:
                 insights = hidden.get('insights', [])
                 time_patterns = hidden.get('time_patterns', {})
                 narrative = hidden.get('narrative_analysis', {})
+                baseline_wr = time_patterns.get('baseline_wr', 27)
 
-                if time_patterns.get('best_hours') or time_patterns.get('best_days') or insights:
-                    r += "<b>🔍 HIDDEN PATTERNS:</b>\n"
+                r += "<b>⏰ HOURLY BREAKDOWN (UTC):</b>\n"
 
-                    # Time patterns
-                    if time_patterns.get('best_hours'):
-                        hours = time_patterns['best_hours'][:2]
-                        r += f"⏰ Best hours: {', '.join(f'{h}:00 ({wr:.0f}%)' for h, wr, _ in hours)}\n"
-                    if time_patterns.get('worst_hours'):
-                        hours = time_patterns['worst_hours'][:2]
-                        r += f"⏰ Worst hours: {', '.join(f'{h}:00 ({wr:.0f}%)' for h, wr, _ in hours)}\n"
-                    if time_patterns.get('best_days'):
-                        days = time_patterns['best_days']
-                        r += f"📅 Best days: {', '.join(f'{d} ({wr:.0f}%)' for d, wr, _ in days)}\n"
+                # Full hourly breakdown
+                hourly = time_patterns.get('hourly_breakdown', [])
+                if hourly:
+                    r += "<pre>"
+                    r += "Hr │ WR  │n  ║Hr │ WR  │n\n"
+                    r += "───┼─────┼───╬───┼─────┼───\n"
+                    # Display hours in 2 columns (0-11 and 12-23)
+                    for i in range(12):
+                        h1, wr1, n1 = hourly[i] if i < len(hourly) else (i, None, 0)
+                        h2, wr2, n2 = hourly[i+12] if i+12 < len(hourly) else (i+12, None, 0)
 
-                    # Winning narratives
-                    if narrative.get('winners'):
-                        winners = narrative['winners'][:3]
-                        r += f"📖 Hot narratives: {', '.join(f'{t} ({wr:.0f}%)' for t, wr, _ in winners)}\n"
+                        # Column 1
+                        if wr1 is not None:
+                            e1 = "🟢" if wr1 >= baseline_wr + 10 else "🔴" if wr1 <= baseline_wr - 10 else "🟡"
+                            c1 = f"{h1:02d}│{e1}{wr1:3.0f}%│{n1:2d}"
+                        else:
+                            c1 = f"{h1:02d}│ --  │{n1:2d}"
 
-                    # Key insights
-                    if insights:
-                        for insight in insights[:2]:
-                            r += f"💡 {insight}\n"
+                        # Column 2
+                        if wr2 is not None:
+                            e2 = "🟢" if wr2 >= baseline_wr + 10 else "🔴" if wr2 <= baseline_wr - 10 else "🟡"
+                            c2 = f"{h2:02d}│{e2}{wr2:3.0f}%│{n2:2d}"
+                        else:
+                            c2 = f"{h2:02d}│ --  │{n2:2d}"
 
-                    r += "\n"
+                        r += f"{c1}║{c2}\n"
+                    r += "</pre>"
+                    r += f"🟢>{baseline_wr+10:.0f}% 🟡avg 🔴<{baseline_wr-10:.0f}%\n\n"
+
+                # Full daily breakdown
+                daily = time_patterns.get('daily_breakdown', [])
+                if daily:
+                    r += "<b>📅 DAILY BREAKDOWN:</b>\n"
+                    r += "<pre>"
+                    for day_name, wr, count in daily:
+                        if wr is not None:
+                            e = "🟢" if wr >= baseline_wr + 10 else "🔴" if wr <= baseline_wr - 10 else "🟡"
+                            r += f"{day_name}: {e}{wr:5.1f}% ({count:3d})\n"
+                        else:
+                            r += f"{day_name}:   --   ({count:3d})\n"
+                    r += "</pre>\n"
+
+                # Best/worst summary
+                if time_patterns.get('best_hours'):
+                    hours = time_patterns['best_hours'][:3]
+                    r += f"✅ Best: {', '.join(f'{h}:00 ({wr:.0f}%)' for h, wr, _ in hours)}\n"
+                if time_patterns.get('worst_hours'):
+                    hours = time_patterns['worst_hours'][:3]
+                    r += f"⚠️ Worst: {', '.join(f'{h}:00 ({wr:.0f}%)' for h, wr, _ in hours)}\n"
+
+                # Winning narratives
+                if narrative.get('winners'):
+                    winners = narrative['winners'][:3]
+                    r += f"📖 Hot: {', '.join(f'{t} ({wr:.0f}%)' for t, wr, _ in winners)}\n"
+
+                # Key insights
+                if insights:
+                    for insight in insights[:2]:
+                        r += f"💡 {insight}\n"
+
+                r += "\n"
 
             # Recommendations
             recs = results.get('recommendations', [])

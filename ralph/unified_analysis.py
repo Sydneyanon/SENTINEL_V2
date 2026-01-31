@@ -660,40 +660,97 @@ class RalphAnalysis:
                 except Exception:
                     pass
 
-        # Find best/worst hours
+        # Calculate win rate for all hours and classify
+        day_names = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+
+        # Process all 24 hours
+        all_hours = []
         best_hours = []
         worst_hours = []
-        for hour, stats in hour_stats.items():
-            if stats['total'] >= 5:
+        for hour in range(24):
+            stats = hour_stats.get(hour, {'total': 0, 'wins': 0})
+            if stats['total'] >= 2:  # Lower threshold to show more data
                 wr = stats['wins'] / stats['total'] * 100
                 stats['win_rate'] = wr
-                if wr >= baseline_wr + 10:
-                    best_hours.append((hour, wr, stats['total']))
-                elif wr <= baseline_wr - 10:
-                    worst_hours.append((hour, wr, stats['total']))
+                all_hours.append((hour, wr, stats['total']))
+                if stats['total'] >= 5:  # Only classify with enough data
+                    if wr >= baseline_wr + 10:
+                        best_hours.append((hour, wr, stats['total']))
+                    elif wr <= baseline_wr - 10:
+                        worst_hours.append((hour, wr, stats['total']))
+            else:
+                all_hours.append((hour, None, stats['total']))  # Not enough data
 
         best_hours.sort(key=lambda x: x[1], reverse=True)
         worst_hours.sort(key=lambda x: x[1])
 
+        # Log FULL hourly breakdown
+        logger.info("")
+        logger.info("      📊 FULL HOURLY BREAKDOWN (UTC):")
+        logger.info("      ─────────────────────────────────────")
+
+        # Display in 4 rows of 6 hours each
+        for row_start in range(0, 24, 6):
+            row_hours = all_hours[row_start:row_start + 6]
+            hour_strs = []
+            for hour, wr, count in row_hours:
+                if wr is not None:
+                    if wr >= baseline_wr + 10:
+                        emoji = "🟢"
+                    elif wr <= baseline_wr - 10:
+                        emoji = "🔴"
+                    else:
+                        emoji = "🟡"
+                    hour_strs.append(f"{hour:02d}:{emoji}{wr:3.0f}%({count})")
+                else:
+                    hour_strs.append(f"{hour:02d}: --  ({count})")
+            logger.info(f"      {' | '.join(hour_strs)}")
+
+        logger.info("      ─────────────────────────────────────")
+        logger.info(f"      🟢 = >{baseline_wr+10:.0f}% WR | 🟡 = {baseline_wr-10:.0f}-{baseline_wr+10:.0f}% | 🔴 = <{baseline_wr-10:.0f}%")
+
         if best_hours:
-            logger.info(f"      ✅ Best hours (UTC): {', '.join(f'{h}:00 ({wr:.0f}%)' for h, wr, _ in best_hours[:3])}")
+            logger.info(f"      ✅ Best: {', '.join(f'{h}:00 ({wr:.0f}%)' for h, wr, _ in best_hours[:3])}")
             results['time_patterns']['best_hours'] = best_hours[:3]
         if worst_hours:
-            logger.info(f"      ⚠️ Worst hours (UTC): {', '.join(f'{h}:00 ({wr:.0f}%)' for h, wr, _ in worst_hours[:3])}")
+            logger.info(f"      ⚠️ Worst: {', '.join(f'{h}:00 ({wr:.0f}%)' for h, wr, _ in worst_hours[:3])}")
             results['time_patterns']['worst_hours'] = worst_hours[:3]
 
-        # Find best/worst days
-        day_names = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+        # Store full hourly data
+        results['time_patterns']['hourly_breakdown'] = all_hours
+
+        # Process all 7 days
+        logger.info("")
+        logger.info("      📊 FULL DAILY BREAKDOWN:")
+        logger.info("      ─────────────────────────────────────")
+
+        all_days = []
         best_days = []
         worst_days = []
-        for day, stats in day_stats.items():
-            if stats['total'] >= 5:
+        for day_idx in range(7):
+            stats = day_stats.get(day_idx, {'total': 0, 'wins': 0})
+            day_name = day_names[day_idx]
+            if stats['total'] >= 2:
                 wr = stats['wins'] / stats['total'] * 100
                 stats['win_rate'] = wr
+                all_days.append((day_name, wr, stats['total']))
+
                 if wr >= baseline_wr + 10:
-                    best_days.append((day_names[day], wr, stats['total']))
+                    emoji = "🟢"
+                    if stats['total'] >= 5:
+                        best_days.append((day_name, wr, stats['total']))
                 elif wr <= baseline_wr - 10:
-                    worst_days.append((day_names[day], wr, stats['total']))
+                    emoji = "🔴"
+                    if stats['total'] >= 5:
+                        worst_days.append((day_name, wr, stats['total']))
+                else:
+                    emoji = "🟡"
+                logger.info(f"      {emoji} {day_name}: {wr:5.1f}% WR ({stats['total']:3d} signals)")
+            else:
+                all_days.append((day_name, None, stats['total']))
+                logger.info(f"      ➖ {day_name}: insufficient data ({stats['total']} signals)")
+
+        logger.info("      ─────────────────────────────────────")
 
         if best_days:
             logger.info(f"      ✅ Best days: {', '.join(f'{d} ({wr:.0f}%)' for d, wr, _ in best_days)}")
@@ -702,8 +759,11 @@ class RalphAnalysis:
             logger.info(f"      ⚠️ Worst days: {', '.join(f'{d} ({wr:.0f}%)' for d, wr, _ in worst_days)}")
             results['time_patterns']['worst_days'] = worst_days
 
+        # Store full daily data
+        results['time_patterns']['daily_breakdown'] = all_days
         results['time_patterns']['hour_stats'] = hour_stats
         results['time_patterns']['day_stats'] = day_stats
+        results['time_patterns']['baseline_wr'] = baseline_wr
 
         # 2. NARRATIVE ANALYSIS - Which narratives win?
         logger.info("")
