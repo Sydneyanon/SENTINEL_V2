@@ -207,7 +207,7 @@ ORGANIC_SCANNER = {
     'enabled': True,
     'min_unique_buyers': 50,       # Raised from 30 to reduce rugs (2026-01-31)
     'min_buy_ratio': 0.65,         # Raised from 0.55 to filter weak momentum (2026-01-31)
-    'min_buy_sell_ratio': 2.0,     # NEW: Ralph shows ≥2.0 B/S ratio gives +5% WR
+    'min_buy_sell_ratio': 1.0,     # Reverted to 1.0 (was 2.0 - too strict, blocking signals)
     'max_bundle_ratio': 0.20,      # Max 20% of buys from same block (anti-bundle)
     'watch_window_seconds': 300,   # Watch tokens for 5 min before deciding
     'min_bonding_pct': 40,         # Raised from 20 → 40 (Ralph: higher bonding wins more)
