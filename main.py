@@ -459,6 +459,16 @@ async def run_daily_pipeline():
         logger.info("✅ Ralph analysis complete")
         logger.info("")
 
+        # Step 4: Ralph threshold optimization
+        logger.info("🎯 STEP 4: Running Ralph threshold optimizer...")
+        try:
+            from ralph.optimizer import run_optimization
+            await run_optimization(db, days=7)
+            logger.info("✅ Ralph optimization complete")
+        except Exception as e:
+            logger.warning(f"⚠️ Optimization skipped: {e}")
+        logger.info("")
+
         logger.info("=" * 80)
         logger.info("✅ DAILY PIPELINE COMPLETE")
         logger.info("=" * 80)
