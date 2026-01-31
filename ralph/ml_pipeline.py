@@ -346,9 +346,11 @@ class MLPipeline:
         logger.info(f"\n✅ Model trained!")
         logger.info(f"   Accuracy: {accuracy*100:.1f}%")
 
-        # Detailed report
-        class_names = ['Rug/Fail', '2x', '10x', '50x', '100x+']
-        report = classification_report(y_test, y_pred, target_names=class_names, zero_division=0)
+        # Detailed report - use labels parameter to handle missing classes
+        all_class_names = ['Rug/Fail', '2x', '10x', '50x', '100x+']
+        unique_labels = np.unique(np.concatenate([y_test, y_pred]))
+        class_names = [all_class_names[i] for i in unique_labels if i < len(all_class_names)]
+        report = classification_report(y_test, y_pred, labels=unique_labels, target_names=class_names, zero_division=0)
         logger.info(f"\n{report}")
 
         # Feature importance
