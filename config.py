@@ -276,14 +276,14 @@ HOLDER_WEIGHTS = {
 
 # Twitter and LunarCrush scoring removed (no budget) - see lines 418-419
 
-# Telegram Social Confirmation Scoring (FREE - 0-5 points, 100-point budget)
-# Applies to tracked tokens as social confirmation
+# Telegram Social Confirmation Scoring - DISABLED
+# TG calls removed from scoring - too easily gamed (2026-01-31)
 TELEGRAM_CONFIRMATION_WEIGHTS = {
-    'high_intensity': 5,    # 6+ mentions OR 3+ groups
-    'medium_intensity': 3,  # 3-5 mentions OR growing buzz
-    'low_intensity': 1,     # 1-2 mentions
-    'age_decay': 0.5,       # 50% reduction if call >2 hours old
-    'max_social_total': 5   # Cap total social score
+    'high_intensity': 0,    # DISABLED
+    'medium_intensity': 0,  # DISABLED
+    'low_intensity': 0,     # DISABLED
+    'age_decay': 0,         # DISABLED
+    'max_social_total': 0   # DISABLED
 }
 
 # Telegram Call-Triggered Tracking (Optional)
@@ -657,8 +657,8 @@ ENABLE_PERFORMANCE_TRACKING = True
 ENABLE_MILESTONE_ALERTS = True
 ENABLE_LUNARCRUSH = False   # LunarCrush disabled (no budget for API)
 ENABLE_TWITTER = False      # Twitter disabled (no budget for API)
-ENABLE_TELEGRAM_SCRAPER = True  # Telegram social confirmation - ENABLED!
-ENABLE_BUILTIN_TELEGRAM_MONITOR = True  # Built-in Telegram monitor - ENABLED!
+ENABLE_TELEGRAM_SCRAPER = False  # DISABLED - TG calls too easily gamed (2026-01-31)
+ENABLE_BUILTIN_TELEGRAM_MONITOR = False  # DISABLED - not using TG for scoring anymore
 
 # =============================================================================
 # NARRATIVE DETECTION (2026 HOT TRENDS)
