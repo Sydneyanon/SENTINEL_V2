@@ -53,6 +53,11 @@ class AdminBot:
             # Register command handlers (admin only)
             self.app.add_handler(CommandHandler("start", self._cmd_help, filters=admin_filter))
             self.app.add_handler(CommandHandler("help", self._cmd_help, filters=admin_filter))
+
+            # NEW: Unified commands
+            self.app.add_handler(CommandHandler("data", self._cmd_data, filters=admin_filter))
+            self.app.add_handler(CommandHandler("ralph", self._cmd_ralph, filters=admin_filter))
+
             self.app.add_handler(CommandHandler("stats", self._cmd_stats, filters=admin_filter))
             self.app.add_handler(CommandHandler("active", self._cmd_active, filters=admin_filter))
             self.app.add_handler(CommandHandler("performance", self._cmd_performance, filters=admin_filter))
@@ -201,27 +206,27 @@ class AdminBot:
         help_text = """
 🤖 <b>PROMETHEUS ADMIN COMMANDS</b>
 
+<b>🎯 CORE (Start Here):</b>
+/data - All data stats in one place
+/ralph - Full analysis + recommendations
+/ml - Train ML model (auto-syncs data)
+
 <b>Performance:</b>
 /stats - Overall system statistics
 /performance - Recent signal performance
-/winrate - KOL vs On-Chain win rate comparison
-/winratekol - Organic vs Organic+KOL win rate
-/kolstats - ALL KOLs ranked by performance (find bad ones)
-/missed - Tracked tokens not signaled (potential missed runners)
+/toprunners - All 2x+ winners
+/kolstats - KOL performance breakdown
 
 <b>Monitoring:</b>
 /active - Currently tracked tokens
 /health - System health check
-/cache - Telegram calls cache status
-/whales - Discovered whale wallets
 /config - Live scoring config values
 
 <b>Wallet Management:</b>
 /wallets - View all tracked wallets
-/addwallet &lt;name&gt; &lt;address&gt; - Add wallet to tracking
-/removewallet &lt;address&gt; - Remove wallet from tracking
-/renamewallet &lt;address&gt; &lt;name&gt; - Rename a wallet
-/syncwebhook - Sync all wallets to Helius webhook
+/addwallet &lt;name&gt; &lt;address&gt; - Add wallet
+/removewallet &lt;address&gt; - Remove wallet
+/syncwebhook - Sync wallets to Helius
 /listwebhooks - Show all registered Helius webhooks
 /clearwebhooks - Delete all wallet webhooks (fresh start)
 /countwallets - Debug wallet counts (DB vs Helius)
@@ -249,6 +254,179 @@ class AdminBot:
 /help - Show this message
 """
         await self._send_response(update, context, help_text)
+
+    async def _cmd_data(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Unified data status command - all data stats in one place"""
+        try:
+            if not self.database or not self.database.pool:
+                await self._send_response(update, context, "❌ Database not available")
+                return
+
+            from ralph.data_manager import DataManager
+            dm = DataManager(self.database)
+            status = await dm.get_status()
+
+            if status.get('error'):
+                await self._send_response(update, context, f"❌ {status['error']}")
+                return
+
+            # Build response
+            r = "📊 <b>DATA STATUS</b>\n\n"
+
+            # Signals
+            r += "<b>📈 Signals:</b>\n"
+            r += f"   Total: {status['total_signals']}\n"
+            r += f"   With outcomes: {status['with_outcomes']}\n"
+            r += f"   Pending: {status['pending_outcomes']}\n"
+            r += f"   Last 24h: {status['recent_24h']}\n\n"
+
+            # Outcomes breakdown
+            if status['outcome_distribution']:
+                r += "<b>📊 Outcomes:</b>\n"
+                dist = status['outcome_distribution']
+                wins = sum(dist.get(k, 0) for k in ['2x', '5x', '10x', '50x', '100x'])
+                rugs = dist.get('rug', 0)
+                losses = dist.get('loss', 0)
+                r += f"   ✅ Wins: {wins} | ❌ Rugs: {rugs} | 📉 Loss: {losses}\n\n"
+
+            # KOL & Wallets
+            r += "<b>👑 KOL Data:</b>\n"
+            r += f"   KOL-backed signals: {status['kol_signals']}\n"
+            r += f"   Wallet activity records: {status['wallet_activity']}\n"
+            r += f"   Tracked wallets: {status['tracked_wallets']}\n\n"
+
+            # ML Status
+            r += "<b>🤖 ML Status:</b>\n"
+            r += f"   {status['ml_status']}\n"
+            r += f"   Min required: {status['min_for_ml']} signals with outcomes\n\n"
+
+            if status['ml_ready']:
+                r += "💡 <i>Run /ml to train model</i>"
+            else:
+                r += "💡 <i>Keep collecting data, or run /ralph for analysis</i>"
+
+            await self._send_response(update, context, r)
+
+        except Exception as e:
+            logger.error(f"❌ Error in /data: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            await self._send_response(update, context, f"❌ Error: {str(e)}")
+
+    async def _cmd_ralph(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Unified Ralph analysis - all analysis in one place"""
+        try:
+            if not self.database or not self.database.pool:
+                await self._send_response(update, context, "❌ Database not available")
+                return
+
+            # Parse days argument
+            days = 7
+            if context.args:
+                try:
+                    days = int(context.args[0])
+                    days = min(max(days, 1), 30)
+                except ValueError:
+                    pass
+
+            await self._send_response(update, context,
+                f"🤖 <b>Running Ralph Analysis...</b>\n"
+                f"Analyzing last {days} days. This may take a moment.")
+
+            # Run in background
+            asyncio.create_task(self._run_ralph_background(update, context, days))
+
+        except Exception as e:
+            logger.error(f"❌ Error in /ralph: {e}")
+            await self._send_response(update, context, f"❌ Error: {str(e)}")
+
+    async def _run_ralph_background(self, update: Update, context: ContextTypes.DEFAULT_TYPE, days: int):
+        """Run Ralph analysis in background"""
+        try:
+            from ralph.unified_analysis import RalphAnalysis
+
+            analyzer = RalphAnalysis(self.database)
+            results = await analyzer.full_analysis(days)
+
+            if results.get('error') == 'insufficient_data':
+                await self._send_response(update, context,
+                    f"⚠️ <b>Insufficient data</b>\n\n"
+                    f"Only {results.get('signal_count', 0)} signals.\n"
+                    f"Need 10+ for analysis.")
+                return
+
+            if results.get('error'):
+                await self._send_response(update, context,
+                    f"❌ Analysis failed: {results['error']}")
+                return
+
+            # Build response
+            r = "🤖 <b>RALPH ANALYSIS</b>\n\n"
+
+            # Overall
+            overall = results.get('overall', {})
+            if overall:
+                wr = overall.get('win_rate', 0)
+                rr = overall.get('rug_rate', 0)
+                emoji = "🟢" if wr >= 40 else "🟡" if wr >= 25 else "🔴"
+
+                r += f"<b>📈 Overall ({days}d):</b>\n"
+                r += f"{emoji} Win Rate: {wr:.0f}% ({overall.get('wins', 0)}W / {overall.get('rugs', 0)}R)\n"
+                r += f"   Avg ROI: {overall.get('avg_roi', 1):.1f}x | Best: {overall.get('max_roi', 1):.0f}x\n\n"
+
+            # Threshold recommendations
+            thresh = results.get('threshold_analysis', {})
+            if thresh.get('pre_grad', {}).get('thresholds'):
+                r += "<b>🎯 Pre-grad Thresholds:</b>\n"
+                pre = thresh['pre_grad']
+                for t, data in sorted(pre['thresholds'].items()):
+                    emoji = "🟢" if data['win_rate'] >= 50 else "🟡" if data['win_rate'] >= 35 else "🔴"
+                    curr = " ←" if t == pre.get('current') else ""
+                    opt = " 🎯" if t == pre.get('optimal') and t != pre.get('current') else ""
+                    r += f"{emoji} {t}: {data['win_rate']:.0f}% ({data['signals']}){curr}{opt}\n"
+                r += "\n"
+
+            # KOL impact
+            kol = results.get('kol_analysis', {}).get('kol_vs_organic', {})
+            if kol.get('kol') and kol.get('organic'):
+                kol_wr = kol['kol'].get('win_rate', 0)
+                org_wr = kol['organic'].get('win_rate', 0)
+                diff = kol_wr - org_wr
+
+                r += "<b>👑 KOL Impact:</b>\n"
+                if diff > 5:
+                    r += f"   ✅ KOL adds +{diff:.0f}% WR\n"
+                elif diff < -5:
+                    r += f"   ⚠️ KOL hurts by {diff:.0f}% WR\n"
+                else:
+                    r += f"   ➖ Minimal impact ({diff:+.0f}%)\n"
+                r += "\n"
+
+            # Recommendations
+            recs = results.get('recommendations', [])
+            if recs:
+                r += "<b>💡 Recommendations:</b>\n"
+                for rec in recs[:5]:
+                    if rec['type'] == 'threshold':
+                        r += f"• {rec['setting']}: {rec['current']} → {rec['recommended']}\n"
+                    elif rec['type'] == 'kol':
+                        r += f"• Remove: {rec['wallet']} ({rec['reason']})\n"
+                r += "\n"
+
+            # Health score
+            health = results.get('health_score', {})
+            if health:
+                r += f"<b>📊 Health:</b> {health.get('score', 50)}/100 ({health.get('grade', 'N/A')})\n"
+
+            r += "\n<i>Full analysis logged to Railway</i>"
+
+            await self._send_response(update, context, r)
+
+        except Exception as e:
+            logger.error(f"❌ Ralph analysis failed: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            await self._send_response(update, context, f"❌ Analysis failed: {str(e)}")
 
     async def _cmd_stats(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Show system statistics"""
@@ -1084,13 +1262,13 @@ class AdminBot:
             await self._send_response(update, context, f"❌ Collection failed: {str(e)}")
 
     async def _cmd_ml_retrain(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Manually trigger ML model retraining"""
+        """Manually trigger ML model retraining (auto-syncs from database first)"""
         try:
             await self._send_response(update, context,
-                "🎓 <b>Starting ML retraining...</b>\n\n"
-                "This retrains the signal prediction model using\n"
-                "the latest collected token data.\n\n"
-                "This may take a few minutes. Check Railway logs for progress.")
+                "🎓 <b>Starting ML Training...</b>\n\n"
+                "Step 1: Syncing data from database\n"
+                "Step 2: Training ML model\n\n"
+                "This may take a few minutes.")
 
             asyncio.create_task(self._run_ml_background(update, context))
 
@@ -1099,8 +1277,14 @@ class AdminBot:
             await update.message.reply_text(f"❌ Error: {str(e)}")
 
     async def _run_ml_background(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Run ML retraining in background and report result"""
+        """Run ML retraining in background - auto-syncs from database first"""
         try:
+            # Step 1: Auto-sync from database
+            logger.info("🔄 Auto-syncing data from database...")
+            synced = await self._sync_db_to_training_file()
+            logger.info(f"   Synced {synced} signals from database")
+
+            # Step 2: Train ML model
             from tools.automated_ml_retrain import AutomatedMLRetrainer
             retrainer = AutomatedMLRetrainer()
             result = await retrainer.run()
@@ -1129,8 +1313,62 @@ class AdminBot:
             logger.error(f"❌ ML retraining failed: {e}")
             await self._send_response(update, context, f"❌ ML retraining failed: {str(e)}")
 
+    async def _sync_db_to_training_file(self) -> int:
+        """Sync database signals to training file. Returns count synced."""
+        try:
+            if not self.database or not self.database.pool:
+                return 0
+
+            from ralph.data_manager import DataManager
+            dm = DataManager(self.database)
+            data = await dm.get_training_data()
+
+            if not data:
+                return 0
+
+            # Convert to training format
+            training_tokens = []
+            for s in data:
+                token_data = {
+                    'address': s.get('token_address', ''),
+                    'symbol': s.get('token_symbol', ''),
+                    'conviction_score': s.get('conviction_score', 0),
+                    'entry_price': s.get('entry_price', 0),
+                    'max_price': s.get('max_price_reached', 0),
+                    'roi': s.get('roi', 1),
+                    'outcome': s.get('outcome', ''),
+                    'bonding_curve_pct': s.get('bonding_curve_pct', 0),
+                    'buy_percentage': s.get('buy_percentage', 0),
+                    'unique_buyers': s.get('unique_buyers', 0),
+                    'liquidity_usd': s.get('liquidity', 0),
+                    'volume_24h': s.get('volume_24h', 0),
+                    'market_cap': s.get('market_cap', 0),
+                    'kol_count': s.get('kol_count', 0),
+                    'has_kol': s.get('has_kol', False),
+                }
+                training_tokens.append(token_data)
+
+            # Write to training file
+            import json
+            data_file = 'data/historical_training_data.json'
+            merged_data = {
+                'tokens': training_tokens,
+                'total_tokens': len(training_tokens),
+                'last_sync': datetime.utcnow().isoformat(),
+                'source': 'database'
+            }
+
+            with open(data_file, 'w') as f:
+                json.dump(merged_data, f, indent=2, default=str)
+
+            return len(training_tokens)
+
+        except Exception as e:
+            logger.error(f"Failed to sync DB to training file: {e}")
+            return 0
+
     async def _cmd_sync_ml_data(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Sync database signals to ML training data file"""
+        """Sync database signals to ML training data file (legacy - /ml does this automatically)"""
         try:
             if not self.database or not self.database.pool:
                 await self._send_response(update, context, "❌ Database not available")

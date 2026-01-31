@@ -426,9 +426,9 @@ async def run_ralph_analysis():
 async def run_daily_pipeline():
     """
     Daily pipeline that runs at 2 AM UTC:
-    1. Collects yesterday's missed winners from DexScreener
-    2. Retrains ML model if enough new data
-    3. Runs Ralph conviction analysis
+    1. Sync data from database
+    2. Retrain ML model if enough data
+    3. Run Ralph unified analysis (includes optimization)
     """
     logger.info("=" * 80)
     logger.info("🌅 DAILY PIPELINE STARTING")
@@ -437,36 +437,46 @@ async def run_daily_pipeline():
     logger.info("")
 
     try:
-        # Step 1: Daily token collection (missed winners)
-        logger.info("📊 STEP 1: Collecting yesterday's missed winners...")
-        from tools.daily_token_collector import DailyTokenCollector
-        collector = DailyTokenCollector()
-        await collector.collect_daily()
-        logger.info("✅ Token collection complete")
-        logger.info("")
-
-        # Step 2: ML model retraining (if needed)
-        logger.info("🎓 STEP 2: Checking if ML retraining needed...")
-        from tools.automated_ml_retrain import AutomatedMLRetrainer
-        retrainer = AutomatedMLRetrainer()
-        await retrainer.run()
-        logger.info("✅ ML retraining check complete")
-        logger.info("")
-
-        # Step 3: Ralph conviction analysis
-        logger.info("🤖 STEP 3: Running Ralph conviction analysis...")
-        await run_ralph_analysis()
-        logger.info("✅ Ralph analysis complete")
-        logger.info("")
-
-        # Step 4: Ralph threshold optimization
-        logger.info("🎯 STEP 4: Running Ralph threshold optimizer...")
+        # Step 1: Sync data from database to training file
+        logger.info("📊 STEP 1: Syncing data from database...")
         try:
-            from ralph.optimizer import run_optimization
-            await run_optimization(db, days=7)
-            logger.info("✅ Ralph optimization complete")
+            from ralph.data_manager import DataManager
+            dm = DataManager(db)
+            data = await dm.get_training_data()
+
+            # Write to training file
+            import json
+            training_file = 'data/historical_training_data.json'
+            with open(training_file, 'w') as f:
+                json.dump({
+                    'tokens': [{'outcome': d['outcome'], **{k: v for k, v in d.items() if k != 'outcome'}} for d in data],
+                    'total_tokens': len(data),
+                    'last_sync': datetime.utcnow().isoformat()
+                }, f, indent=2, default=str)
+            logger.info(f"   ✅ Synced {len(data)} signals from database")
         except Exception as e:
-            logger.warning(f"⚠️ Optimization skipped: {e}")
+            logger.warning(f"   ⚠️ Data sync skipped: {e}")
+        logger.info("")
+
+        # Step 2: ML model retraining (if enough data)
+        logger.info("🎓 STEP 2: ML model retraining...")
+        try:
+            from tools.automated_ml_retrain import AutomatedMLRetrainer
+            retrainer = AutomatedMLRetrainer()
+            await retrainer.run()
+            logger.info("   ✅ ML check complete")
+        except Exception as e:
+            logger.warning(f"   ⚠️ ML skipped: {e}")
+        logger.info("")
+
+        # Step 3: Ralph unified analysis (includes optimization + recommendations)
+        logger.info("🤖 STEP 3: Ralph unified analysis...")
+        try:
+            from ralph.unified_analysis import run_full_analysis
+            await run_full_analysis(db, days=7)
+            logger.info("   ✅ Ralph analysis complete")
+        except Exception as e:
+            logger.warning(f"   ⚠️ Analysis skipped: {e}")
         logger.info("")
 
         logger.info("=" * 80)
