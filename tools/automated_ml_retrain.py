@@ -114,7 +114,7 @@ class AutomatedMLRetrainer:
         logger.info("=" * 80)
 
         # Train model
-        success = self.pipeline.train_model()
+        success = self.pipeline.train()
 
         if not success:
             logger.error("❌ Training failed!")
