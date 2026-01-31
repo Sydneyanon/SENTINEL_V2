@@ -11,6 +11,7 @@ import config
 import base64
 import struct
 from datetime import datetime, timedelta
+from utils.sol_price import get_sol_price
 
 # Try to import solders - log if it fails
 try:
@@ -192,17 +193,17 @@ class HeliusDataFetcher:
             virtual_token = decoded['virtual_token_reserves'] / 1_000_000  # 6 decimals
             
             logger.debug(f"   📊 virtual_sol={virtual_sol:.4f}, virtual_token={virtual_token:.0f}")
-            
-            # Get current SOL price (simplified - use 150 USD for now)
-            sol_price_usd = 150  # TODO: Fetch live SOL price
-            
+
+            # Get current SOL price (cached for 5 minutes)
+            sol_price_usd = await get_sol_price()
+
             price_sol = virtual_sol / virtual_token if virtual_token > 0 else 0
             price_usd = price_sol * sol_price_usd
-            
+
             # MCAP in SOL = virtual_sol (represents SOL value at current supply)
             mcap_sol = virtual_sol
             mcap_usd = mcap_sol * sol_price_usd
-            
+
             # Liquidity (SOL in bonding curve)
             liquidity_usd = virtual_sol * sol_price_usd
             

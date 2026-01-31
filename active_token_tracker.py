@@ -9,6 +9,7 @@ from loguru import logger
 import asyncio
 from pumpportal_api import PumpPortalAPI
 import config
+from utils.sol_price import get_sol_price
 
 
 @dataclass
@@ -304,18 +305,18 @@ class ActiveTokenTracker:
             # Calculate price from reserves (PumpPortal doesn't always provide priceUsd)
             market_cap_sol = trade_data.get('marketCapSol', 0)
             v_sol_reserves = trade_data.get('vSolInBondingCurve', 0)
-            
+
             # Constants
             TOTAL_SUPPLY = 1_000_000_000  # 1 billion tokens
-            SOL_PRICE_USD = 150  # TODO: Fetch live SOL price
-            
+            SOL_PRICE_USD = await get_sol_price()  # Live SOL price (cached 5min)
+
             # Calculate price from market cap
             price_sol = market_cap_sol / TOTAL_SUPPLY if market_cap_sol > 0 else 0
             price_usd = price_sol * SOL_PRICE_USD
-            
+
             # Calculate liquidity (SOL in bonding curve)
             liquidity_usd = v_sol_reserves * SOL_PRICE_USD
-            
+
             # Calculate market cap in USD
             market_cap_usd = market_cap_sol * SOL_PRICE_USD
             
@@ -958,7 +959,7 @@ class ActiveTokenTracker:
                     v_tokens = data.get('virtual_token_reserves', 0)
                     bonding_complete = data.get('complete', False)
 
-                    SOL_PRICE_USD = 150  # TODO: fetch live
+                    SOL_PRICE_USD = await get_sol_price()  # Live SOL price (cached 5min)
 
                     # Calculate price from reserves
                     price_usd = 0
