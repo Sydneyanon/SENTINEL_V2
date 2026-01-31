@@ -1314,11 +1314,27 @@ class AdminBot:
             await self._send_response(update, context, f"❌ ML retraining failed: {str(e)}")
 
     async def _sync_db_to_training_file(self) -> int:
-        """Sync database signals to training file. Returns count synced."""
+        """Sync database signals to training file, merging with external data. Returns count synced."""
         try:
+            import json
+            import os
+
             if not self.database or not self.database.pool:
                 return 0
 
+            data_file = 'data/historical_training_data.json'
+
+            # Load existing external data
+            existing_tokens = []
+            if os.path.exists(data_file):
+                try:
+                    with open(data_file, 'r') as f:
+                        existing_data = json.load(f)
+                        existing_tokens = existing_data.get('tokens', [])
+                except:
+                    pass
+
+            # Get database signals
             from ralph.data_manager import DataManager
             dm = DataManager(self.database)
             data = await dm.get_training_data()
@@ -1327,41 +1343,45 @@ class AdminBot:
                 return 0
 
             # Convert to training format
-            training_tokens = []
+            db_tokens = []
             for s in data:
                 token_data = {
-                    'address': s.get('token_address', ''),
+                    'token_address': s.get('token_address', ''),
                     'symbol': s.get('token_symbol', ''),
                     'conviction_score': s.get('conviction_score', 0),
                     'entry_price': s.get('entry_price', 0),
-                    'max_price': s.get('max_price_reached', 0),
-                    'roi': s.get('roi', 1),
+                    'max_price_reached': s.get('max_price_reached', 0),
+                    'max_roi': s.get('roi', 1),
                     'outcome': s.get('outcome', ''),
                     'bonding_curve_pct': s.get('bonding_curve_pct', 0),
                     'buy_percentage': s.get('buy_percentage', 0),
                     'unique_buyers': s.get('unique_buyers', 0),
-                    'liquidity_usd': s.get('liquidity', 0),
+                    'liquidity': s.get('liquidity', 0),
                     'volume_24h': s.get('volume_24h', 0),
                     'market_cap': s.get('market_cap', 0),
-                    'kol_count': s.get('kol_count', 0),
-                    'has_kol': s.get('has_kol', False),
+                    'kol_count': len(s.get('kol_wallets') or []),
+                    'kol_wallets': s.get('kol_wallets'),
+                    'source': 'database'
                 }
-                training_tokens.append(token_data)
+                db_tokens.append(token_data)
 
-            # Write to training file
-            import json
-            data_file = 'data/historical_training_data.json'
-            merged_data = {
-                'tokens': training_tokens,
-                'total_tokens': len(training_tokens),
-                'last_sync': datetime.utcnow().isoformat(),
-                'source': 'database'
-            }
+            # Merge: DB takes priority, keep external tokens we don't have
+            db_addresses = {t['token_address'] for t in db_tokens}
+            external_only = [t for t in existing_tokens if t.get('token_address') not in db_addresses]
+            combined = db_tokens + external_only
 
+            # Write merged data
+            os.makedirs('data', exist_ok=True)
             with open(data_file, 'w') as f:
-                json.dump(merged_data, f, indent=2, default=str)
+                json.dump({
+                    'tokens': combined,
+                    'total_tokens': len(combined),
+                    'db_signals': len(db_tokens),
+                    'external_tokens': len(external_only),
+                    'last_sync': datetime.utcnow().isoformat()
+                }, f, indent=2, default=str)
 
-            return len(training_tokens)
+            return len(db_tokens)
 
         except Exception as e:
             logger.error(f"Failed to sync DB to training file: {e}")
