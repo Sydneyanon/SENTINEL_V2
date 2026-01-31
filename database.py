@@ -361,12 +361,34 @@ class Database:
     
     async def mark_signal_posted(self, token_address: str, message_id: int):
         """Mark a signal as posted to Telegram"""
+        try:
+            async with self.pool.acquire() as conn:
+                # Use RETURNING to verify update worked
+                row = await conn.fetchrow('''
+                    UPDATE signals
+                    SET signal_posted = TRUE, telegram_message_id = $1, updated_at = NOW()
+                    WHERE token_address = $2
+                    RETURNING token_address, signal_posted
+                ''', message_id, token_address)
+
+                if row:
+                    logger.info(f"✅ Marked signal posted: {token_address[:12]}... (msg_id={message_id})")
+                else:
+                    logger.warning(f"⚠️ mark_signal_posted: No rows updated for {token_address[:12]}... (token not in signals table?)")
+        except Exception as e:
+            logger.error(f"❌ mark_signal_posted failed for {token_address[:12]}...: {e}")
+
+    async def fix_orphaned_signals(self) -> int:
+        """Fix signals with telegram_message_id but signal_posted=FALSE"""
         async with self.pool.acquire() as conn:
-            await conn.execute('''
+            result = await conn.execute('''
                 UPDATE signals
-                SET signal_posted = TRUE, telegram_message_id = $1, updated_at = NOW()
-                WHERE token_address = $2
-            ''', message_id, token_address)
+                SET signal_posted = TRUE
+                WHERE telegram_message_id IS NOT NULL
+                AND signal_posted = FALSE
+            ''')
+            rows_affected = int(result.split()[-1]) if result else 0
+            return rows_affected
 
     async def mark_posting_failed(self, token_address: str, error_reason: str):
         """

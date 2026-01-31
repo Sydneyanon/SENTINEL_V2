@@ -2202,7 +2202,19 @@ class AdminBot:
             if not context.args:
                 await self._send_response(update, context,
                     "Usage: <code>/checksignal &lt;token_address&gt;</code>\n\n"
-                    "Checks database status for debugging milestones.")
+                    "Checks database status for debugging milestones.\n\n"
+                    "Or: <code>/checksignal fix</code> to fix orphaned signals.")
+                return
+
+            # Check for fix subcommand
+            if context.args[0].lower() == 'fix':
+                if not self.database:
+                    await self._send_response(update, context, "❌ Database not available")
+                    return
+                fixed = await self.database.fix_orphaned_signals()
+                await self._send_response(update, context,
+                    f"✅ Fixed {fixed} orphaned signals\n\n"
+                    f"(Signals with telegram_message_id but signal_posted=FALSE)")
                 return
 
             token_address = context.args[0]
