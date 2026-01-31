@@ -67,6 +67,7 @@ class AdminBot:
             self.app.add_handler(CommandHandler("ml", self._cmd_ml_retrain, filters=admin_filter))
             self.app.add_handler(CommandHandler("syncmldata", self._cmd_sync_ml_data, filters=admin_filter))
             self.app.add_handler(CommandHandler("automl", self._cmd_automl, filters=admin_filter))
+            self.app.add_handler(CommandHandler("optimize", self._cmd_optimize, filters=admin_filter))
             self.app.add_handler(CommandHandler("pause", self._cmd_pause, filters=admin_filter))
             self.app.add_handler(CommandHandler("resume", self._cmd_resume, filters=admin_filter))
             self.app.add_handler(CommandHandler("winrate", self._cmd_winrate, filters=admin_filter))
@@ -232,6 +233,7 @@ class AdminBot:
 /ml - Retrain ML model with latest data
 /automl - Toggle auto ML retraining (daily 2AM UTC)
 /analyze - Deep performance analysis with recommendations
+/optimize - Ralph finds optimal thresholds (backtests all signals)
 
 <b>Control:</b>
 /pause - Pause signal posting
@@ -1292,6 +1294,115 @@ class AdminBot:
         except Exception as e:
             logger.error(f"❌ Error in /automl: {e}")
             await self._send_response(update, context, f"❌ Error: {str(e)}")
+
+    async def _cmd_optimize(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Run Ralph threshold optimizer to find optimal settings"""
+        try:
+            if not self.database or not self.database.pool:
+                await self._send_response(update, context, "❌ Database not available")
+                return
+
+            # Parse days argument (default 7)
+            days = 7
+            if context.args:
+                try:
+                    days = int(context.args[0])
+                    days = min(max(days, 1), 30)  # Clamp to 1-30 days
+                except ValueError:
+                    pass
+
+            await self._send_response(update, context,
+                f"🤖 <b>Running Ralph Threshold Optimizer...</b>\n\n"
+                f"Analyzing last {days} days of signals.\n"
+                f"This may take a moment.")
+
+            # Run in background
+            asyncio.create_task(self._run_optimize_background(update, context, days))
+
+        except Exception as e:
+            logger.error(f"❌ Error in /optimize: {e}")
+            await self._send_response(update, context, f"❌ Error: {str(e)}")
+
+    async def _run_optimize_background(self, update: Update, context: ContextTypes.DEFAULT_TYPE, days: int):
+        """Run optimization in background and report results"""
+        try:
+            from ralph.optimizer import RalphOptimizer
+
+            optimizer = RalphOptimizer(self.database)
+            results = await optimizer.run_optimization(days)
+
+            if results.get('error') == 'insufficient_data':
+                await self._send_response(update, context,
+                    f"⚠️ <b>Insufficient data</b>\n\n"
+                    f"Only {results.get('signal_count', 0)} signals found.\n"
+                    f"Need 20+ signals with outcomes for optimization.")
+                return
+
+            if results.get('error'):
+                await self._send_response(update, context,
+                    f"❌ Optimization failed: {results['error']}")
+                return
+
+            # Build response
+            r = "🤖 <b>RALPH OPTIMIZATION RESULTS</b>\n\n"
+
+            # Current settings
+            curr = results.get('current_settings', {})
+            r += f"<b>📊 Data analyzed:</b> {results.get('total_signals', 0)} signals\n"
+            r += f"   Pre-grad: {results.get('pre_grad_count', 0)} | Post-grad: {results.get('post_grad_count', 0)}\n\n"
+
+            # Pre-grad analysis
+            pre = results.get('pre_grad_analysis', {})
+            if pre.get('thresholds'):
+                r += "<b>PRE-GRAD THRESHOLDS:</b>\n"
+                for thresh, data in sorted(pre['thresholds'].items()):
+                    emoji = "🟢" if data['win_rate'] >= 50 else "🟡" if data['win_rate'] >= 35 else "🔴"
+                    curr_marker = " ←" if thresh == curr.get('min_conviction_score') else ""
+                    opt_marker = " 🎯" if thresh == pre.get('optimal_threshold') and thresh != curr.get('min_conviction_score') else ""
+                    r += f"{emoji} {thresh}: {data['win_rate']:.0f}% WR ({data['signals']}){curr_marker}{opt_marker}\n"
+                r += "\n"
+
+            # Post-grad analysis
+            post = results.get('post_grad_analysis', {})
+            if post.get('thresholds'):
+                r += "<b>POST-GRAD THRESHOLDS:</b>\n"
+                for thresh, data in sorted(post['thresholds'].items()):
+                    emoji = "🟢" if data['win_rate'] >= 50 else "🟡" if data['win_rate'] >= 35 else "🔴"
+                    curr_marker = " ←" if thresh == curr.get('post_grad_threshold') else ""
+                    opt_marker = " 🎯" if thresh == post.get('optimal_threshold') and thresh != curr.get('post_grad_threshold') else ""
+                    r += f"{emoji} {thresh}: {data['win_rate']:.0f}% WR ({data['signals']}){curr_marker}{opt_marker}\n"
+                r += "\n"
+
+            # KOL impact
+            kol = results.get('kol_analysis', {})
+            if 'kol_impact' in kol:
+                impact = kol['kol_impact']
+                if impact > 5:
+                    r += f"<b>KOL Impact:</b> ✅ +{impact:.0f}% WR\n"
+                elif impact < -5:
+                    r += f"<b>KOL Impact:</b> ⚠️ {impact:.0f}% WR\n"
+                else:
+                    r += f"<b>KOL Impact:</b> ➖ {impact:+.0f}% WR\n"
+                r += "\n"
+
+            # Recommendations
+            recs = results.get('recommendations', [])
+            if recs:
+                r += "<b>🎯 RECOMMENDATIONS:</b>\n"
+                for rec in recs:
+                    r += f"• {rec['setting']}: {rec['current']} → {rec['recommended']} ({rec['reason']})\n"
+            else:
+                r += "✅ <i>Current settings are optimal</i>\n"
+
+            r += f"\n<i>Full analysis logged to Railway</i>"
+
+            await self._send_response(update, context, r)
+
+        except Exception as e:
+            logger.error(f"❌ Optimization failed: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            await self._send_response(update, context, f"❌ Optimization failed: {str(e)}")
 
     async def _cmd_winrate(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Compare win rates: KOL-based era vs On-Chain-first era"""
