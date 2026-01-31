@@ -478,7 +478,6 @@ async def run_daily_pipeline():
                     'market_cap': d.get('market_cap'),
                     'liquidity': d.get('liquidity'),
                     'volume_24h': d.get('volume_24h'),
-                    'unique_buyers': d.get('unique_buyers'),
                     'buys_24h': d.get('buys_24h'),
                     'sells_24h': d.get('sells_24h'),
                     'bonding_curve_pct': d.get('bonding_curve_pct'),
