@@ -517,7 +517,33 @@ async def lifespan(app: FastAPI):
     # Link performance tracker to admin bot
     if admin_bot_initialized:
         admin_bot.performance_tracker = performance_tracker
-    
+
+    # Set up daily pipeline scheduler (ML auto-retraining at 2 AM UTC)
+    global daily_pipeline_scheduler
+    if APSCHEDULER_AVAILABLE and admin_bot_initialized:
+        logger.info("⏰ Setting up daily ML pipeline scheduler...")
+        daily_pipeline_scheduler = AsyncIOScheduler()
+
+        async def scheduled_daily_pipeline():
+            """Run daily pipeline if auto ML is enabled"""
+            if admin_bot and admin_bot.auto_ml_enabled:
+                logger.info("🔄 Running scheduled daily ML pipeline...")
+                await run_daily_pipeline()
+            else:
+                logger.info("⏭️ Skipping daily pipeline (auto ML disabled)")
+
+        # Schedule for 2 AM UTC daily
+        daily_pipeline_scheduler.add_job(
+            scheduled_daily_pipeline,
+            CronTrigger(hour=2, minute=0),
+            id='daily_ml_pipeline',
+            name='Daily ML Pipeline (collect + retrain)'
+        )
+        daily_pipeline_scheduler.start()
+        logger.info("✅ Daily pipeline scheduled for 2:00 AM UTC")
+    elif not APSCHEDULER_AVAILABLE:
+        logger.warning("⚠️ APScheduler not installed - install with: pip install apscheduler")
+
     # Initialize Active Token Tracker (NEW!)
     logger.info("🎯 Initializing active token tracker...")
     active_tracker = ActiveTokenTracker(

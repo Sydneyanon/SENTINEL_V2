@@ -26,6 +26,7 @@ class AdminBot:
         self.admin_user_id = config.ADMIN_TELEGRAM_USER_ID
         self.admin_channel_id = config.ADMIN_CHANNEL_ID  # Optional: post to channel instead of DM
         self.pending_media_type = None  # Tracks what type of media is expected next (banner, 2x, 10x, etc.)
+        self.auto_ml_enabled = True  # Auto ML retraining enabled by default
 
     async def initialize(self):
         """Initialize admin bot"""
@@ -65,6 +66,7 @@ class AdminBot:
             self.app.add_handler(CommandHandler("collect", self._cmd_collect, filters=admin_filter))
             self.app.add_handler(CommandHandler("ml", self._cmd_ml_retrain, filters=admin_filter))
             self.app.add_handler(CommandHandler("syncmldata", self._cmd_sync_ml_data, filters=admin_filter))
+            self.app.add_handler(CommandHandler("automl", self._cmd_automl, filters=admin_filter))
             self.app.add_handler(CommandHandler("pause", self._cmd_pause, filters=admin_filter))
             self.app.add_handler(CommandHandler("resume", self._cmd_resume, filters=admin_filter))
             self.app.add_handler(CommandHandler("winrate", self._cmd_winrate, filters=admin_filter))
@@ -1242,6 +1244,48 @@ class AdminBot:
             logger.error(f"❌ Error in /syncmldata: {e}")
             import traceback
             logger.error(traceback.format_exc())
+            await self._send_response(update, context, f"❌ Error: {str(e)}")
+
+    async def _cmd_automl(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Toggle automatic ML retraining on/off"""
+        try:
+            args = context.args
+
+            if not args:
+                # Show current status
+                status = "ON ✅" if self.auto_ml_enabled else "OFF ❌"
+                await self._send_response(update, context,
+                    f"🤖 <b>Auto ML Status:</b> {status}\n\n"
+                    f"When enabled, ML automatically retrains daily at 2 AM UTC "
+                    f"after collecting missed winners.\n\n"
+                    f"Usage:\n"
+                    f"  /automl on - Enable auto retraining\n"
+                    f"  /automl off - Disable auto retraining")
+                return
+
+            cmd = args[0].lower()
+
+            if cmd == 'on':
+                self.auto_ml_enabled = True
+                await self._send_response(update, context,
+                    "✅ <b>Auto ML enabled!</b>\n\n"
+                    "Daily pipeline will run at 2 AM UTC:\n"
+                    "1. Collect missed winners from DexScreener\n"
+                    "2. Sync database signals\n"
+                    "3. Retrain ML model if enough data\n\n"
+                    "Run /ml to train immediately.")
+            elif cmd == 'off':
+                self.auto_ml_enabled = False
+                await self._send_response(update, context,
+                    "❌ <b>Auto ML disabled.</b>\n\n"
+                    "Use /ml to manually trigger training.\n"
+                    "Use /automl on to re-enable.")
+            else:
+                await self._send_response(update, context,
+                    "❓ Unknown option. Use: /automl on or /automl off")
+
+        except Exception as e:
+            logger.error(f"❌ Error in /automl: {e}")
             await self._send_response(update, context, f"❌ Error: {str(e)}")
 
     async def _cmd_winrate(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
