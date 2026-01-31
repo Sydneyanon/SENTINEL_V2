@@ -135,6 +135,33 @@ class AdminBot:
             await self.app.initialize()
             await self.app.start()
 
+            # Register commands with Telegram menu
+            from telegram import BotCommand
+            commands = [
+                BotCommand("help", "Show all commands"),
+                BotCommand("data", "All data stats in one place"),
+                BotCommand("ralph", "Full analysis + recommendations"),
+                BotCommand("stats", "System statistics"),
+                BotCommand("performance", "Recent signal performance"),
+                BotCommand("toprunners", "All 2x+ winners"),
+                BotCommand("active", "Currently tracked tokens"),
+                BotCommand("revivals", "Post-grad revival watchlist"),
+                BotCommand("sources", "KOL vs Organic comparison"),
+                BotCommand("checksignal", "Debug signal status"),
+                BotCommand("kolstats", "KOL performance breakdown"),
+                BotCommand("health", "System health check"),
+                BotCommand("config", "Live config values"),
+                BotCommand("wallets", "View tracked wallets"),
+                BotCommand("ml", "Retrain ML model"),
+                BotCommand("pause", "Pause signal posting"),
+                BotCommand("resume", "Resume signal posting"),
+            ]
+            try:
+                await self.app.bot.set_my_commands(commands)
+                logger.info(f"✅ Registered {len(commands)} commands with Telegram menu")
+            except Exception as e:
+                logger.warning(f"⚠️ Could not set Telegram commands: {e}")
+
             # Start polling (this will run in background)
             await self.app.updater.start_polling(
                 drop_pending_updates=True,
@@ -254,6 +281,10 @@ class AdminBot:
 <b>Multiplier Animations:</b>
 /setmultiplier &lt;tier&gt; - Set animation (2x/10x/100x/1000x)
 /testmultiplier &lt;tier&gt; - Test multiplier animation
+
+<b>Debug:</b>
+/checksignal &lt;address&gt; - Check signal status for token
+/checksignal fix - Fix orphaned signals
 
 <b>Help:</b>
 /help - Show this message
@@ -502,7 +533,7 @@ class AdminBot:
 
                         r += f"{c1}║{c2}\n"
                     r += "</pre>"
-                    r += f"🟢>{baseline_wr+10:.0f}% 🟡avg 🔴<{baseline_wr-10:.0f}%\n\n"
+                    r += f"🟢&gt;{baseline_wr+10:.0f}% 🟡avg 🔴&lt;{baseline_wr-10:.0f}%\n\n"
 
                 # Full daily breakdown
                 daily = time_patterns.get('daily_breakdown', [])
@@ -2142,8 +2173,9 @@ class AdminBot:
     async def _cmd_revivals(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Show post-grad revival scanner watchlist"""
         try:
-            # Get revival scanner from main module
-            from main import revival_scanner
+            # Get revival scanner from main module (use module access to get current value)
+            import main
+            revival_scanner = main.revival_scanner
 
             if not revival_scanner:
                 await self._send_response(update, context,
@@ -2217,6 +2249,22 @@ class AdminBot:
                     f"(Signals with telegram_message_id but signal_posted=FALSE)")
                 return
 
+            # Check for fixsymbol subcommand: /checksignal fixsymbol <address> <symbol>
+            if context.args[0].lower() == 'fixsymbol' and len(context.args) >= 3:
+                if not self.database or not self.database.pool:
+                    await self._send_response(update, context, "❌ Database not available")
+                    return
+                token_address = context.args[1]
+                new_symbol = context.args[2].upper()
+                async with self.database.pool.acquire() as conn:
+                    result = await conn.execute('''
+                        UPDATE signals SET token_symbol = $1 WHERE token_address = $2
+                    ''', new_symbol, token_address)
+                await self._send_response(update, context,
+                    f"✅ Updated symbol to <b>${new_symbol}</b>\n\n"
+                    f"<code>{token_address[:20]}...</code>")
+                return
+
             token_address = context.args[0]
 
             if not self.database or not self.database.pool:
@@ -2227,7 +2275,8 @@ class AdminBot:
                 # Get signal info
                 signal = await conn.fetchrow('''
                     SELECT token_symbol, signal_posted, entry_price, conviction_score,
-                           signal_type, signal_source, created_at, telegram_message_id
+                           signal_type, signal_source, created_at, telegram_message_id,
+                           current_price, max_price_reached
                     FROM signals
                     WHERE token_address = $1
                 ''', token_address)
@@ -2248,6 +2297,14 @@ class AdminBot:
                 r += f"• Symbol: {signal['token_symbol']}\n"
                 r += f"• Posted: {'✅ YES' if signal['signal_posted'] else '❌ NO'}\n"
                 r += f"• Entry Price: ${signal['entry_price']:.8f}\n"
+                r += f"• Current Price: ${signal['current_price']:.8f if signal['current_price'] else 'NULL'}\n"
+                r += f"• Max Price: ${signal['max_price_reached']:.8f if signal['max_price_reached'] else 'NULL'}\n"
+
+                # Calculate multiplier
+                if signal['entry_price'] and signal['entry_price'] > 0 and signal['max_price_reached']:
+                    mult = signal['max_price_reached'] / signal['entry_price']
+                    r += f"• <b>Peak Multiple: {mult:.2f}x</b>\n"
+
                 r += f"• Score: {signal['conviction_score']}\n"
                 r += f"• Type: {signal['signal_type']}\n"
                 r += f"• Source: {signal['signal_source']}\n"
@@ -2261,6 +2318,12 @@ class AdminBot:
                 if signal['entry_price'] == 0:
                     r += "⚠️ <b>ISSUE:</b> entry_price=0\n"
                     r += "   Performance tracker skips $0 prices!\n\n"
+                if signal['token_symbol'] == 'UNKNOWN':
+                    r += "⚠️ <b>ISSUE:</b> Symbol is UNKNOWN\n"
+                    r += "   Token name wasn't captured at signal time.\n\n"
+                if not signal['max_price_reached']:
+                    r += "⚠️ <b>ISSUE:</b> max_price_reached=NULL\n"
+                    r += "   Price updates aren't reaching this signal!\n\n"
             else:
                 r += "❌ <b>TOKEN NOT IN SIGNALS TABLE</b>\n"
                 r += "   This token was never signaled.\n\n"
