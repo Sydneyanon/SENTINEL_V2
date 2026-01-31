@@ -71,6 +71,7 @@ class AdminBot:
             self.app.add_handler(CommandHandler("collect", self._cmd_collect, filters=admin_filter))
             self.app.add_handler(CommandHandler("ml", self._cmd_ml_retrain, filters=admin_filter))
             self.app.add_handler(CommandHandler("syncmldata", self._cmd_sync_ml_data, filters=admin_filter))
+            self.app.add_handler(CommandHandler("cleandata", self._cmd_clean_data, filters=admin_filter))
             self.app.add_handler(CommandHandler("automl", self._cmd_automl, filters=admin_filter))
             self.app.add_handler(CommandHandler("optimize", self._cmd_optimize, filters=admin_filter))
             self.app.add_handler(CommandHandler("pause", self._cmd_pause, filters=admin_filter))
@@ -1675,6 +1676,132 @@ class AdminBot:
 
         except Exception as e:
             logger.error(f"❌ Error in /syncmldata: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            await self._send_response(update, context, f"❌ Error: {str(e)}")
+
+    async def _cmd_clean_data(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Clean up stale ML data sources and consolidate to signals table"""
+        try:
+            if not self.database or not self.database.pool:
+                await self._send_response(update, context, "❌ Database not available")
+                return
+
+            await self._send_response(update, context,
+                "🧹 <b>Cleaning up stale ML data...</b>\n\n"
+                "This will:\n"
+                "1. Clear stale ml_training_tokens table\n"
+                "2. Reset training file to signals-only data\n"
+                "3. Consolidate to single source of truth")
+
+            # Step 1: Get current state
+            async with self.database.pool.acquire() as conn:
+                old_ml_count = await conn.fetchval('SELECT COUNT(*) FROM ml_training_tokens')
+                signals_count = await conn.fetchval('SELECT COUNT(*) FROM signals WHERE signal_posted = TRUE')
+
+            # Step 2: Clear stale ml_training_tokens table
+            async with self.database.pool.acquire() as conn:
+                await conn.execute('DELETE FROM ml_training_tokens')
+
+            # Step 3: Get all signals and convert to training format
+            signals = await self.database.get_all_signals_for_ml()
+
+            training_tokens = []
+            outcome_dist = {'rug': 0, '2x': 0, '10x': 0, '50x': 0, '100x': 0, 'loss': 0}
+
+            for s in signals:
+                if not s.get('entry_price') or s['entry_price'] <= 0:
+                    continue
+
+                peak = s.get('max_price_reached') or 0
+                entry = s['entry_price']
+                roi = peak / entry if peak > 0 else 0
+
+                if roi >= 100:
+                    outcome = '100x+'
+                    outcome_dist['100x'] += 1
+                elif roi >= 50:
+                    outcome = '50x'
+                    outcome_dist['50x'] += 1
+                elif roi >= 10:
+                    outcome = '10x'
+                    outcome_dist['10x'] += 1
+                elif roi >= 2:
+                    outcome = '2x'
+                    outcome_dist['2x'] += 1
+                elif roi < 0.5:
+                    outcome = 'rug'
+                    outcome_dist['rug'] += 1
+                else:
+                    outcome = 'small'
+                    outcome_dist['loss'] += 1
+
+                token_data = {
+                    'address': s.get('token_address', ''),
+                    'symbol': s.get('token_symbol', ''),
+                    'conviction_score': s.get('conviction_score', 0),
+                    'entry_price': entry,
+                    'max_price': peak,
+                    'roi': roi,
+                    'outcome': outcome,
+                    'bonding_curve_pct': s.get('bonding_curve_pct', 0),
+                    'buy_percentage': s.get('buy_percentage', 0),
+                    'liquidity_usd': s.get('liquidity', 0),
+                    'volume_24h': s.get('volume_24h', 0),
+                    'market_cap': s.get('market_cap', 0),
+                    'signal_type': s.get('signal_type', ''),
+                    'signal_source': s.get('signal_source', ''),
+                    'kol_count': len(s.get('kol_wallets') or []),
+                    'has_kol': bool(s.get('kol_wallets')),
+                    'created_at': str(s.get('created_at', ''))
+                }
+                training_tokens.append(token_data)
+
+            # Step 4: Save clean data to file (NO external merge)
+            import json
+            from datetime import datetime
+            data_file = 'data/historical_training_data.json'
+
+            clean_data = {
+                'total_tokens': len(training_tokens),
+                'tokens': training_tokens,
+                'outcome_distribution': outcome_dist,
+                'last_sync': datetime.utcnow().isoformat(),
+                'source': 'signals_table_only',
+                'db_signals': len(signals),
+                'external_tokens': 0,
+                'cleaned_at': datetime.utcnow().isoformat()
+            }
+
+            with open(data_file, 'w') as f:
+                json.dump(clean_data, f, indent=2, default=str)
+
+            # Step 5: Sync to ml_training_tokens table for Railway persistence
+            if training_tokens:
+                await self.database.save_training_tokens(training_tokens, source='clean_sync')
+
+            # Summary
+            ready = "✅ Ready for ML training!" if len(training_tokens) >= 75 else f"⚠️ Need {75 - len(training_tokens)} more tokens"
+
+            await self._send_response(update, context,
+                f"🧹 <b>Data Cleanup Complete!</b>\n\n"
+                f"<b>Before:</b>\n"
+                f"• ml_training_tokens: {old_ml_count} (stale)\n"
+                f"• signals table: {signals_count}\n\n"
+                f"<b>After (consolidated):</b>\n"
+                f"• Training tokens: {len(training_tokens)}\n"
+                f"• Source: signals table only\n\n"
+                f"<b>Outcomes:</b>\n"
+                f"  🔴 Rug: {outcome_dist['rug']}\n"
+                f"  🟡 Loss: {outcome_dist['loss']}\n"
+                f"  🟢 2x: {outcome_dist['2x']}\n"
+                f"  🟢 10x: {outcome_dist['10x']}\n"
+                f"  🟢 50x: {outcome_dist['50x']}\n"
+                f"  🔥 100x+: {outcome_dist['100x']}\n\n"
+                f"{ready}")
+
+        except Exception as e:
+            logger.error(f"❌ Error in /cleandata: {e}")
             import traceback
             logger.error(traceback.format_exc())
             await self._send_response(update, context, f"❌ Error: {str(e)}")
