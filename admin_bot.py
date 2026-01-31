@@ -502,7 +502,7 @@ class AdminBot:
 
                         r += f"{c1}║{c2}\n"
                     r += "</pre>"
-                    r += f"🟢>{baseline_wr+10:.0f}% 🟡avg 🔴<{baseline_wr-10:.0f}%\n\n"
+                    r += f"🟢&gt;{baseline_wr+10:.0f}% 🟡avg 🔴&lt;{baseline_wr-10:.0f}%\n\n"
 
                 # Full daily breakdown
                 daily = time_patterns.get('daily_breakdown', [])
