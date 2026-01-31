@@ -460,6 +460,39 @@ class AdminBot:
                     r += f"• {rec['name']}: {rec['from']} → {rec['to']} ({rec['impact']})\n"
                 r += "\n"
 
+            # Hidden patterns section
+            hidden = results.get('hidden_patterns', {})
+            if hidden:
+                insights = hidden.get('insights', [])
+                time_patterns = hidden.get('time_patterns', {})
+                narrative = hidden.get('narrative_analysis', {})
+
+                if time_patterns.get('best_hours') or time_patterns.get('best_days') or insights:
+                    r += "<b>🔍 HIDDEN PATTERNS:</b>\n"
+
+                    # Time patterns
+                    if time_patterns.get('best_hours'):
+                        hours = time_patterns['best_hours'][:2]
+                        r += f"⏰ Best hours: {', '.join(f'{h}:00 ({wr:.0f}%)' for h, wr, _ in hours)}\n"
+                    if time_patterns.get('worst_hours'):
+                        hours = time_patterns['worst_hours'][:2]
+                        r += f"⏰ Worst hours: {', '.join(f'{h}:00 ({wr:.0f}%)' for h, wr, _ in hours)}\n"
+                    if time_patterns.get('best_days'):
+                        days = time_patterns['best_days']
+                        r += f"📅 Best days: {', '.join(f'{d} ({wr:.0f}%)' for d, wr, _ in days)}\n"
+
+                    # Winning narratives
+                    if narrative.get('winners'):
+                        winners = narrative['winners'][:3]
+                        r += f"📖 Hot narratives: {', '.join(f'{t} ({wr:.0f}%)' for t, wr, _ in winners)}\n"
+
+                    # Key insights
+                    if insights:
+                        for insight in insights[:2]:
+                            r += f"💡 {insight}\n"
+
+                    r += "\n"
+
             # Recommendations
             recs = results.get('recommendations', [])
             if recs:

@@ -125,7 +125,15 @@ class RalphAnalysis:
             metrics_breakdown = self._analyze_metrics_breakdown(data)
             results['metrics_breakdown'] = metrics_breakdown
 
-            # 6. Summary & Recommendations
+            # 6. Hidden Pattern Discovery (What are we missing?)
+            hidden_patterns = self._discover_hidden_patterns(data)
+            results['hidden_patterns'] = hidden_patterns
+
+            # Add pattern-based recommendations
+            if hidden_patterns.get('recommendations'):
+                results['recommendations'].extend(hidden_patterns['recommendations'])
+
+            # 7. Summary & Recommendations
             logger.info("")
             logger.info("=" * 60)
             logger.info("🎯 RECOMMENDATIONS")
@@ -588,6 +596,286 @@ class RalphAnalysis:
 
         logger.info("")
         logger.info(f"   📊 Summary: {len(strong_predictors)} strong predictors, {len(results['recommendations'])} recommendations")
+
+        return results
+
+    def _discover_hidden_patterns(self, data: List[Dict]) -> Dict:
+        """
+        Discover hidden patterns in the data that we might be missing.
+        Analyzes: time patterns, narratives, entry characteristics, signal sources.
+        """
+        results = {
+            'time_patterns': {},
+            'narrative_analysis': {},
+            'entry_patterns': {},
+            'source_analysis': {},
+            'insights': [],
+            'recommendations': []
+        }
+
+        logger.info("")
+        logger.info("━" * 50)
+        logger.info("🔍 HIDDEN PATTERN DISCOVERY")
+        logger.info("━" * 50)
+
+        wins = [d for d in data if d['is_win']]
+        rugs = [d for d in data if d['is_rug']]
+        baseline_wr = (len(wins) / len(data) * 100) if data else 0
+
+        # 1. TIME PATTERNS - When do wins happen?
+        logger.info("")
+        logger.info("   ⏰ TIME PATTERNS:")
+
+        hour_stats = {}
+        day_stats = {}
+
+        for d in data:
+            created = d.get('created_at')
+            if created:
+                try:
+                    if hasattr(created, 'hour'):
+                        hour = created.hour
+                        day = created.weekday()  # 0=Monday, 6=Sunday
+                    else:
+                        # Parse if string
+                        from datetime import datetime
+                        if isinstance(created, str):
+                            created = datetime.fromisoformat(created.replace('Z', '+00:00'))
+                        hour = created.hour
+                        day = created.weekday()
+
+                    # Hour stats
+                    if hour not in hour_stats:
+                        hour_stats[hour] = {'total': 0, 'wins': 0}
+                    hour_stats[hour]['total'] += 1
+                    if d['is_win']:
+                        hour_stats[hour]['wins'] += 1
+
+                    # Day stats
+                    if day not in day_stats:
+                        day_stats[day] = {'total': 0, 'wins': 0}
+                    day_stats[day]['total'] += 1
+                    if d['is_win']:
+                        day_stats[day]['wins'] += 1
+                except Exception:
+                    pass
+
+        # Find best/worst hours
+        best_hours = []
+        worst_hours = []
+        for hour, stats in hour_stats.items():
+            if stats['total'] >= 5:
+                wr = stats['wins'] / stats['total'] * 100
+                stats['win_rate'] = wr
+                if wr >= baseline_wr + 10:
+                    best_hours.append((hour, wr, stats['total']))
+                elif wr <= baseline_wr - 10:
+                    worst_hours.append((hour, wr, stats['total']))
+
+        best_hours.sort(key=lambda x: x[1], reverse=True)
+        worst_hours.sort(key=lambda x: x[1])
+
+        if best_hours:
+            logger.info(f"      ✅ Best hours (UTC): {', '.join(f'{h}:00 ({wr:.0f}%)' for h, wr, _ in best_hours[:3])}")
+            results['time_patterns']['best_hours'] = best_hours[:3]
+        if worst_hours:
+            logger.info(f"      ⚠️ Worst hours (UTC): {', '.join(f'{h}:00 ({wr:.0f}%)' for h, wr, _ in worst_hours[:3])}")
+            results['time_patterns']['worst_hours'] = worst_hours[:3]
+
+        # Find best/worst days
+        day_names = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+        best_days = []
+        worst_days = []
+        for day, stats in day_stats.items():
+            if stats['total'] >= 5:
+                wr = stats['wins'] / stats['total'] * 100
+                stats['win_rate'] = wr
+                if wr >= baseline_wr + 10:
+                    best_days.append((day_names[day], wr, stats['total']))
+                elif wr <= baseline_wr - 10:
+                    worst_days.append((day_names[day], wr, stats['total']))
+
+        if best_days:
+            logger.info(f"      ✅ Best days: {', '.join(f'{d} ({wr:.0f}%)' for d, wr, _ in best_days)}")
+            results['time_patterns']['best_days'] = best_days
+        if worst_days:
+            logger.info(f"      ⚠️ Worst days: {', '.join(f'{d} ({wr:.0f}%)' for d, wr, _ in worst_days)}")
+            results['time_patterns']['worst_days'] = worst_days
+
+        results['time_patterns']['hour_stats'] = hour_stats
+        results['time_patterns']['day_stats'] = day_stats
+
+        # 2. NARRATIVE ANALYSIS - Which narratives win?
+        logger.info("")
+        logger.info("   📖 NARRATIVE PATTERNS:")
+
+        narrative_stats = {}
+        for d in data:
+            tags = d.get('narrative_tags') or []
+            if isinstance(tags, str):
+                tags = [tags]
+            for tag in tags:
+                if tag:
+                    if tag not in narrative_stats:
+                        narrative_stats[tag] = {'total': 0, 'wins': 0, 'rugs': 0}
+                    narrative_stats[tag]['total'] += 1
+                    if d['is_win']:
+                        narrative_stats[tag]['wins'] += 1
+                    if d['is_rug']:
+                        narrative_stats[tag]['rugs'] += 1
+
+        winning_narratives = []
+        losing_narratives = []
+        for tag, stats in narrative_stats.items():
+            if stats['total'] >= 3:
+                wr = stats['wins'] / stats['total'] * 100
+                rr = stats['rugs'] / stats['total'] * 100
+                stats['win_rate'] = wr
+                stats['rug_rate'] = rr
+                if wr >= baseline_wr + 10:
+                    winning_narratives.append((tag, wr, stats['total']))
+                elif wr <= baseline_wr - 10 or rr > 50:
+                    losing_narratives.append((tag, wr, rr, stats['total']))
+
+        winning_narratives.sort(key=lambda x: x[1], reverse=True)
+        losing_narratives.sort(key=lambda x: x[2], reverse=True)  # Sort by rug rate
+
+        if winning_narratives:
+            logger.info(f"      ✅ Winning narratives: {', '.join(f'{t} ({wr:.0f}%)' for t, wr, _ in winning_narratives[:5])}")
+            results['narrative_analysis']['winners'] = winning_narratives[:5]
+            results['insights'].append(f"Narratives that win: {', '.join(t for t, _, _ in winning_narratives[:3])}")
+        if losing_narratives:
+            logger.info(f"      ⚠️ Losing narratives: {', '.join(f'{t} ({wr:.0f}% WR, {rr:.0f}% RR)' for t, wr, rr, _ in losing_narratives[:5])}")
+            results['narrative_analysis']['losers'] = losing_narratives[:5]
+
+        if not narrative_stats:
+            logger.info("      ➖ No narrative data available")
+
+        results['narrative_analysis']['stats'] = narrative_stats
+
+        # 3. ENTRY CHARACTERISTICS - What distinguishes winners at entry?
+        logger.info("")
+        logger.info("   🎯 ENTRY CHARACTERISTICS (Wins vs Rugs):")
+
+        # Calculate entry characteristics
+        win_bonding = [d.get('bonding_curve_pct', 0) for d in wins if d.get('bonding_curve_pct')]
+        rug_bonding = [d.get('bonding_curve_pct', 0) for d in rugs if d.get('bonding_curve_pct')]
+
+        win_mcap = [d.get('market_cap', 0) for d in wins if d.get('market_cap')]
+        rug_mcap = [d.get('market_cap', 0) for d in rugs if d.get('market_cap')]
+
+        win_unique = [d.get('unique_buyers', 0) for d in wins if d.get('unique_buyers')]
+        rug_unique = [d.get('unique_buyers', 0) for d in rugs if d.get('unique_buyers')]
+
+        if win_bonding and rug_bonding:
+            win_avg = sum(win_bonding) / len(win_bonding)
+            rug_avg = sum(rug_bonding) / len(rug_bonding)
+            if abs(win_avg - rug_avg) > 5:
+                direction = "higher" if win_avg > rug_avg else "lower"
+                logger.info(f"      Entry Bonding: Wins {win_avg:.0f}% vs Rugs {rug_avg:.0f}% ({direction} wins)")
+                results['entry_patterns']['bonding'] = {'wins': win_avg, 'rugs': rug_avg}
+
+        if win_mcap and rug_mcap:
+            win_avg = sum(win_mcap) / len(win_mcap)
+            rug_avg = sum(rug_mcap) / len(rug_mcap)
+            if abs(win_avg - rug_avg) > 5000:
+                direction = "lower" if win_avg < rug_avg else "higher"
+                logger.info(f"      Entry MCAP: Wins ${win_avg/1000:.0f}K vs Rugs ${rug_avg/1000:.0f}K ({direction} wins)")
+                results['entry_patterns']['mcap'] = {'wins': win_avg, 'rugs': rug_avg}
+
+                # Generate recommendation if we're entering too late
+                if win_avg < rug_avg and rug_avg > config.MAX_MARKET_CAP_FILTER:
+                    results['recommendations'].append({
+                        'type': 'pattern',
+                        'insight': 'entry_mcap',
+                        'message': f"Lower MCAP cap to ${win_avg/1000:.0f}K (wins enter earlier)"
+                    })
+
+        if win_unique and rug_unique:
+            win_avg = sum(win_unique) / len(win_unique)
+            rug_avg = sum(rug_unique) / len(rug_unique)
+            if abs(win_avg - rug_avg) > 20:
+                direction = "more" if win_avg > rug_avg else "fewer"
+                logger.info(f"      Unique Buyers: Wins {win_avg:.0f} vs Rugs {rug_avg:.0f} ({direction} buyers)")
+                results['entry_patterns']['unique_buyers'] = {'wins': win_avg, 'rugs': rug_avg}
+
+        # 4. SIGNAL SOURCE ANALYSIS
+        logger.info("")
+        logger.info("   📡 SIGNAL SOURCE:")
+
+        source_stats = {}
+        for d in data:
+            source = d.get('signal_source') or d.get('signal_type') or 'unknown'
+            if source not in source_stats:
+                source_stats[source] = {'total': 0, 'wins': 0}
+            source_stats[source]['total'] += 1
+            if d['is_win']:
+                source_stats[source]['wins'] += 1
+
+        for source, stats in source_stats.items():
+            if stats['total'] >= 3:
+                wr = stats['wins'] / stats['total'] * 100
+                emoji = "✅" if wr >= baseline_wr else "⚠️" if wr < baseline_wr - 10 else "➖"
+                logger.info(f"      {emoji} {source}: {wr:.0f}% WR ({stats['total']} signals)")
+
+        results['source_analysis'] = source_stats
+
+        # 5. MULTI-METRIC COMBOS - Do tokens with multiple strong signals win more?
+        logger.info("")
+        logger.info("   🔗 MULTI-METRIC COMBOS:")
+
+        # Count how many "strong" metrics each token has
+        for d in data:
+            strong_count = 0
+            if (d.get('bonding_curve_pct') or 0) >= 40:
+                strong_count += 1
+            if (d.get('unique_buyers') or 0) >= 75:
+                strong_count += 1
+            if (d.get('buy_percentage') or 0) >= 70:
+                strong_count += 1
+            bs_ratio = (d.get('buys_24h') or 0) / max(d.get('sells_24h') or 1, 1)
+            if bs_ratio >= 2.0:
+                strong_count += 1
+            if (d.get('market_cap') or float('inf')) <= 15000:
+                strong_count += 1
+            d['strong_metric_count'] = strong_count
+
+        combo_stats = {}
+        for d in data:
+            count = d['strong_metric_count']
+            if count not in combo_stats:
+                combo_stats[count] = {'total': 0, 'wins': 0}
+            combo_stats[count]['total'] += 1
+            if d['is_win']:
+                combo_stats[count]['wins'] += 1
+
+        for count in sorted(combo_stats.keys()):
+            stats = combo_stats[count]
+            if stats['total'] >= 3:
+                wr = stats['wins'] / stats['total'] * 100
+                emoji = "✅" if wr >= baseline_wr + 5 else "🟡" if wr >= baseline_wr else "🔴"
+                logger.info(f"      {emoji} {count} strong metrics: {wr:.0f}% WR ({stats['total']} signals)")
+
+        results['combo_stats'] = combo_stats
+
+        # Check if more strong metrics = better WR
+        sorted_combos = sorted(combo_stats.items(), key=lambda x: x[0])
+        if len(sorted_combos) >= 2:
+            low_combo = sorted_combos[0]
+            high_combo = sorted_combos[-1]
+            if high_combo[1]['total'] >= 3 and low_combo[1]['total'] >= 3:
+                low_wr = low_combo[1]['wins'] / low_combo[1]['total'] * 100
+                high_wr = high_combo[1]['wins'] / high_combo[1]['total'] * 100
+                if high_wr > low_wr + 10:
+                    results['insights'].append(f"More strong metrics = higher WR ({high_combo[0]} metrics: {high_wr:.0f}% vs {low_combo[0]} metrics: {low_wr:.0f}%)")
+                    logger.info(f"      💡 Pattern: More strong metrics correlates with higher WR")
+
+        # Summary of insights
+        logger.info("")
+        if results['insights']:
+            logger.info("   💡 KEY INSIGHTS:")
+            for insight in results['insights']:
+                logger.info(f"      • {insight}")
 
         return results
 
