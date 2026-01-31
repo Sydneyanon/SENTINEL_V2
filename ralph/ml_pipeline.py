@@ -63,44 +63,75 @@ class MLPipeline:
         """
         Extract ML features from a token
 
+        Handles two data formats:
+        1. External data (from DexScreener scraping)
+        2. Signal data (from our database via /syncmldata)
+
         Returns:
             Dict of feature_name: value
         """
         features = {}
 
-        # KOL features
-        features['kol_count'] = token.get('our_kol_count', 0)
+        # Detect data source
+        is_signal_data = 'conviction_score' in token or 'entry_price' in token
+
+        # KOL features - handle both formats
+        if is_signal_data:
+            features['kol_count'] = token.get('kol_count', 0) or len(token.get('kol_wallets') or [])
+            features['has_kol'] = 1 if features['kol_count'] > 0 else 0
+        else:
+            features['kol_count'] = token.get('our_kol_count', 0)
+            features['has_kol'] = 1 if features['kol_count'] > 0 else 0
+
         features['new_wallet_count'] = token.get('new_wallet_count', 0)
 
-        # Holder metrics
+        # Holder metrics - handle both formats
         onchain = token.get('onchain_metrics', {})
         features['holder_count'] = onchain.get('holder_count', 0)
         features['top_10_concentration'] = onchain.get('top_10_concentration_pct', 0)
         features['top_3_concentration'] = onchain.get('top_3_concentration_pct', 0)
         features['decentralization_score'] = onchain.get('decentralization_score', 0)
 
-        # Volume/Liquidity
-        features['volume_24h'] = token.get('volume_24h', 0)
-        features['liquidity_usd'] = token.get('liquidity_usd', 0)
+        # Volume/Liquidity - handle both formats
+        features['volume_24h'] = token.get('volume_24h', 0) or 0
+        features['liquidity_usd'] = token.get('liquidity_usd', 0) or token.get('liquidity', 0) or 0
         features['volume_to_liquidity'] = (
             features['volume_24h'] / features['liquidity_usd']
             if features['liquidity_usd'] > 0 else 0
         )
 
-        # Price momentum
-        features['price_change_24h'] = token.get('price_change_24h', 0)
-        features['price_change_6h'] = token.get('price_change_6h', 0)
-        features['price_change_1h'] = token.get('price_change_1h', 0)
+        # Market cap
+        features['market_cap'] = token.get('market_cap', 0) or token.get('fdv', 0) or 0
 
-        # Security
+        # Conviction score (our signal data) - key feature!
+        features['conviction_score'] = token.get('conviction_score', 0) or 0
+
+        # Buy/sell metrics - handle both formats
+        features['buy_percentage'] = token.get('buy_percentage', 50) or 50
+        features['buy_sell_score'] = token.get('buy_sell_score', 0) or 0
+        features['buys_24h'] = token.get('buys_24h', 0) or token.get('txns_24h_buys', 0) or 0
+        features['sells_24h'] = token.get('sells_24h', 0) or token.get('txns_24h_sells', 0) or 0
+
+        # Bonding curve (pump.fun specific)
+        features['bonding_curve_pct'] = token.get('bonding_curve_pct', 0) or 0
+
+        # Price momentum - handle both formats
+        features['price_change_24h'] = token.get('price_change_24h', 0) or 0
+        features['price_change_6h'] = token.get('price_change_6h', 0) or 0
+        features['price_change_1h'] = token.get('price_change_1h', 0) or 0
+
+        # Security - handle both formats
         security = token.get('security', {})
-        features['rugcheck_score'] = security.get('rugcheck_score', 0)
+        features['rugcheck_score'] = security.get('rugcheck_score', 0) or 0
         features['is_rugged'] = 1 if security.get('rugged', False) else 0
         features['is_honeypot'] = 1 if security.get('is_honeypot', False) else 0
 
         # Risk level encoding (0=good, 1=low, 2=medium, 3=high, 4=critical)
         risk_map = {'good': 0, 'low': 1, 'medium': 2, 'high': 3, 'critical': 4}
         features['risk_level'] = risk_map.get(security.get('risk_level', 'medium'), 2)
+
+        # Is missed winner (from missed winners collector)
+        features['is_missed_winner'] = 1 if token.get('is_missed_winner', False) else 0
 
         # Token age (if available)
         if token.get('created_at'):
@@ -168,20 +199,51 @@ class MLPipeline:
         """
         Classify token outcome for training
 
+        Handles two data formats:
+        1. External data: uses 'price_change_24h' (percentage)
+        2. Signal data: uses 'roi' (multiplier) or 'outcome' (string)
+
         Returns:
             0 = rug/failed
-            1 = 2x (100-300%)
-            2 = 10x (300-900%)
-            3 = 50x (900-4900%)
-            4 = 100x+ (5000%+)
+            1 = 2x (100-300% or 2-3x)
+            2 = 10x (300-900% or 3-10x)
+            3 = 50x (900-4900% or 10-50x)
+            4 = 100x+ (5000%+ or 50x+)
         """
-        # Check if rugged
+        # Check if rugged (both formats)
         security = token.get('security', {})
         if security.get('rugged') or security.get('is_honeypot'):
             return 0
 
-        # Classify by price change
-        gain = token.get('price_change_24h', 0)
+        # Check for pre-classified outcome (from /syncmldata or missed_winners)
+        outcome = token.get('outcome', '')
+        if outcome:
+            outcome_map = {
+                'rug': 0, 'loss': 0, 'small': 0,
+                '2x': 1, '3x': 1,
+                '5x': 2, '10x': 2,
+                '50x': 3,
+                '100x': 4, '100x+': 4
+            }
+            if outcome in outcome_map:
+                return outcome_map[outcome]
+
+        # Check for ROI multiplier (from signal data)
+        roi = token.get('roi', 0) or token.get('calculated_roi', 0)
+        if roi and roi > 0:
+            if roi < 2:
+                return 0  # Failed/rug
+            elif roi < 3:
+                return 1  # 2x
+            elif roi < 10:
+                return 2  # ~10x
+            elif roi < 50:
+                return 3  # ~50x
+            else:
+                return 4  # 100x+
+
+        # Fallback: Classify by price change percentage (external data format)
+        gain = token.get('price_change_24h', 0) or 0
 
         if gain < 100:  # Less than 2x
             return 0  # Failed/rug
@@ -247,8 +309,8 @@ class MLPipeline:
         if tokens is None:
             tokens = self.load_data()
 
-        if len(tokens) < 50:
-            logger.error(f"❌ Need at least 50 tokens to train. Only have {len(tokens)}")
+        if len(tokens) < 30:
+            logger.error(f"❌ Need at least 30 tokens to train. Only have {len(tokens)}")
             return False
 
         # Prepare data
