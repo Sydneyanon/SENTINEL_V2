@@ -175,7 +175,10 @@ class PumpMonitorV2:
         - If yes, trigger immediate re-analysis via ActiveTokenTracker
         """
         token_address = data.get('mint')
-        bonding_pct = data.get('bondingCurvePercentage', 0)
+        # Calculate bonding % from vSolInBondingCurve (PumpPortal doesn't send bondingCurvePercentage)
+        v_sol_raw = data.get('vSolInBondingCurve', 0)
+        v_sol = v_sol_raw / 1e9 if v_sol_raw > 1000 else v_sol_raw  # Handle lamports vs SOL
+        bonding_pct = min((v_sol / 85) * 100, 100) if v_sol > 0 else 0  # 85 SOL = graduation
         tx_type = data.get('txType')  # 'buy' or 'sell'
         trader_wallet = data.get('traderPublicKey')
         
@@ -496,8 +499,11 @@ class PumpMonitorV2:
     async def _extract_token_data(self, data: Dict) -> Dict:
         """Extract token data with unique buyer count"""
         token_address = data.get('mint')
-        bonding_pct = data.get('bondingCurvePercentage', 0)
-        
+        # Calculate bonding % from vSolInBondingCurve (PumpPortal doesn't send bondingCurvePercentage)
+        v_sol_raw = data.get('vSolInBondingCurve', 0)
+        v_sol = v_sol_raw / 1e9 if v_sol_raw > 1000 else v_sol_raw  # Handle lamports vs SOL
+        bonding_pct = min((v_sol / 85) * 100, 100) if v_sol > 0 else 0  # 85 SOL = graduation
+
         token_data = {
             'token_address': token_address,
             'token_name': data.get('name'),
@@ -505,7 +511,7 @@ class PumpMonitorV2:
             'description': data.get('description', ''),
             'bonding_curve_pct': bonding_pct,
             'market_cap': data.get('marketCapSol', 0) * 150,
-            'liquidity': data.get('vSolInBondingCurve', 0) * 150,
+            'liquidity': v_sol * 150,  # v_sol already converted above
             'volume_24h': data.get('volume24h', 0),
             'price_usd': data.get('priceUsd', 0),
             'price_native': data.get('priceNative', 0),
