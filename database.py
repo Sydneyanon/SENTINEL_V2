@@ -1225,6 +1225,69 @@ class Database:
             logger.error(f"Error clearing all tracked wallets: {e}")
             return -1  # Return -1 to indicate error
 
+    async def get_all_signals_for_ml(self) -> List[Dict]:
+        """
+        Get ALL signals with outcome data for ML training.
+        No time limit - fetches entire history.
+
+        Returns:
+            List of signals with full metadata for ML training
+        """
+        try:
+            async with self.pool.acquire() as conn:
+                # Get all posted signals that have price data (for outcome calculation)
+                rows = await conn.fetch('''
+                    SELECT
+                        token_address,
+                        token_symbol,
+                        conviction_score,
+                        entry_price,
+                        max_price_reached,
+                        bonding_curve_pct,
+                        buy_percentage,
+                        buy_sell_score,
+                        liquidity,
+                        volume_24h,
+                        market_cap,
+                        kol_wallets,
+                        narrative_tags,
+                        outcome,
+                        max_roi,
+                        created_at
+                    FROM signals
+                    WHERE signal_posted = TRUE
+                    AND entry_price > 0
+                    ORDER BY created_at DESC
+                ''')
+
+                signals = []
+                for row in rows:
+                    signal = dict(row)
+                    # Calculate outcome if not set but we have price data
+                    if signal['max_price_reached'] and signal['entry_price']:
+                        roi = signal['max_price_reached'] / signal['entry_price']
+                        if not signal.get('outcome'):
+                            if roi >= 100:
+                                signal['outcome'] = '100x'
+                            elif roi >= 50:
+                                signal['outcome'] = '50x'
+                            elif roi >= 10:
+                                signal['outcome'] = '10x'
+                            elif roi >= 2:
+                                signal['outcome'] = '2x'
+                            elif roi < 0.5:
+                                signal['outcome'] = 'rug'
+                            else:
+                                signal['outcome'] = 'loss'
+                        signal['calculated_roi'] = roi
+                    signals.append(signal)
+
+                logger.info(f"✅ Retrieved {len(signals)} signals for ML training")
+                return signals
+        except Exception as e:
+            logger.error(f"Error getting signals for ML: {e}")
+            return []
+
     async def get_tracked_wallets_for_conviction(self) -> dict:
         """Get tracked wallets in format for SmartWalletTracker (address -> wallet_info dict)"""
         try:
