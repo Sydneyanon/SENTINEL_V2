@@ -275,10 +275,21 @@ class AdminBot:
 
             # Signals
             r += "<b>📈 Signals:</b>\n"
-            r += f"   Total: {status['total_signals']}\n"
+            r += f"   Total posted: {status['total_signals']}\n"
             r += f"   With outcomes: {status['with_outcomes']}\n"
-            r += f"   Pending: {status['pending_outcomes']}\n"
+            r += f"   Pending outcomes: {status['pending_outcomes']}\n"
             r += f"   Last 24h: {status['recent_24h']}\n\n"
+
+            # Diagnostic breakdown
+            r += "<b>🔍 Data Quality:</b>\n"
+            r += f"   Usable for ML: {status.get('usable_for_ml', status['with_outcomes'])}\n"
+            missing_outcome = status.get('missing_outcome', 0)
+            missing_price = status.get('missing_entry_price', 0)
+            if missing_outcome > 0:
+                r += f"   ⏳ Missing outcome: {missing_outcome}\n"
+            if missing_price > 0:
+                r += f"   ⚠️ Missing entry price: {missing_price}\n"
+            r += "\n"
 
             # Outcomes breakdown
             if status['outcome_distribution']:

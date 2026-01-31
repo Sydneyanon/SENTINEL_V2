@@ -74,10 +74,31 @@ class DataManager:
             ml_ready = with_outcomes >= 30
             ml_status = "✅ Ready" if ml_ready else f"⏳ Need {30 - with_outcomes} more"
 
+            # Diagnostic: why are signals missing from training?
+            missing_entry_price = await conn.fetchval('''
+                SELECT COUNT(*) FROM signals
+                WHERE signal_posted = TRUE AND outcome IS NOT NULL
+                  AND (entry_price IS NULL OR entry_price = 0)
+            ''')
+
+            missing_outcome = await conn.fetchval('''
+                SELECT COUNT(*) FROM signals
+                WHERE signal_posted = TRUE AND outcome IS NULL
+            ''')
+
+            # Usable for ML (has outcome, regardless of entry_price)
+            usable_for_ml = await conn.fetchval('''
+                SELECT COUNT(*) FROM signals
+                WHERE signal_posted = TRUE AND outcome IS NOT NULL
+            ''')
+
         return {
             'total_signals': total or 0,
             'with_outcomes': with_outcomes or 0,
             'pending_outcomes': (total or 0) - (with_outcomes or 0),
+            'missing_outcome': missing_outcome or 0,
+            'missing_entry_price': missing_entry_price or 0,
+            'usable_for_ml': usable_for_ml or 0,
             'outcome_distribution': outcome_dist,
             'recent_24h': recent_24h or 0,
             'recent_with_outcomes': recent_with_outcomes or 0,
@@ -98,6 +119,8 @@ class DataManager:
             return []
 
         async with self.db.pool.acquire() as conn:
+            # Include ALL signals with outcomes - don't require entry_price
+            # We can still use conviction_score, metrics, and outcome for ML
             query = '''
                 SELECT
                     token_address, token_symbol, conviction_score,
@@ -108,7 +131,6 @@ class DataManager:
                 FROM signals
                 WHERE signal_posted = TRUE
                   AND outcome IS NOT NULL
-                  AND entry_price > 0
             '''
 
             if days:
