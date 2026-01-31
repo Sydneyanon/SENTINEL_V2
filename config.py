@@ -49,10 +49,10 @@ TELEGRAM_PHONE = os.getenv('TELEGRAM_PHONE')  # Your phone number (optional, for
 # CREDIT OPTIMIZATION (CRITICAL!)
 # =============================================================================
 
-# KOL TRACKING - DISABLED (2026-01-31)
-# Analysis shows KOLs have 18% WR vs Organic 29% WR (-11% difference)
-# Going pure organic until we can find consistently good wallets
-ENABLE_KOL_TRACKING = False  # ← DISABLED: KOLs underperforming organic by 11%
+# KOL TRACKING - RE-ENABLED (STABLE MODE)
+# Jan 22 used KOL tracking and had 53% WR with fewer but higher quality signals
+# Organic scanner has been unreliable - reverting to proven approach
+ENABLE_KOL_TRACKING = True   # ← RE-ENABLED: STABLE MODE (Jan 22 config)
 
 # STRICT MODE: Only track tokens bought by KOLs (saves massive API credits)
 # When True: Only tracks tokens from /webhook/smart-wallet (KOL buys)
@@ -78,11 +78,11 @@ DISABLE_POLLING_BELOW_THRESHOLD = True
 # - Added buyer velocity scoring (0-18 pts) and bonding curve speed (0-15 pts)
 # - Unique buyers (0-10), volume (0-12), narrative (0-7 RSS+BERTopic), telegram (0-5)
 # - Lowered post-grad threshold from 75 to 65 (no KOL boost available)
-# UPDATE 2026-01-31 (RALPH OPTIMIZATION):
-# - Lowered MIN_CONVICTION_SCORE from 50 to 30 (same WR, more signals)
-# - Data shows threshold doesn't significantly impact WR (26% at all levels)
-MIN_CONVICTION_SCORE = 30  # Pre-grad threshold (Ralph: same WR at 30 vs 50, more signals)
-POST_GRAD_THRESHOLD = 55   # Post-grad threshold (lowered from 65 to catch runners - 2026-01-31)
+# UPDATE 2026-01-31 (STABLE MODE - REVERT):
+# - Raised MIN_CONVICTION_SCORE back to 60 (Jan 22 had 53% WR with stricter threshold)
+# - Quality > Quantity: fewer signals but higher win rate
+MIN_CONVICTION_SCORE = 60  # Pre-grad threshold (REVERTED to stable - Jan 22 config)
+POST_GRAD_THRESHOLD = 75   # Post-grad threshold (REVERTED to stable)
 
 # Base score threshold for distribution checks
 # Only check distribution if base score >= this value
@@ -105,11 +105,11 @@ DISTRIBUTION_CHECK_THRESHOLD = 30
 
 # Combined WEIGHTS dictionary (required by conviction engine)
 WEIGHTS = {
-    # Smart Wallet Activity - DISABLED (2026-01-31: KOLs underperform organic by 11%)
-    'smart_wallet_elite': 0,        # DISABLED - was 15
-    'smart_wallet_kol': 0,          # DISABLED - was 10
-    'smart_wallet_verified': 0,     # DISABLED - was 7
-    'smart_wallet_emerging': 0,     # DISABLED - was 4
+    # Smart Wallet Activity - RE-ENABLED (STABLE MODE)
+    'smart_wallet_elite': 15,       # RESTORED: Elite tier wallets
+    'smart_wallet_kol': 10,         # RESTORED: Top KOL wallets
+    'smart_wallet_verified': 7,     # RESTORED: Verified wallets
+    'smart_wallet_emerging': 4,     # RESTORED: Emerging wallets
 
     # Narrative Detection (max 7 points — RSS+BERTopic matching)
     'narrative_hot': 5,             # Hot/trending narrative (RSS+BERTopic cluster match)
@@ -134,12 +134,13 @@ WEIGHTS = {
 # DETAILED SCORING WEIGHTS (for specific calculations)
 # =============================================================================
 
-# Smart Wallet Activity - DISABLED (2026-01-31: KOLs underperform organic by 11%)
+# Smart Wallet Activity - RE-ENABLED (STABLE MODE)
+# Jan 22 had 53% WR with KOL-based scoring
 SMART_WALLET_WEIGHTS = {
-    'per_kol': 0,            # DISABLED - was 10
-    'max_score': 0,          # DISABLED - was 40 (this is the key flag)
-    'multi_kol_bonus': 0,    # DISABLED - was 15
-    'kol_time_window': 300   # 5 minutes for multi-KOL bonus (kept for reference)
+    'per_kol': 10,           # RESTORED: +10 per KOL buy
+    'max_score': 40,         # RESTORED: max 40 pts from smart wallets
+    'multi_kol_bonus': 15,   # RESTORED: bonus for multiple KOLs
+    'kol_time_window': 300   # 5 minutes for multi-KOL bonus
 }
 
 # =============================================================================
@@ -204,7 +205,7 @@ EARLY_PUMP_ALERT = {
 # - Raised min_bonding_pct: 20 → 40 (data shows ≥40% bonding wins more)
 # =============================================================================
 ORGANIC_SCANNER = {
-    'enabled': True,
+    'enabled': False,              # DISABLED: STABLE MODE - Jan 22 didn't use organic scanner
     'min_unique_buyers': 50,       # Raised from 30 to reduce rugs (2026-01-31)
     'min_buy_ratio': 0.65,         # Raised from 0.55 to filter weak momentum (2026-01-31)
     'min_buy_sell_ratio': 1.0,     # Reverted to 1.0 (was 2.0 - too strict, blocking signals)
@@ -223,7 +224,7 @@ ORGANIC_SCANNER = {
 # Pattern: Graduate at ~$69K → dump to $10-30K → consolidate → moon to $500K+
 # =============================================================================
 POST_GRAD_REVIVAL_SCANNER = {
-    'enabled': True,
+    'enabled': False,             # DISABLED: STABLE MODE - experimental feature
     'watchlist_hours': 48,           # How long to watch after graduation
     'min_drop_pct': 40,              # Min % drop from graduation price to consider
     'min_recovery_pct': 15,          # Min % recovery from local low to trigger
@@ -250,7 +251,7 @@ POST_GRAD_REVIVAL_SCANNER = {
 # That's a 7x difference between best and worst hours!
 # =============================================================================
 TIME_FILTER = {
-    'enabled': True,
+    'enabled': False,             # DISABLED: STABLE MODE - experimental feature
     'mode': 'block_worst',  # 'block_worst' = skip worst hours, 'boost_best' = add points for best hours
 
     # Hours to SKIP signals (UTC) - these have <15% win rate
@@ -374,7 +375,7 @@ EARLY_KILL_SWITCH = {
 
 MIN_HOLDERS = 20            # Minimum holders for any signal
 MIN_UNIQUE_BUYERS = 15      # Minimum unique buyers for pre-grad signals
-MIN_LIQUIDITY = 8000        # Lowered to catch 40-60% bonding curve tokens (~$8K-$18K liquidity range)
+MIN_LIQUIDITY = 20000       # REVERTED: Stricter liquidity requirement (stable mode)
 
 # =============================================================================
 # RUG DETECTION SETTINGS (Grok's Anti-Scam System)
