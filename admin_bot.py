@@ -79,6 +79,7 @@ class AdminBot:
             self.app.add_handler(CommandHandler("winratekol", self._cmd_winrate_kol, filters=admin_filter))
             self.app.add_handler(CommandHandler("sources", self._cmd_sources, filters=admin_filter))
             self.app.add_handler(CommandHandler("revivals", self._cmd_revivals, filters=admin_filter))
+            self.app.add_handler(CommandHandler("checksignal", self._cmd_checksignal, filters=admin_filter))
             self.app.add_handler(CommandHandler("kolstats", self._cmd_kolstats, filters=admin_filter))
             self.app.add_handler(CommandHandler("analyze", self._cmd_analyze, filters=admin_filter))
             self.app.add_handler(CommandHandler("testbanner", self._cmd_testbanner, filters=admin_filter))
@@ -2191,6 +2192,78 @@ class AdminBot:
 
         except Exception as e:
             logger.error(f"❌ Error in /revivals: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            await self._send_response(update, context, f"❌ Error: {str(e)}")
+
+    async def _cmd_checksignal(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Debug command: Check signal status for a specific token"""
+        try:
+            if not context.args:
+                await self._send_response(update, context,
+                    "Usage: <code>/checksignal &lt;token_address&gt;</code>\n\n"
+                    "Checks database status for debugging milestones.")
+                return
+
+            token_address = context.args[0]
+
+            if not self.database or not self.database.pool:
+                await self._send_response(update, context, "❌ Database not available")
+                return
+
+            async with self.database.pool.acquire() as conn:
+                # Get signal info
+                signal = await conn.fetchrow('''
+                    SELECT token_symbol, signal_posted, entry_price, conviction_score,
+                           signal_type, signal_source, created_at, telegram_message_id
+                    FROM signals
+                    WHERE token_address = $1
+                ''', token_address)
+
+                # Get milestones
+                milestones = await conn.fetch('''
+                    SELECT milestone, price_at_milestone, reached_at
+                    FROM performance
+                    WHERE token_address = $1
+                    ORDER BY milestone
+                ''', token_address)
+
+            r = f"🔍 <b>SIGNAL DEBUG</b>\n"
+            r += f"<code>{token_address[:20]}...</code>\n\n"
+
+            if signal:
+                r += "<b>📊 SIGNAL STATUS</b>\n"
+                r += f"• Symbol: {signal['token_symbol']}\n"
+                r += f"• Posted: {'✅ YES' if signal['signal_posted'] else '❌ NO'}\n"
+                r += f"• Entry Price: ${signal['entry_price']:.8f}\n"
+                r += f"• Score: {signal['conviction_score']}\n"
+                r += f"• Type: {signal['signal_type']}\n"
+                r += f"• Source: {signal['signal_source']}\n"
+                r += f"• TG Msg ID: {signal['telegram_message_id']}\n"
+                r += f"• Created: {signal['created_at']}\n\n"
+
+                # Diagnose issues
+                if not signal['signal_posted']:
+                    r += "⚠️ <b>ISSUE:</b> signal_posted=FALSE\n"
+                    r += "   Performance tracker won't track this!\n\n"
+                if signal['entry_price'] == 0:
+                    r += "⚠️ <b>ISSUE:</b> entry_price=0\n"
+                    r += "   Performance tracker skips $0 prices!\n\n"
+            else:
+                r += "❌ <b>TOKEN NOT IN SIGNALS TABLE</b>\n"
+                r += "   This token was never signaled.\n\n"
+
+            if milestones:
+                r += "<b>🎯 MILESTONES RECORDED</b>\n"
+                for m in milestones:
+                    r += f"• {m['milestone']}x at ${m['price_at_milestone']:.8f}\n"
+            else:
+                r += "<b>🎯 MILESTONES:</b> None recorded\n"
+
+            await self._send_response(update, context, r)
+
+        except Exception as e:
+            logger.error(f"❌ Error in /checksignal: {e}")
             import traceback
             logger.error(traceback.format_exc())
             await self._send_response(update, context, f"❌ Error: {str(e)}")
