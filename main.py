@@ -11,8 +11,12 @@ from datetime import datetime, timedelta
 import sys
 import os
 
+# Import config first for LOG_LEVEL default
+import config
+
 # Configure logging (environment-based to avoid Railway 500 logs/sec limit)
-LOG_LEVEL = os.getenv('LOG_LEVEL', 'WARNING').upper()  # Default: WARNING (minimal logs)
+# Falls back to config.LOG_LEVEL if env var not set
+LOG_LEVEL = os.getenv('LOG_LEVEL', config.LOG_LEVEL).upper()
 logger.remove()
 logger.add(
     sys.stdout,
@@ -21,7 +25,6 @@ logger.add(
 )
 
 # Import existing modules
-import config
 from database import Database
 from pump_monitor_v2 import PumpMonitorV2
 from performance_tracker import PerformanceTracker
