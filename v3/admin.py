@@ -3,11 +3,10 @@ SENTINEL V3 - Admin Bot
 Essential commands only. Clean and focused.
 """
 import asyncio
-from telegram import Update, Bot
+from telegram import Update, Bot, BotCommand
 from telegram.ext import Application, CommandHandler, ContextTypes
 from telegram.constants import ParseMode
 from loguru import logger
-from datetime import datetime
 
 from config import TELEGRAM_BOT_TOKEN, ADMIN_USER_ID
 import database as db
@@ -40,6 +39,16 @@ class AdminBot:
         await self.app.initialize()
         await self.app.start()
         await self.app.updater.start_polling(drop_pending_updates=True)
+
+        # Register commands with Telegram menu
+        await self.app.bot.set_my_commands([
+            BotCommand("stats", "Overall statistics"),
+            BotCommand("wallets", "Wallet performance"),
+            BotCommand("active", "Currently tracking"),
+            BotCommand("history", "Daily win rates"),
+            BotCommand("addwallet", "Add a wallet"),
+            BotCommand("help", "Show commands"),
+        ])
 
         self.running = True
         logger.info(f"Admin bot started (admin: {ADMIN_USER_ID})")
