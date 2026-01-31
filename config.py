@@ -218,6 +218,31 @@ ORGANIC_SCANNER = {
 }
 
 # =============================================================================
+# NEW: POST-GRADUATION REVIVAL SCANNER (2026-01-31)
+# Monitors recently graduated tokens for "bottom reversal" patterns
+# Pattern: Graduate at ~$69K → dump to $10-30K → consolidate → moon to $500K+
+# =============================================================================
+POST_GRAD_REVIVAL_SCANNER = {
+    'enabled': True,
+    'watchlist_hours': 48,           # How long to watch after graduation
+    'min_drop_pct': 40,              # Min % drop from graduation price to consider
+    'min_recovery_pct': 15,          # Min % recovery from local low to trigger
+    'min_volume_5m': 5000,           # Min 5m volume (USD) for revival signal
+    'min_volume_1h': 20000,          # Min 1h volume (USD) for revival signal
+    'min_mcap': 10000,               # Min MCAP to consider ($10K - catches deep dumps)
+    'max_mcap': 200000,              # Max MCAP to consider ($200K - still early)
+    'poll_interval': 60,             # Seconds between DexScreener polls
+    'max_watchlist_size': 100,       # Limit watchlist to prevent API spam
+
+    # GRADUATION MOMENTUM: Track hot tokens immediately (no dump required)
+    # For tokens that graduate and keep pumping without a pullback
+    'graduation_momentum_enabled': True,
+    'momentum_min_volume_1h': 50000,    # Min 1h volume (USD) for immediate tracking
+    'momentum_min_price_change': 5,     # Min % price above graduation to trigger
+    'momentum_max_mcap': 300000,        # Max MCAP for momentum tracking ($300K)
+}
+
+# =============================================================================
 # TIME-BASED FILTERING (Ralph Discovery 2026-01-31)
 # Analysis shows HUGE win rate differences by hour:
 # - Best: 16:00 UTC (71% WR), 8:00 UTC (50% WR)

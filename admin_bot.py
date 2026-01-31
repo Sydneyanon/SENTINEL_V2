@@ -77,6 +77,9 @@ class AdminBot:
             self.app.add_handler(CommandHandler("resume", self._cmd_resume, filters=admin_filter))
             self.app.add_handler(CommandHandler("winrate", self._cmd_winrate, filters=admin_filter))
             self.app.add_handler(CommandHandler("winratekol", self._cmd_winrate_kol, filters=admin_filter))
+            self.app.add_handler(CommandHandler("sources", self._cmd_sources, filters=admin_filter))
+            self.app.add_handler(CommandHandler("revivals", self._cmd_revivals, filters=admin_filter))
+            self.app.add_handler(CommandHandler("checksignal", self._cmd_checksignal, filters=admin_filter))
             self.app.add_handler(CommandHandler("kolstats", self._cmd_kolstats, filters=admin_filter))
             self.app.add_handler(CommandHandler("analyze", self._cmd_analyze, filters=admin_filter))
             self.app.add_handler(CommandHandler("testbanner", self._cmd_testbanner, filters=admin_filter))
@@ -216,9 +219,11 @@ class AdminBot:
 /performance - Recent signal performance
 /toprunners - All 2x+ winners
 /kolstats - KOL performance breakdown
+/sources - Compare KOL vs Organic discovery
 
 <b>Monitoring:</b>
 /active - Currently tracked tokens
+/revivals - Post-grad revival scanner watchlist
 /health - System health check
 /config - Live scoring config values
 
@@ -2041,6 +2046,224 @@ class AdminBot:
 
         except Exception as e:
             logger.error(f"❌ Error in /winratekol: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            await self._send_response(update, context, f"❌ Error: {str(e)}")
+
+    async def _cmd_sources(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Compare KOL vs Organic discovery performance"""
+        try:
+            if not self.database or not self.database.pool:
+                await self._send_response(update, context, "❌ Database not available")
+                return
+
+            async with self.database.pool.acquire() as conn:
+                # Group sources into KOL vs Organic
+                stats = await conn.fetch("""
+                    SELECT
+                        CASE
+                            WHEN signal_source = 'organic_scanner' THEN 'ORGANIC'
+                            WHEN signal_source IN ('kol_buy', 'telegram_call') THEN 'KOL'
+                            ELSE 'OTHER'
+                        END as category,
+                        signal_source,
+                        COUNT(*) as total,
+                        SUM(CASE WHEN outcome IN ('2x','5x','10x','50x','100x') THEN 1 ELSE 0 END) as wins,
+                        SUM(CASE WHEN outcome = 'rug' THEN 1 ELSE 0 END) as rugs,
+                        SUM(CASE WHEN outcome = 'loss' THEN 1 ELSE 0 END) as losses,
+                        SUM(CASE WHEN outcome IS NULL THEN 1 ELSE 0 END) as pending,
+                        ROUND(AVG(CASE WHEN max_roi IS NOT NULL THEN max_roi END)::numeric, 2) as avg_roi,
+                        ROUND(MAX(CASE WHEN max_roi IS NOT NULL THEN max_roi END)::numeric, 1) as best_roi,
+                        ROUND(AVG(conviction_score)::numeric, 0) as avg_score
+                    FROM signals
+                    WHERE signal_posted = TRUE
+                    GROUP BY category, signal_source
+                    ORDER BY category, total DESC
+                """)
+
+                # Summary by category
+                summary = await conn.fetch("""
+                    SELECT
+                        CASE
+                            WHEN signal_source = 'organic_scanner' THEN 'ORGANIC'
+                            WHEN signal_source IN ('kol_buy', 'telegram_call') THEN 'KOL'
+                            ELSE 'OTHER'
+                        END as category,
+                        COUNT(*) as total,
+                        SUM(CASE WHEN outcome IN ('2x','5x','10x','50x','100x') THEN 1 ELSE 0 END) as wins,
+                        SUM(CASE WHEN outcome = 'rug' THEN 1 ELSE 0 END) as rugs,
+                        SUM(CASE WHEN outcome = 'loss' THEN 1 ELSE 0 END) as losses,
+                        SUM(CASE WHEN outcome IS NULL THEN 1 ELSE 0 END) as pending,
+                        ROUND(AVG(CASE WHEN max_roi IS NOT NULL THEN max_roi END)::numeric, 2) as avg_roi,
+                        ROUND(MAX(CASE WHEN max_roi IS NOT NULL THEN max_roi END)::numeric, 1) as best_roi
+                    FROM signals
+                    WHERE signal_posted = TRUE
+                    GROUP BY category
+                    ORDER BY category
+                """)
+
+            r = "📡 <b>DISCOVERY SOURCE COMPARISON</b>\n"
+            r += "<i>KOL = wallet tracking | ORGANIC = on-chain scanner</i>\n\n"
+
+            # Category summary
+            for row in summary:
+                cat = row['category']
+                decided = row['total'] - row['pending']
+                wr = (row['wins'] / decided * 100) if decided > 0 else 0
+                rr = (row['rugs'] / decided * 100) if decided > 0 else 0
+
+                emoji = "👔" if cat == "KOL" else "🔬" if cat == "ORGANIC" else "❓"
+                status = "🟢" if wr >= 40 else "🟡" if wr >= 25 else "🔴"
+
+                r += f"<b>{emoji} {cat}</b>\n"
+                r += f"{status} Win Rate: <b>{wr:.0f}%</b> ({row['wins']}W / {row['losses']}L / {row['rugs']}R)\n"
+                r += f"   Signals: {row['total']} total ({row['pending']} pending)\n"
+                r += f"   Avg ROI: {row['avg_roi'] or 0}x | Best: {row['best_roi'] or 0}x\n\n"
+
+            # Detailed breakdown
+            r += "<b>📋 DETAILED BREAKDOWN</b>\n"
+            for row in stats:
+                src = row['signal_source'] or 'unknown'
+                decided = row['total'] - row['pending']
+                wr = (row['wins'] / decided * 100) if decided > 0 else 0
+                r += f"• {src}: {wr:.0f}% WR ({row['wins']}W/{row['rugs']}R) avg {row['avg_roi'] or 0}x [{row['total']} sig]\n"
+
+            # Note about historical data
+            r += "\n<i>⚠️ Note: All signals before Jan 31 are KOL (organic scanner was broken)</i>"
+
+            await self._send_response(update, context, r)
+
+        except Exception as e:
+            logger.error(f"❌ Error in /sources: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            await self._send_response(update, context, f"❌ Error: {str(e)}")
+
+    async def _cmd_revivals(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Show post-grad revival scanner watchlist"""
+        try:
+            # Get revival scanner from main module
+            from main import revival_scanner
+
+            if not revival_scanner:
+                await self._send_response(update, context,
+                    "⏭️ Revival scanner not enabled.\n\n"
+                    "Enable in config.py:\n"
+                    "<code>POST_GRAD_REVIVAL_SCANNER['enabled'] = True</code>")
+                return
+
+            stats = revival_scanner.get_stats()
+            watchlist = revival_scanner.get_watchlist_summary()
+
+            r = "🔄 <b>POST-GRAD REVIVAL SCANNER</b>\n\n"
+
+            # Stats
+            r += "<b>📊 STATS</b>\n"
+            r += f"• Graduations tracked: {stats['graduations_tracked']}\n"
+            r += f"• 🔥 Momentum triggers: {stats.get('momentum_triggers', 0)}\n"
+            r += f"• 🔄 Revivals detected: {stats['revivals_detected']}\n"
+            r += f"• Tokens expired: {stats['tokens_expired']}\n"
+            r += f"• Current watchlist: {stats['watchlist_size']}\n\n"
+
+            # Watchlist
+            if watchlist:
+                r += "<b>👀 WATCHLIST (by age)</b>\n"
+                for token in watchlist[:15]:
+                    drop_emoji = "🔻" if token['drop_pct'] > 50 else "📉"
+                    r += f"{drop_emoji} ${token['symbol']} — {token['drop_pct']:.0f}% down\n"
+                    r += f"   Grad: ${token['grad_mcap']:,.0f} → Low: ${token['lowest_mcap']:,.0f}\n"
+                    r += f"   Age: {token['age_hours']:.1f}h | <code>{token['address']}...</code>\n"
+
+                if len(watchlist) > 15:
+                    r += f"\n<i>...and {len(watchlist) - 15} more</i>\n"
+            else:
+                r += "<i>No tokens in watchlist yet.\n"
+                r += "Tokens are added when they graduate from pump.fun.</i>\n"
+
+            # Config
+            cfg = revival_scanner.config
+            r += f"\n<b>⚙️ CONFIG</b>\n"
+            r += f"• Watch duration: {cfg['watchlist_hours']}h\n"
+            r += f"• Min drop to watch: {cfg['min_drop_pct']}%\n"
+            r += f"• Min recovery to trigger: {cfg['min_recovery_pct']}%\n"
+            r += f"• MCAP range: ${cfg['min_mcap']:,} - ${cfg['max_mcap']:,}\n"
+
+            await self._send_response(update, context, r)
+
+        except Exception as e:
+            logger.error(f"❌ Error in /revivals: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            await self._send_response(update, context, f"❌ Error: {str(e)}")
+
+    async def _cmd_checksignal(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Debug command: Check signal status for a specific token"""
+        try:
+            if not context.args:
+                await self._send_response(update, context,
+                    "Usage: <code>/checksignal &lt;token_address&gt;</code>\n\n"
+                    "Checks database status for debugging milestones.")
+                return
+
+            token_address = context.args[0]
+
+            if not self.database or not self.database.pool:
+                await self._send_response(update, context, "❌ Database not available")
+                return
+
+            async with self.database.pool.acquire() as conn:
+                # Get signal info
+                signal = await conn.fetchrow('''
+                    SELECT token_symbol, signal_posted, entry_price, conviction_score,
+                           signal_type, signal_source, created_at, telegram_message_id
+                    FROM signals
+                    WHERE token_address = $1
+                ''', token_address)
+
+                # Get milestones
+                milestones = await conn.fetch('''
+                    SELECT milestone, price_at_milestone, reached_at
+                    FROM performance
+                    WHERE token_address = $1
+                    ORDER BY milestone
+                ''', token_address)
+
+            r = f"🔍 <b>SIGNAL DEBUG</b>\n"
+            r += f"<code>{token_address[:20]}...</code>\n\n"
+
+            if signal:
+                r += "<b>📊 SIGNAL STATUS</b>\n"
+                r += f"• Symbol: {signal['token_symbol']}\n"
+                r += f"• Posted: {'✅ YES' if signal['signal_posted'] else '❌ NO'}\n"
+                r += f"• Entry Price: ${signal['entry_price']:.8f}\n"
+                r += f"• Score: {signal['conviction_score']}\n"
+                r += f"• Type: {signal['signal_type']}\n"
+                r += f"• Source: {signal['signal_source']}\n"
+                r += f"• TG Msg ID: {signal['telegram_message_id']}\n"
+                r += f"• Created: {signal['created_at']}\n\n"
+
+                # Diagnose issues
+                if not signal['signal_posted']:
+                    r += "⚠️ <b>ISSUE:</b> signal_posted=FALSE\n"
+                    r += "   Performance tracker won't track this!\n\n"
+                if signal['entry_price'] == 0:
+                    r += "⚠️ <b>ISSUE:</b> entry_price=0\n"
+                    r += "   Performance tracker skips $0 prices!\n\n"
+            else:
+                r += "❌ <b>TOKEN NOT IN SIGNALS TABLE</b>\n"
+                r += "   This token was never signaled.\n\n"
+
+            if milestones:
+                r += "<b>🎯 MILESTONES RECORDED</b>\n"
+                for m in milestones:
+                    r += f"• {m['milestone']}x at ${m['price_at_milestone']:.8f}\n"
+            else:
+                r += "<b>🎯 MILESTONES:</b> None recorded\n"
+
+            await self._send_response(update, context, r)
+
+        except Exception as e:
+            logger.error(f"❌ Error in /checksignal: {e}")
             import traceback
             logger.error(traceback.format_exc())
             await self._send_response(update, context, f"❌ Error: {str(e)}")

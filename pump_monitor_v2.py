@@ -21,6 +21,7 @@ class PumpMonitorV2:
         self.ws_url = 'wss://pumpportal.fun/api/data'
         self.on_signal_callback = on_signal_callback
         self.active_tracker = active_tracker
+        self.revival_scanner = None  # Set by main.py after initialization
         self.ws = None
         self.tracked_tokens = {}
         
@@ -478,11 +479,23 @@ class PumpMonitorV2:
         """Handle graduation"""
         token_address = data.get('mint')
         symbol = data.get('symbol', 'UNKNOWN')
-        
+
         if token_address:
             buyer_count = len(self.unique_buyers.get(token_address, set()))
             logger.info(f"🎓 Graduation: ${symbol} ({buyer_count} unique buyers tracked)")
-            
+
+            # Add to revival scanner watchlist (monitors for bottom reversals)
+            if self.revival_scanner:
+                # Graduation MCAP is ~$69K, price ~$0.000069
+                graduation_mcap = data.get('marketCapSol', 0) * 150  # SOL price ~$150
+                if graduation_mcap <= 0:
+                    graduation_mcap = 69000  # Default pump.fun graduation
+                await self.revival_scanner.add_graduation(
+                    token_address=token_address,
+                    symbol=symbol,
+                    graduation_mcap=graduation_mcap
+                )
+
             # Check if this is a tracked token
             if self.active_tracker and self.active_tracker.is_tracked(token_address):
                 # Update tracked token with graduation info
@@ -493,7 +506,7 @@ class PumpMonitorV2:
                 token_data = await self._extract_token_data(data)
                 token_data['bonding_curve_pct'] = 100
                 await self.on_signal_callback(token_data, 'POST_GRADUATION')
-            
+
             self.tracked_tokens.pop(token_address, None)
     
     async def _extract_token_data(self, data: Dict) -> Dict:

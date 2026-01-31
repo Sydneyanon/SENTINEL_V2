@@ -135,6 +135,10 @@ class PerformanceTracker:
             signals = await self._get_active_signals()
             now = datetime.utcnow()
 
+            # Log tracking status every 20 cycles (~5 min)
+            if cycle % 20 == 0:
+                logger.debug(f"📊 Performance tracker: {len(signals)} active signals")
+
             for signal in signals:
                 age = now - signal['created_at']
                 is_fresh = age.total_seconds() < 3600  # < 1 hour old
@@ -169,6 +173,7 @@ class PerformanceTracker:
             signal_type = signal.get('signal_type', 'POST_GRADUATION')
             
             if not entry_price or entry_price == 0:
+                logger.debug(f"⚠️ Skipping {signal.get('token_symbol', '?')}: entry_price is 0")
                 return
             
             # Get current price based on signal type
