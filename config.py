@@ -73,7 +73,7 @@ DISABLE_POLLING_BELOW_THRESHOLD = True
 # - Added buyer velocity scoring (0-18 pts) and bonding curve speed (0-15 pts)
 # - Unique buyers (0-10), volume (0-12), narrative (0-7 RSS+BERTopic), telegram (0-5)
 # - Lowered post-grad threshold from 75 to 65 (no KOL boost available)
-MIN_CONVICTION_SCORE = 40  # Pre-grad threshold (raised from 30 to reduce rugs - 2026-01-31)
+MIN_CONVICTION_SCORE = 50  # Pre-grad threshold (emergency raise to 50 - 2026-01-31)
 POST_GRAD_THRESHOLD = 55   # Post-grad threshold (lowered from 65 to catch runners - 2026-01-31)
 
 # Base score threshold for distribution checks
