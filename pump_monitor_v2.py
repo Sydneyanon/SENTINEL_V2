@@ -13,6 +13,7 @@ import aiohttp
 from loguru import logger
 from data.curated_wallets import get_wallet_info
 import config
+from utils.sol_price import get_sol_price
 
 class PumpMonitorV2:
     """Monitors pump.fun tokens via PumpPortal WebSocket"""
@@ -490,7 +491,8 @@ class PumpMonitorV2:
             # Add to revival scanner watchlist (monitors for bottom reversals)
             if self.revival_scanner:
                 # Graduation MCAP is ~$69K, price ~$0.000069
-                graduation_mcap = data.get('marketCapSol', 0) * 150  # SOL price ~$150
+                sol_price = await get_sol_price()
+                graduation_mcap = data.get('marketCapSol', 0) * sol_price
                 if graduation_mcap <= 0:
                     graduation_mcap = 69000  # Default pump.fun graduation
                 await self.revival_scanner.add_graduation(
@@ -520,14 +522,15 @@ class PumpMonitorV2:
         v_sol = v_sol_raw / 1e9 if v_sol_raw > 1000 else v_sol_raw  # Handle lamports vs SOL
         bonding_pct = min((v_sol / 85) * 100, 100) if v_sol > 0 else 0  # 85 SOL = graduation
 
+        sol_price = await get_sol_price()  # Live SOL price (cached 5min)
         token_data = {
             'token_address': token_address,
             'token_name': data.get('name'),
             'token_symbol': data.get('symbol'),
             'description': data.get('description', ''),
             'bonding_curve_pct': bonding_pct,
-            'market_cap': data.get('marketCapSol', 0) * 150,
-            'liquidity': v_sol * 150,  # v_sol already converted above
+            'market_cap': data.get('marketCapSol', 0) * sol_price,
+            'liquidity': v_sol * sol_price,  # v_sol already converted above
             'volume_24h': data.get('volume24h', 0),
             'price_usd': data.get('priceUsd', 0),
             'price_native': data.get('priceNative', 0),
