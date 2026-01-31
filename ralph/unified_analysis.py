@@ -408,23 +408,25 @@ class RalphAnalysis:
         """
         Analyze which metrics correlate with wins vs rugs.
         Shows what thresholds work and which don't.
+        Generates actionable recommendations for each metric.
         """
         results = {
             'metrics': {},
-            'recommendations': []
+            'recommendations': [],
+            'summary': {}
         }
 
-        # Define metrics to analyze
+        # Define metrics to analyze with current config values
         metrics_config = [
-            ('conviction_score', 'Conviction Score', [30, 40, 50, 60, 70]),
-            ('buy_percentage', 'Buy %', [50, 55, 60, 65, 70, 75]),
-            ('unique_buyers', 'Unique Buyers', [20, 50, 100, 150, 200]),
-            ('bonding_curve_pct', 'Bonding %', [20, 40, 60, 80]),
-            ('buys_24h', 'Buys 24h', [50, 100, 200, 500, 1000]),
-            ('sells_24h', 'Sells 24h', [20, 50, 100, 200]),  # Lower is better
-            ('volume_24h', 'Volume 24h', [1000, 5000, 10000, 50000]),
-            ('market_cap', 'Market Cap', [10000, 25000, 50000, 100000]),
-            ('liquidity', 'Liquidity', [1000, 5000, 10000, 25000]),
+            ('conviction_score', 'Conviction Score', [30, 40, 50, 55, 60, 65, 70], config.MIN_CONVICTION_SCORE),
+            ('buy_percentage', 'Buy %', [50, 55, 60, 65, 70, 75, 80], config.ORGANIC_SCANNER.get('min_buy_ratio', 0.65) * 100),
+            ('unique_buyers', 'Unique Buyers', [20, 30, 50, 75, 100, 150, 200], config.ORGANIC_SCANNER.get('min_unique_buyers', 50)),
+            ('bonding_curve_pct', 'Bonding %', [10, 20, 30, 40, 50, 60, 70, 80], config.ORGANIC_SCANNER.get('min_bonding_pct', 20)),
+            ('buys_24h', 'Buys 24h', [25, 50, 100, 200, 500, 1000], None),
+            ('sells_24h', 'Sells 24h', [10, 25, 50, 100, 200], None),  # Lower is better
+            ('volume_24h', 'Volume 24h ($)', [500, 1000, 5000, 10000, 50000], None),
+            ('market_cap', 'Market Cap ($)', [5000, 10000, 15000, 25000, 50000], None),
+            ('liquidity', 'Liquidity ($)', [1000, 5000, 8000, 10000, 25000], config.MIN_LIQUIDITY),
         ]
 
         # Also calculate buy/sell ratio
@@ -434,7 +436,7 @@ class RalphAnalysis:
             d['buy_sell_ratio'] = buys / sells if sells > 0 else buys
 
         # Add B/S ratio to metrics
-        metrics_config.append(('buy_sell_ratio', 'Buy/Sell Ratio', [1.0, 1.5, 2.0, 3.0, 5.0]))
+        metrics_config.append(('buy_sell_ratio', 'Buy/Sell Ratio', [0.5, 1.0, 1.5, 2.0, 3.0, 5.0], None))
 
         logger.info("")
         logger.info("━" * 50)
@@ -446,14 +448,22 @@ class RalphAnalysis:
         rugs = [d for d in data if d['is_rug']]
         losses = [d for d in data if d['is_loss']]
 
-        for metric_key, metric_name, thresholds in metrics_config:
+        strong_predictors = []
+        weak_predictors = []
+
+        for metric_key, metric_name, thresholds, current_config in metrics_config:
             metric_data = {
+                'name': metric_name,
                 'wins_avg': None,
                 'rugs_avg': None,
                 'losses_avg': None,
+                'current_config': current_config,
                 'thresholds': {},
                 'best_threshold': None,
-                'recommendation': None
+                'best_wr': 0,
+                'recommendation': None,
+                'is_predictive': False,
+                'direction': 'higher'  # Whether higher is better
             }
 
             # Calculate averages
@@ -463,17 +473,28 @@ class RalphAnalysis:
 
             if win_values:
                 metric_data['wins_avg'] = sum(win_values) / len(win_values)
+                metric_data['wins_median'] = sorted(win_values)[len(win_values) // 2]
             if rug_values:
                 metric_data['rugs_avg'] = sum(rug_values) / len(rug_values)
+                metric_data['rugs_median'] = sorted(rug_values)[len(rug_values) // 2]
             if loss_values:
                 metric_data['losses_avg'] = sum(loss_values) / len(loss_values)
 
-            # Test thresholds
+            # Determine if higher or lower is better
+            if metric_data['wins_avg'] and metric_data['rugs_avg']:
+                metric_data['direction'] = 'higher' if metric_data['wins_avg'] > metric_data['rugs_avg'] else 'lower'
+
+            # Test thresholds (for "higher is better" metrics)
             best_wr = 0
             best_thresh = None
+            baseline_wr = (len(wins) / len(data) * 100) if data else 0
 
             for threshold in thresholds:
-                passing = [d for d in data if (d.get(metric_key) or 0) >= threshold]
+                if metric_data['direction'] == 'higher':
+                    passing = [d for d in data if (d.get(metric_key) or 0) >= threshold]
+                else:
+                    passing = [d for d in data if (d.get(metric_key) or float('inf')) <= threshold]
+
                 if len(passing) >= 5:
                     thresh_wins = sum(1 for d in passing if d['is_win'])
                     thresh_rugs = sum(1 for d in passing if d['is_rug'])
@@ -483,31 +504,90 @@ class RalphAnalysis:
                     metric_data['thresholds'][threshold] = {
                         'signals': len(passing),
                         'win_rate': round(thresh_wr, 1),
-                        'rug_rate': round(thresh_rr, 1)
+                        'rug_rate': round(thresh_rr, 1),
+                        'improvement': round(thresh_wr - baseline_wr, 1)
                     }
 
-                    if thresh_wr > best_wr:
+                    # Best threshold = highest WR with at least 10% of signals
+                    if thresh_wr > best_wr and len(passing) >= len(data) * 0.1:
                         best_wr = thresh_wr
                         best_thresh = threshold
 
             metric_data['best_threshold'] = best_thresh
+            metric_data['best_wr'] = best_wr
+
+            # Determine if predictive (>10% difference between wins and rugs)
+            if metric_data['wins_avg'] is not None and metric_data['rugs_avg'] is not None:
+                diff = abs(metric_data['wins_avg'] - metric_data['rugs_avg'])
+                max_val = max(metric_data['wins_avg'], metric_data['rugs_avg'], 1)
+                metric_data['is_predictive'] = diff > 0.1 * max_val
+
+            # Generate recommendation
+            if best_thresh and current_config is not None:
+                if metric_data['direction'] == 'higher' and best_thresh > current_config:
+                    best_data = metric_data['thresholds'].get(best_thresh, {})
+                    if best_data.get('win_rate', 0) > baseline_wr + 5:  # At least 5% improvement
+                        metric_data['recommendation'] = {
+                            'action': 'raise',
+                            'from': current_config,
+                            'to': best_thresh,
+                            'impact': f"+{best_data['improvement']:.0f}% WR"
+                        }
+                        results['recommendations'].append({
+                            'metric': metric_key,
+                            'name': metric_name,
+                            'action': 'raise',
+                            'from': current_config,
+                            'to': best_thresh,
+                            'impact': f"+{best_data['improvement']:.0f}% WR",
+                            'signals_kept': best_data['signals']
+                        })
+                elif metric_data['direction'] == 'lower' and best_thresh < current_config:
+                    best_data = metric_data['thresholds'].get(best_thresh, {})
+                    if best_data.get('win_rate', 0) > baseline_wr + 5:
+                        metric_data['recommendation'] = {
+                            'action': 'lower',
+                            'from': current_config,
+                            'to': best_thresh,
+                            'impact': f"+{best_data['improvement']:.0f}% WR"
+                        }
+
             results['metrics'][metric_key] = metric_data
+
+            # Classify as strong or weak predictor
+            if metric_data['is_predictive']:
+                strong_predictors.append(metric_data)
+            else:
+                weak_predictors.append(metric_data)
 
             # Log findings
             if metric_data['wins_avg'] is not None and metric_data['rugs_avg'] is not None:
                 diff = metric_data['wins_avg'] - metric_data['rugs_avg']
-                direction = "higher" if diff > 0 else "lower"
+                direction = "↑" if diff > 0 else "↓"
 
-                # Determine if this metric is predictive
-                if abs(diff) > 0.1 * max(metric_data['wins_avg'], metric_data['rugs_avg'], 1):
-                    indicator = "✅" if diff > 0 else "⚠️"
-                    logger.info(f"   {indicator} {metric_name}: Wins avg {metric_data['wins_avg']:.1f} vs Rugs {metric_data['rugs_avg']:.1f} ({direction} is better)")
-
+                if metric_data['is_predictive']:
+                    indicator = "✅"
+                    logger.info(f"   {indicator} {metric_name}:")
+                    logger.info(f"      Wins: {metric_data['wins_avg']:.1f} | Rugs: {metric_data['rugs_avg']:.1f} ({direction} wins)")
                     if best_thresh:
                         best_data = metric_data['thresholds'].get(best_thresh, {})
-                        logger.info(f"      Best threshold ≥{best_thresh}: {best_data.get('win_rate', 0):.0f}% WR ({best_data.get('signals', 0)} signals)")
+                        op = "≥" if metric_data['direction'] == 'higher' else "≤"
+                        logger.info(f"      Best: {op}{best_thresh} → {best_data.get('win_rate', 0):.0f}% WR ({best_data.get('signals', 0)} signals)")
+                    if metric_data.get('recommendation'):
+                        rec = metric_data['recommendation']
+                        logger.info(f"      💡 RECOMMEND: {rec['from']} → {rec['to']} ({rec['impact']})")
                 else:
-                    logger.info(f"   ➖ {metric_name}: No strong correlation (Wins: {metric_data['wins_avg']:.1f}, Rugs: {metric_data['rugs_avg']:.1f})")
+                    logger.info(f"   ➖ {metric_name}: Weak predictor (W:{metric_data['wins_avg']:.1f} R:{metric_data['rugs_avg']:.1f})")
+
+        # Summary
+        results['summary'] = {
+            'strong_predictors': [m['name'] for m in strong_predictors],
+            'weak_predictors': [m['name'] for m in weak_predictors],
+            'total_recommendations': len(results['recommendations'])
+        }
+
+        logger.info("")
+        logger.info(f"   📊 Summary: {len(strong_predictors)} strong predictors, {len(results['recommendations'])} recommendations")
 
         return results
 

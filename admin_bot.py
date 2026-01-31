@@ -417,30 +417,47 @@ class AdminBot:
                     r += f"   ➖ Similar performance\n"
                 r += "\n"
 
-            # Metrics breakdown (top predictors)
-            metrics = results.get('metrics_breakdown', {}).get('metrics', {})
+            # Metrics breakdown (strong predictors + recommendations)
+            metrics_data = results.get('metrics_breakdown', {})
+            metrics = metrics_data.get('metrics', {})
+            metrics_recs = metrics_data.get('recommendations', [])
+
             if metrics:
-                r += "<b>🔬 Top Predictors:</b>\n"
-                # Show metrics with biggest difference between wins and rugs
-                predictive = []
+                r += "<b>🔬 METRICS BREAKDOWN:</b>\n"
+
+                # Show strong predictors
                 for key, data in metrics.items():
-                    if data.get('wins_avg') and data.get('rugs_avg'):
-                        diff = abs(data['wins_avg'] - data['rugs_avg'])
-                        max_val = max(data['wins_avg'], data['rugs_avg'], 1)
-                        if diff > 0.1 * max_val:  # At least 10% difference
-                            predictive.append({
-                                'name': key.replace('_', ' ').title(),
-                                'wins': data['wins_avg'],
-                                'rugs': data['rugs_avg'],
-                                'better': 'higher' if data['wins_avg'] > data['rugs_avg'] else 'lower'
-                            })
+                    if data.get('is_predictive') and data.get('wins_avg') and data.get('rugs_avg'):
+                        direction = "↑" if data.get('direction') == 'higher' else "↓"
+                        name = data.get('name', key.replace('_', ' ').title())
+                        r += f"✅ <b>{name}</b>\n"
+                        r += f"   Wins: {data['wins_avg']:.1f} | Rugs: {data['rugs_avg']:.1f} ({direction})\n"
 
-                for p in predictive[:4]:  # Top 4
-                    indicator = "✅" if p['better'] == 'higher' else "⚠️"
-                    r += f"   {indicator} {p['name']}: {p['wins']:.1f} vs {p['rugs']:.1f} ({p['better']} wins)\n"
+                        # Show best threshold if available
+                        if data.get('best_threshold'):
+                            best = data['best_threshold']
+                            thresh_data = data.get('thresholds', {}).get(best, {})
+                            op = "≥" if data.get('direction') == 'higher' else "≤"
+                            r += f"   Best: {op}{best} → {thresh_data.get('win_rate', 0):.0f}% WR\n"
 
-                if not predictive:
-                    r += "   ➖ No strong predictors found\n"
+                        # Show recommendation if available
+                        if data.get('recommendation'):
+                            rec = data['recommendation']
+                            r += f"   💡 {rec['from']} → {rec['to']} ({rec['impact']})\n"
+                        r += "\n"
+
+                # Summary
+                summary = metrics_data.get('summary', {})
+                if summary:
+                    strong = len(summary.get('strong_predictors', []))
+                    weak = len(summary.get('weak_predictors', []))
+                    r += f"<i>{strong} strong, {weak} weak predictors</i>\n\n"
+
+            # Metrics recommendations section
+            if metrics_recs:
+                r += "<b>📋 FILTER RECOMMENDATIONS:</b>\n"
+                for rec in metrics_recs[:5]:
+                    r += f"• {rec['name']}: {rec['from']} → {rec['to']} ({rec['impact']})\n"
                 r += "\n"
 
             # Recommendations
