@@ -77,6 +77,7 @@ class AdminBot:
             self.app.add_handler(CommandHandler("resume", self._cmd_resume, filters=admin_filter))
             self.app.add_handler(CommandHandler("winrate", self._cmd_winrate, filters=admin_filter))
             self.app.add_handler(CommandHandler("winratekol", self._cmd_winrate_kol, filters=admin_filter))
+            self.app.add_handler(CommandHandler("sources", self._cmd_sources, filters=admin_filter))
             self.app.add_handler(CommandHandler("kolstats", self._cmd_kolstats, filters=admin_filter))
             self.app.add_handler(CommandHandler("analyze", self._cmd_analyze, filters=admin_filter))
             self.app.add_handler(CommandHandler("testbanner", self._cmd_testbanner, filters=admin_filter))
@@ -216,6 +217,7 @@ class AdminBot:
 /performance - Recent signal performance
 /toprunners - All 2x+ winners
 /kolstats - KOL performance breakdown
+/sources - Compare KOL vs Organic discovery
 
 <b>Monitoring:</b>
 /active - Currently tracked tokens
@@ -2041,6 +2043,95 @@ class AdminBot:
 
         except Exception as e:
             logger.error(f"❌ Error in /winratekol: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            await self._send_response(update, context, f"❌ Error: {str(e)}")
+
+    async def _cmd_sources(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Compare KOL vs Organic discovery performance"""
+        try:
+            if not self.database or not self.database.pool:
+                await self._send_response(update, context, "❌ Database not available")
+                return
+
+            async with self.database.pool.acquire() as conn:
+                # Group sources into KOL vs Organic
+                stats = await conn.fetch("""
+                    SELECT
+                        CASE
+                            WHEN signal_source = 'organic_scanner' THEN 'ORGANIC'
+                            WHEN signal_source IN ('kol_buy', 'telegram_call') THEN 'KOL'
+                            ELSE 'OTHER'
+                        END as category,
+                        signal_source,
+                        COUNT(*) as total,
+                        SUM(CASE WHEN outcome IN ('2x','5x','10x','50x','100x') THEN 1 ELSE 0 END) as wins,
+                        SUM(CASE WHEN outcome = 'rug' THEN 1 ELSE 0 END) as rugs,
+                        SUM(CASE WHEN outcome = 'loss' THEN 1 ELSE 0 END) as losses,
+                        SUM(CASE WHEN outcome IS NULL THEN 1 ELSE 0 END) as pending,
+                        ROUND(AVG(CASE WHEN max_roi IS NOT NULL THEN max_roi END)::numeric, 2) as avg_roi,
+                        ROUND(MAX(CASE WHEN max_roi IS NOT NULL THEN max_roi END)::numeric, 1) as best_roi,
+                        ROUND(AVG(conviction_score)::numeric, 0) as avg_score
+                    FROM signals
+                    WHERE signal_posted = TRUE
+                    GROUP BY category, signal_source
+                    ORDER BY category, total DESC
+                """)
+
+                # Summary by category
+                summary = await conn.fetch("""
+                    SELECT
+                        CASE
+                            WHEN signal_source = 'organic_scanner' THEN 'ORGANIC'
+                            WHEN signal_source IN ('kol_buy', 'telegram_call') THEN 'KOL'
+                            ELSE 'OTHER'
+                        END as category,
+                        COUNT(*) as total,
+                        SUM(CASE WHEN outcome IN ('2x','5x','10x','50x','100x') THEN 1 ELSE 0 END) as wins,
+                        SUM(CASE WHEN outcome = 'rug' THEN 1 ELSE 0 END) as rugs,
+                        SUM(CASE WHEN outcome = 'loss' THEN 1 ELSE 0 END) as losses,
+                        SUM(CASE WHEN outcome IS NULL THEN 1 ELSE 0 END) as pending,
+                        ROUND(AVG(CASE WHEN max_roi IS NOT NULL THEN max_roi END)::numeric, 2) as avg_roi,
+                        ROUND(MAX(CASE WHEN max_roi IS NOT NULL THEN max_roi END)::numeric, 1) as best_roi
+                    FROM signals
+                    WHERE signal_posted = TRUE
+                    GROUP BY category
+                    ORDER BY category
+                """)
+
+            r = "📡 <b>DISCOVERY SOURCE COMPARISON</b>\n"
+            r += "<i>KOL = wallet tracking | ORGANIC = on-chain scanner</i>\n\n"
+
+            # Category summary
+            for row in summary:
+                cat = row['category']
+                decided = row['total'] - row['pending']
+                wr = (row['wins'] / decided * 100) if decided > 0 else 0
+                rr = (row['rugs'] / decided * 100) if decided > 0 else 0
+
+                emoji = "👔" if cat == "KOL" else "🔬" if cat == "ORGANIC" else "❓"
+                status = "🟢" if wr >= 40 else "🟡" if wr >= 25 else "🔴"
+
+                r += f"<b>{emoji} {cat}</b>\n"
+                r += f"{status} Win Rate: <b>{wr:.0f}%</b> ({row['wins']}W / {row['losses']}L / {row['rugs']}R)\n"
+                r += f"   Signals: {row['total']} total ({row['pending']} pending)\n"
+                r += f"   Avg ROI: {row['avg_roi'] or 0}x | Best: {row['best_roi'] or 0}x\n\n"
+
+            # Detailed breakdown
+            r += "<b>📋 DETAILED BREAKDOWN</b>\n"
+            for row in stats:
+                src = row['signal_source'] or 'unknown'
+                decided = row['total'] - row['pending']
+                wr = (row['wins'] / decided * 100) if decided > 0 else 0
+                r += f"• {src}: {wr:.0f}% WR ({row['wins']}W/{row['rugs']}R) avg {row['avg_roi'] or 0}x [{row['total']} sig]\n"
+
+            # Note about historical data
+            r += "\n<i>⚠️ Note: All signals before Jan 31 are KOL (organic scanner was broken)</i>"
+
+            await self._send_response(update, context, r)
+
+        except Exception as e:
+            logger.error(f"❌ Error in /sources: {e}")
             import traceback
             logger.error(traceback.format_exc())
             await self._send_response(update, context, f"❌ Error: {str(e)}")
