@@ -389,7 +389,7 @@ class PumpMonitorV2:
             if not velocity_bypassed:
                 return
 
-        # Check buy/sell ratio
+        # Check buy/sell ratio (buys as % of total trades)
         stats = self.trade_stats.get(token_address, {'buys': 0, 'sells': 0, 'blocks': {}})
         total_trades = stats['buys'] + stats['sells']
         if total_trades < 20:
@@ -398,6 +398,14 @@ class PumpMonitorV2:
         min_buy_ratio = scanner_cfg.get('min_buy_ratio', 0.65)
         if buy_ratio < min_buy_ratio:
             return
+
+        # Check buy/sell ratio (buys divided by sells) - Ralph optimization
+        # Higher B/S ratio = more buying pressure = better performance
+        if stats['sells'] > 0:
+            buy_sell_ratio = stats['buys'] / stats['sells']
+            min_bs_ratio = scanner_cfg.get('min_buy_sell_ratio', 1.0)
+            if buy_sell_ratio < min_bs_ratio:
+                return
 
         # Check bundle ratio (same-block buys as % of total buys)
         if stats['buys'] > 0 and stats['blocks']:
@@ -428,9 +436,10 @@ class PumpMonitorV2:
 
         logger.info("=" * 60)
         bypass_tag = " [VELOCITY BYPASS]" if velocity_bypassed else ""
+        bs_ratio = stats['buys'] / stats['sells'] if stats['sells'] > 0 else stats['buys']
         logger.info(f"🔬 ORGANIC SCANNER: ${symbol} QUALIFIED!{bypass_tag}")
         logger.info(f"   👥 Buyers: {buyer_count} | 💹 Buy ratio: {buy_ratio:.0%} | ⚡ Bonding: {bonding_pct:.0f}%")
-        logger.info(f"   📊 Trades: {total_trades} ({stats['buys']} buys / {stats['sells']} sells)")
+        logger.info(f"   📊 Trades: {total_trades} ({stats['buys']} buys / {stats['sells']} sells) | B/S: {bs_ratio:.1f}x")
         logger.info(f"   🎯 Routing to ActiveTokenTracker for conviction scoring...")
         logger.info("=" * 60)
 

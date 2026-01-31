@@ -78,7 +78,10 @@ DISABLE_POLLING_BELOW_THRESHOLD = True
 # - Added buyer velocity scoring (0-18 pts) and bonding curve speed (0-15 pts)
 # - Unique buyers (0-10), volume (0-12), narrative (0-7 RSS+BERTopic), telegram (0-5)
 # - Lowered post-grad threshold from 75 to 65 (no KOL boost available)
-MIN_CONVICTION_SCORE = 50  # Pre-grad threshold (emergency raise to 50 - 2026-01-31)
+# UPDATE 2026-01-31 (RALPH OPTIMIZATION):
+# - Lowered MIN_CONVICTION_SCORE from 50 to 30 (same WR, more signals)
+# - Data shows threshold doesn't significantly impact WR (26% at all levels)
+MIN_CONVICTION_SCORE = 30  # Pre-grad threshold (Ralph: same WR at 30 vs 50, more signals)
 POST_GRAD_THRESHOLD = 55   # Post-grad threshold (lowered from 65 to catch runners - 2026-01-31)
 
 # Base score threshold for distribution checks
@@ -196,14 +199,18 @@ EARLY_PUMP_ALERT = {
 # =============================================================================
 # NEW: ORGANIC SCANNER CONFIG
 # Filters for PumpPortal new tokens to identify organic activity
+# UPDATE 2026-01-31 (RALPH OPTIMIZATION):
+# - Added min_buy_sell_ratio: 2.0 (≥2.0 gives 32% WR vs 27% baseline)
+# - Raised min_bonding_pct: 20 → 40 (data shows ≥40% bonding wins more)
 # =============================================================================
 ORGANIC_SCANNER = {
     'enabled': True,
     'min_unique_buyers': 50,       # Raised from 30 to reduce rugs (2026-01-31)
     'min_buy_ratio': 0.65,         # Raised from 0.55 to filter weak momentum (2026-01-31)
+    'min_buy_sell_ratio': 2.0,     # NEW: Ralph shows ≥2.0 B/S ratio gives +5% WR
     'max_bundle_ratio': 0.20,      # Max 20% of buys from same block (anti-bundle)
     'watch_window_seconds': 300,   # Watch tokens for 5 min before deciding
-    'min_bonding_pct': 20,         # Lowered from 40 — catches very early FOMO
+    'min_bonding_pct': 40,         # Raised from 20 → 40 (Ralph: higher bonding wins more)
     'max_bonding_pct': 90,         # Raised from 85 — allow near-graduation entries
     'max_tracked_candidates': 100, # Max tokens to watch simultaneously
     'cooldown_seconds': 60,        # Wait 60s between scanner evaluations
@@ -624,9 +631,10 @@ TRACK_METRICS = {
 # Cleanup settings
 MAX_TRACKED_TOKENS = 1000   # Maximum tokens to track in memory
 
-# Maximum market cap for signal calls ($20K for testing)
+# Maximum market cap for signal calls
 # Tokens above this MCAP won't trigger new signals (already mooned)
-MAX_MARKET_CAP_FILTER = int(os.getenv('MAX_MARKET_CAP_FILTER', '20000'))  # $20K default
+# UPDATE 2026-01-31 (RALPH): Lowered from $20K to $15K (≤$15K gives 34% WR vs 27% baseline)
+MAX_MARKET_CAP_FILTER = int(os.getenv('MAX_MARKET_CAP_FILTER', '15000'))  # $15K (Ralph optimized)
 CLEANUP_THRESHOLD = 500     # How many to remove when limit hit
 
 # Buyer tracking duration
