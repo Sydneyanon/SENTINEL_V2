@@ -15,6 +15,7 @@ from tracker import TokenTracker
 from fetchers import fetch_token_data
 from telegram import TelegramPoster
 from admin import AdminBot
+from pumpportal_ws import PumpPortalWS
 
 
 # Configure logging
@@ -29,11 +30,27 @@ logger.add(
 telegram_poster = TelegramPoster()
 token_tracker = TokenTracker(telegram_poster)
 admin_bot = AdminBot()
+pumpportal = None  # Initialized in lifespan
+
+
+async def on_kol_buy(token_address: str, wallet_address: str, symbol: str,
+                     unique_buyers: int, bonding_pct: float, volume_sol: float):
+    """Callback when PumpPortal detects a KOL buy."""
+    wallet = await db.get_wallet(wallet_address)
+    if not wallet:
+        return
+
+    logger.info(f"PumpPortal: {wallet['name'] or wallet_address[:8]} bought ${symbol}")
+
+    # Process as potential signal
+    await process_potential_signal(token_address, wallet)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup and shutdown."""
+    global pumpportal
+
     # Startup
     logger.info("=" * 50)
     logger.info("SENTINEL V3 Starting...")
@@ -43,18 +60,26 @@ async def lifespan(app: FastAPI):
     await token_tracker.start()
     await admin_bot.start()
 
+    # Get tracked wallets and start PumpPortal WebSocket
     wallets = await db.get_all_wallets()
+    wallet_addresses = [w['address'] for w in wallets]
+
+    pumpportal = PumpPortalWS(on_kol_buy=on_kol_buy)
+    await pumpportal.start(tracked_wallets=wallet_addresses)
+
     logger.info(f"Tracking {len(wallets)} wallets")
 
     stats = await db.get_stats()
     logger.info(f"Total signals: {stats['total_signals']} | Win rate: {stats['win_rate']:.1f}%")
 
-    logger.info("Ready to receive webhooks")
+    logger.info("Ready! (Helius webhooks + PumpPortal WebSocket)")
 
     yield
 
     # Shutdown
     logger.info("Shutting down...")
+    if pumpportal:
+        await pumpportal.stop()
     await token_tracker.stop()
     await admin_bot.stop()
 
