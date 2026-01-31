@@ -420,9 +420,21 @@ class RalphAnalysis:
             ('buy_percentage', 'Buy %', [50, 55, 60, 65, 70, 75]),
             ('unique_buyers', 'Unique Buyers', [20, 50, 100, 150, 200]),
             ('bonding_curve_pct', 'Bonding %', [20, 40, 60, 80]),
+            ('buys_24h', 'Buys 24h', [50, 100, 200, 500, 1000]),
+            ('sells_24h', 'Sells 24h', [20, 50, 100, 200]),  # Lower is better
             ('volume_24h', 'Volume 24h', [1000, 5000, 10000, 50000]),
             ('market_cap', 'Market Cap', [10000, 25000, 50000, 100000]),
+            ('liquidity', 'Liquidity', [1000, 5000, 10000, 25000]),
         ]
+
+        # Also calculate buy/sell ratio
+        for d in data:
+            buys = d.get('buys_24h') or 0
+            sells = d.get('sells_24h') or 1  # Avoid division by zero
+            d['buy_sell_ratio'] = buys / sells if sells > 0 else buys
+
+        # Add B/S ratio to metrics
+        metrics_config.append(('buy_sell_ratio', 'Buy/Sell Ratio', [1.0, 1.5, 2.0, 3.0, 5.0]))
 
         logger.info("")
         logger.info("━" * 50)

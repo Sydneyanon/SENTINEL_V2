@@ -397,20 +397,50 @@ class AdminBot:
                     r += f"{emoji} {t}: {data['win_rate']:.0f}% ({data['signals']}){curr}{opt}\n"
                 r += "\n"
 
-            # KOL impact
+            # KOL impact - show actual numbers
             kol = results.get('kol_analysis', {}).get('kol_vs_organic', {})
             if kol.get('kol') and kol.get('organic'):
                 kol_wr = kol['kol'].get('win_rate', 0)
+                kol_count = kol['kol'].get('total', 0)
                 org_wr = kol['organic'].get('win_rate', 0)
+                org_count = kol['organic'].get('total', 0)
                 diff = kol_wr - org_wr
 
-                r += "<b>👑 KOL Impact:</b>\n"
+                r += "<b>👑 KOL vs ORGANIC:</b>\n"
+                r += f"   KOL: {kol_wr:.0f}% WR ({kol_count} signals)\n"
+                r += f"   Organic: {org_wr:.0f}% WR ({org_count} signals)\n"
                 if diff > 5:
-                    r += f"   ✅ KOL adds +{diff:.0f}% WR\n"
+                    r += f"   ✅ KOL adds +{diff:.0f}%\n"
                 elif diff < -5:
-                    r += f"   ⚠️ KOL hurts by {diff:.0f}% WR\n"
+                    r += f"   ⚠️ KOL hurts by {diff:.0f}%\n"
                 else:
-                    r += f"   ➖ Minimal impact ({diff:+.0f}%)\n"
+                    r += f"   ➖ Similar performance\n"
+                r += "\n"
+
+            # Metrics breakdown (top predictors)
+            metrics = results.get('metrics_breakdown', {}).get('metrics', {})
+            if metrics:
+                r += "<b>🔬 Top Predictors:</b>\n"
+                # Show metrics with biggest difference between wins and rugs
+                predictive = []
+                for key, data in metrics.items():
+                    if data.get('wins_avg') and data.get('rugs_avg'):
+                        diff = abs(data['wins_avg'] - data['rugs_avg'])
+                        max_val = max(data['wins_avg'], data['rugs_avg'], 1)
+                        if diff > 0.1 * max_val:  # At least 10% difference
+                            predictive.append({
+                                'name': key.replace('_', ' ').title(),
+                                'wins': data['wins_avg'],
+                                'rugs': data['rugs_avg'],
+                                'better': 'higher' if data['wins_avg'] > data['rugs_avg'] else 'lower'
+                            })
+
+                for p in predictive[:4]:  # Top 4
+                    indicator = "✅" if p['better'] == 'higher' else "⚠️"
+                    r += f"   {indicator} {p['name']}: {p['wins']:.1f} vs {p['rugs']:.1f} ({p['better']} wins)\n"
+
+                if not predictive:
+                    r += "   ➖ No strong predictors found\n"
                 r += "\n"
 
             # Recommendations
