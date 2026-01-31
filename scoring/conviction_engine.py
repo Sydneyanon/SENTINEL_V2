@@ -950,6 +950,34 @@ class ConvictionEngine:
             # Determine threshold
             threshold = config.MIN_CONVICTION_SCORE if is_pre_grad else config.POST_GRAD_THRESHOLD
 
+            # TIME-BASED FILTERING (Ralph Discovery 2026-01-31)
+            # Analysis shows 7x difference in WR between best/worst hours
+            time_filter_blocked = False
+            time_bonus = 0
+            current_hour = datetime.utcnow().hour
+
+            time_cfg = getattr(config, 'TIME_FILTER', {})
+            if time_cfg.get('enabled', False):
+                blocked_hours = time_cfg.get('blocked_hours', [])
+                best_hours = time_cfg.get('best_hours', [])
+                worst_hours = time_cfg.get('worst_hours', [])
+
+                # Check if current hour is blocked
+                if time_cfg.get('mode') == 'block_worst' and current_hour in blocked_hours:
+                    time_filter_blocked = True
+                    if time_cfg.get('log_skipped', True):
+                        logger.warning(f"   ⏰ TIME FILTER: Hour {current_hour}:00 UTC blocked (low WR hour)")
+
+                # Apply bonus/penalty to score
+                if current_hour in best_hours:
+                    time_bonus = time_cfg.get('best_hour_bonus', 10)
+                    final_score += time_bonus
+                    logger.info(f"   ⏰ Time Bonus: +{time_bonus} pts (hour {current_hour}:00 = high WR)")
+                elif current_hour in worst_hours and not time_filter_blocked:
+                    time_penalty = time_cfg.get('worst_hour_penalty', -15)
+                    final_score += time_penalty
+                    logger.info(f"   ⏰ Time Penalty: {time_penalty} pts (hour {current_hour}:00 = low WR)")
+
             # GROK: Early trigger at 30% bonding if 200+ unique buyers
             early_trigger_applied = False
             if (is_pre_grad and
@@ -964,6 +992,11 @@ class ConvictionEngine:
 
             # Check if passed threshold (with early trigger consideration)
             passed = final_score >= threshold or early_trigger_applied
+
+            # TIME FILTER: Block signals during worst hours (Ralph Discovery)
+            if passed and time_filter_blocked:
+                passed = False
+                logger.warning(f"   🚫 TIME BLOCKED: Signal would pass but hour {current_hour}:00 UTC is blocked")
 
             # GROK: MCAP cap - skip if too high (avoid tops)
             # POST-GRAD: Uses tiered system to catch $100-150K runners
@@ -1475,6 +1508,7 @@ class ConvictionEngine:
                     'ml_bonus': ml_result.get('ml_bonus', 0),
                     'dump_penalty': dump_penalty,
                     'buyer_mcap_penalty': buyer_mcap_penalty,
+                    'time_bonus': time_bonus,
                     'total': final_score
                 },
                 'rug_checks': {
