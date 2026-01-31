@@ -81,6 +81,7 @@ class AdminBot:
             self.app.add_handler(CommandHandler("sources", self._cmd_sources, filters=admin_filter))
             self.app.add_handler(CommandHandler("revivals", self._cmd_revivals, filters=admin_filter))
             self.app.add_handler(CommandHandler("checksignal", self._cmd_checksignal, filters=admin_filter))
+            self.app.add_handler(CommandHandler("history", self._cmd_history, filters=admin_filter))
             self.app.add_handler(CommandHandler("kolstats", self._cmd_kolstats, filters=admin_filter))
             self.app.add_handler(CommandHandler("analyze", self._cmd_analyze, filters=admin_filter))
             self.app.add_handler(CommandHandler("testbanner", self._cmd_testbanner, filters=admin_filter))
@@ -2293,6 +2294,94 @@ class AdminBot:
 
         except Exception as e:
             logger.error(f"❌ Error in /sources: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            await self._send_response(update, context, f"❌ Error: {str(e)}")
+
+    async def _cmd_history(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Show daily win rate history to find best performing periods"""
+        try:
+            if not self.database or not self.database.pool:
+                await self._send_response(update, context, "❌ Database not available")
+                return
+
+            # Parse optional days argument (default 14)
+            days = 14
+            if context.args:
+                try:
+                    days = int(context.args[0])
+                    days = max(1, min(days, 60))
+                except ValueError:
+                    pass
+
+            async with self.database.pool.acquire() as conn:
+                # Daily breakdown
+                daily = await conn.fetch(f"""
+                    SELECT
+                        DATE(created_at) as day,
+                        COUNT(*) as total,
+                        SUM(CASE WHEN outcome IN ('2x','5x','10x','50x','100x') THEN 1 ELSE 0 END) as wins,
+                        SUM(CASE WHEN outcome = 'rug' THEN 1 ELSE 0 END) as rugs,
+                        SUM(CASE WHEN outcome = 'loss' THEN 1 ELSE 0 END) as losses,
+                        SUM(CASE WHEN outcome IS NULL THEN 1 ELSE 0 END) as pending,
+                        ROUND(AVG(conviction_score)::numeric, 0) as avg_score,
+                        ROUND(AVG(CASE WHEN max_roi IS NOT NULL THEN max_roi END)::numeric, 2) as avg_roi
+                    FROM signals
+                    WHERE signal_posted = TRUE
+                      AND created_at >= NOW() - INTERVAL '{days} days'
+                    GROUP BY DATE(created_at)
+                    ORDER BY day DESC
+                """)
+
+            if not daily:
+                await self._send_response(update, context, f"ℹ️ No signals in last {days} days")
+                return
+
+            r = f"📅 <b>DAILY WIN RATE HISTORY</b>\n"
+            r += f"<i>Last {days} days - find your best periods</i>\n\n"
+
+            r += "<pre>"
+            r += "Date       │Sig│Win│Rug│ WR% │Score\n"
+            r += "───────────┼───┼───┼───┼─────┼─────\n"
+
+            best_day = None
+            best_wr = 0
+
+            for row in daily:
+                decided = row['total'] - row['pending']
+                wr = (row['wins'] / decided * 100) if decided > 0 else 0
+                day_str = row['day'].strftime('%m-%d')
+
+                # Track best day
+                if decided >= 3 and wr > best_wr:
+                    best_wr = wr
+                    best_day = row['day'].strftime('%Y-%m-%d')
+
+                # Emoji based on win rate
+                if decided < 3:
+                    emoji = "⚪"  # Not enough data
+                elif wr >= 40:
+                    emoji = "🟢"
+                elif wr >= 25:
+                    emoji = "🟡"
+                else:
+                    emoji = "🔴"
+
+                r += f"{row['day'].strftime('%Y-%m-%d')}│{row['total']:>3}│{row['wins']:>3}│{row['rugs']:>3}│{emoji}{wr:>3.0f}%│{row['avg_score'] or 0:>4.0f}\n"
+
+            r += "</pre>\n"
+
+            # Summary
+            if best_day:
+                r += f"\n🏆 <b>Best day:</b> {best_day} ({best_wr:.0f}% WR)\n"
+
+            # Find what was different on the best day
+            r += "\n<i>Compare code/config on best days vs worst to find what changed</i>"
+
+            await self._send_response(update, context, r)
+
+        except Exception as e:
+            logger.error(f"❌ Error in /history: {e}")
             import traceback
             logger.error(traceback.format_exc())
             await self._send_response(update, context, f"❌ Error: {str(e)}")
