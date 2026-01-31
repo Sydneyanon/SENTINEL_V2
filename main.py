@@ -805,20 +805,26 @@ async def lifespan(app: FastAPI):
 
     # Initialize Post-Grad Revival Scanner (NEW!)
     # Monitors graduated tokens for bottom reversal patterns
-    if config.POST_GRAD_REVIVAL_SCANNER.get('enabled', True):
-        logger.info("🔄 Initializing post-grad revival scanner...")
-        from trackers.post_grad_revival_scanner import PostGradRevivalScanner
-        revival_scanner = PostGradRevivalScanner(active_tracker=active_tracker)
+    try:
+        revival_config = getattr(config, 'POST_GRAD_REVIVAL_SCANNER', {'enabled': True})
+        if revival_config.get('enabled', True):
+            logger.info("🔄 Initializing post-grad revival scanner...")
+            from trackers.post_grad_revival_scanner import PostGradRevivalScanner
+            revival_scanner = PostGradRevivalScanner(active_tracker=active_tracker)
 
-        # Link to pump monitor so graduations are added to watchlist
-        if pumpportal_monitor:
-            pumpportal_monitor.revival_scanner = revival_scanner
+            # Link to pump monitor so graduations are added to watchlist
+            if pumpportal_monitor:
+                pumpportal_monitor.revival_scanner = revival_scanner
 
-        # Start revival scanner polling in background
-        asyncio.create_task(revival_scanner.start())
-        logger.info("✅ Revival scanner started (watching post-grad tokens for bottoms)")
-    else:
-        logger.info("⏭️ Revival scanner disabled in config")
+            # Start revival scanner polling in background
+            asyncio.create_task(revival_scanner.start())
+            logger.info("✅ Revival scanner started (watching post-grad tokens for bottoms)")
+        else:
+            logger.info("⏭️ Revival scanner disabled in config")
+    except Exception as e:
+        logger.error(f"❌ Failed to initialize revival scanner: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
 
     # Helius Pump.fun program webhook
     if config.HELIUS_PUMP_WEBHOOK.get('enabled', False) and config.HELIUS_PUMP_WEBHOOK.get('auto_register', False):
