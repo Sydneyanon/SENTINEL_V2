@@ -422,9 +422,9 @@ async def get_daily_stats(days: int = 7) -> List[Dict]:
                 COUNT(*) FILTER (WHERE outcome = 'win') as wins,
                 COUNT(*) FILTER (WHERE outcome = 'rug') as rugs
             FROM signals
-            WHERE posted_at > NOW() - INTERVAL '%s days'
+            WHERE posted_at > NOW() - make_interval(days => $1)
             AND outcome IS NOT NULL
             GROUP BY DATE(posted_at)
             ORDER BY date DESC
-        ''' % days)
+        ''', days)
         return [dict(row) for row in rows]

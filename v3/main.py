@@ -211,6 +211,12 @@ async def process_potential_signal(token_address: str, wallet: dict):
     if message_id:
         await db.mark_signal_posted(signal_id, message_id)
         logger.info(f"Posted ${symbol} to Telegram (msg_id: {message_id})")
+    else:
+        # Failed to post - delete the orphaned signal
+        logger.warning(f"Failed to post ${symbol} to Telegram, removing signal")
+        pool = await db.get_pool()
+        async with pool.acquire() as conn:
+            await conn.execute('DELETE FROM signals WHERE id = $1', signal_id)
 
 
 @app.post("/webhook/test")

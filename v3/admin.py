@@ -173,7 +173,7 @@ class AdminBot:
             mult = s['current_multiplier'] or 1.0
             max_mult = s['max_multiplier'] or 1.0
 
-            emoji = "" if mult >= 1 else ""
+            emoji = "📈" if mult >= 1 else "📉"
             lines.append(f"{emoji} <b>${symbol}</b>: {mult:.2f}x (max: {max_mult:.2f}x)")
 
         lines.append(f"\nTotal: {len(signals)} active")
@@ -206,7 +206,8 @@ class AdminBot:
             wins = d['wins']
             wr = (wins / signals * 100) if signals > 0 else 0
 
-            bar = "" * int(wr / 10) + "" * (10 - int(wr / 10))
+            filled = int(wr / 10)
+            bar = "█" * filled + "░" * (10 - filled)
             lines.append(f"{date}: {bar} {wr:.0f}% ({wins}/{signals})")
 
         await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
