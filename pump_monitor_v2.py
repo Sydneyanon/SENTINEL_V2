@@ -362,6 +362,8 @@ class PumpMonitorV2:
         min_bonding = scanner_cfg.get('min_bonding_pct', 25)
         max_bonding = scanner_cfg.get('max_bonding_pct', 90)
         if bonding_pct < min_bonding or bonding_pct > max_bonding:
+            symbol = data.get('symbol', token_address[:8])
+            logger.debug(f"🔍 Organic skip ${symbol}: bonding {bonding_pct:.0f}% outside {min_bonding}-{max_bonding}%")
             return
 
         # Check unique buyer count (with velocity bypass)
@@ -387,16 +389,22 @@ class PumpMonitorV2:
                     logger.info(f"⚡ Organic scanner: ${symbol} velocity bypass! {buyers_at_cutoff}→{buyers_now} buyers ({buyers_now/buyers_at_cutoff:.1f}x in 5m)")
 
             if not velocity_bypassed:
+                symbol = data.get('symbol', token_address[:8])
+                logger.debug(f"🔍 Organic skip ${symbol}: {buyer_count} buyers < {min_buyers} required (no velocity bypass)")
                 return
 
         # Check buy/sell ratio (buys as % of total trades)
         stats = self.trade_stats.get(token_address, {'buys': 0, 'sells': 0, 'blocks': {}})
         total_trades = stats['buys'] + stats['sells']
         if total_trades < 20:
-            return  # Not enough data
+            symbol = data.get('symbol', token_address[:8])
+            logger.debug(f"🔍 Organic skip ${symbol}: {total_trades} trades < 20 required")
+            return
         buy_ratio = stats['buys'] / total_trades
         min_buy_ratio = scanner_cfg.get('min_buy_ratio', 0.65)
         if buy_ratio < min_buy_ratio:
+            symbol = data.get('symbol', token_address[:8])
+            logger.debug(f"🔍 Organic skip ${symbol}: buy ratio {buy_ratio:.0%} < {min_buy_ratio:.0%} required")
             return
 
         # Check buy/sell ratio (buys divided by sells) - Ralph optimization
@@ -405,6 +413,8 @@ class PumpMonitorV2:
             buy_sell_ratio = stats['buys'] / stats['sells']
             min_bs_ratio = scanner_cfg.get('min_buy_sell_ratio', 1.0)
             if buy_sell_ratio < min_bs_ratio:
+                symbol = data.get('symbol', token_address[:8])
+                logger.debug(f"🔍 Organic skip ${symbol}: B/S ratio {buy_sell_ratio:.1f}x < {min_bs_ratio:.1f}x required")
                 return
 
         # Check bundle ratio (same-block buys as % of total buys)
@@ -421,13 +431,18 @@ class PumpMonitorV2:
         # Rate limit evaluations
         now = datetime.now()
         cooldown = scanner_cfg.get('cooldown_seconds', 60)
-        if (now - self.last_organic_eval).total_seconds() < cooldown:
+        time_since_last = (now - self.last_organic_eval).total_seconds()
+        if time_since_last < cooldown:
+            symbol = data.get('symbol', token_address[:8])
+            logger.debug(f"🔍 Organic skip ${symbol}: cooldown ({time_since_last:.0f}s < {cooldown}s)")
             return
         self.last_organic_eval = now
 
         # Check candidate limit
         max_candidates = scanner_cfg.get('max_tracked_candidates', 100)
         if len(self.organic_promoted) >= max_candidates:
+            symbol = data.get('symbol', token_address[:8])
+            logger.warning(f"🔍 Organic skip ${symbol}: candidate limit reached ({len(self.organic_promoted)}/{max_candidates})")
             return
 
         # ALL CRITERIA MET - Promote to active tracking!
