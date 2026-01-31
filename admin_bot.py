@@ -2142,8 +2142,9 @@ class AdminBot:
     async def _cmd_revivals(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Show post-grad revival scanner watchlist"""
         try:
-            # Get revival scanner from main module
-            from main import revival_scanner
+            # Get revival scanner from main module (use module access to get current value)
+            import main
+            revival_scanner = main.revival_scanner
 
             if not revival_scanner:
                 await self._send_response(update, context,
