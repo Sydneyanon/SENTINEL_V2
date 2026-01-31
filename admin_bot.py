@@ -2259,7 +2259,8 @@ class AdminBot:
                 # Get signal info
                 signal = await conn.fetchrow('''
                     SELECT token_symbol, signal_posted, entry_price, conviction_score,
-                           signal_type, signal_source, created_at, telegram_message_id
+                           signal_type, signal_source, created_at, telegram_message_id,
+                           current_price, max_price_reached
                     FROM signals
                     WHERE token_address = $1
                 ''', token_address)
@@ -2280,6 +2281,14 @@ class AdminBot:
                 r += f"• Symbol: {signal['token_symbol']}\n"
                 r += f"• Posted: {'✅ YES' if signal['signal_posted'] else '❌ NO'}\n"
                 r += f"• Entry Price: ${signal['entry_price']:.8f}\n"
+                r += f"• Current Price: ${signal['current_price']:.8f if signal['current_price'] else 'NULL'}\n"
+                r += f"• Max Price: ${signal['max_price_reached']:.8f if signal['max_price_reached'] else 'NULL'}\n"
+
+                # Calculate multiplier
+                if signal['entry_price'] and signal['entry_price'] > 0 and signal['max_price_reached']:
+                    mult = signal['max_price_reached'] / signal['entry_price']
+                    r += f"• <b>Peak Multiple: {mult:.2f}x</b>\n"
+
                 r += f"• Score: {signal['conviction_score']}\n"
                 r += f"• Type: {signal['signal_type']}\n"
                 r += f"• Source: {signal['signal_source']}\n"
@@ -2293,6 +2302,12 @@ class AdminBot:
                 if signal['entry_price'] == 0:
                     r += "⚠️ <b>ISSUE:</b> entry_price=0\n"
                     r += "   Performance tracker skips $0 prices!\n\n"
+                if signal['token_symbol'] == 'UNKNOWN':
+                    r += "⚠️ <b>ISSUE:</b> Symbol is UNKNOWN\n"
+                    r += "   Token name wasn't captured at signal time.\n\n"
+                if not signal['max_price_reached']:
+                    r += "⚠️ <b>ISSUE:</b> max_price_reached=NULL\n"
+                    r += "   Price updates aren't reaching this signal!\n\n"
             else:
                 r += "❌ <b>TOKEN NOT IN SIGNALS TABLE</b>\n"
                 r += "   This token was never signaled.\n\n"
