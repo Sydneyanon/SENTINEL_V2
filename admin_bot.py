@@ -2249,6 +2249,22 @@ class AdminBot:
                     f"(Signals with telegram_message_id but signal_posted=FALSE)")
                 return
 
+            # Check for fixsymbol subcommand: /checksignal fixsymbol <address> <symbol>
+            if context.args[0].lower() == 'fixsymbol' and len(context.args) >= 3:
+                if not self.database or not self.database.pool:
+                    await self._send_response(update, context, "❌ Database not available")
+                    return
+                token_address = context.args[1]
+                new_symbol = context.args[2].upper()
+                async with self.database.pool.acquire() as conn:
+                    result = await conn.execute('''
+                        UPDATE signals SET token_symbol = $1 WHERE token_address = $2
+                    ''', new_symbol, token_address)
+                await self._send_response(update, context,
+                    f"✅ Updated symbol to <b>${new_symbol}</b>\n\n"
+                    f"<code>{token_address[:20]}...</code>")
+                return
+
             token_address = context.args[0]
 
             if not self.database or not self.database.pool:
