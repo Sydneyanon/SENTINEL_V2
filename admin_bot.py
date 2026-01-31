@@ -2630,6 +2630,20 @@ class AdminBot:
                     "Address should be 32-44 characters.")
                 return
 
+            # Check blacklist
+            try:
+                from data.kol_blacklist import is_blacklisted, get_blacklist_warning
+                blacklist_info = is_blacklisted(address)
+                if blacklist_info:
+                    warning = get_blacklist_warning(address)
+                    await self._send_response(update, context,
+                        f"🚫 <b>CANNOT ADD - BLACKLISTED</b>\n\n{warning}\n\n"
+                        "This wallet was removed for poor performance.\n"
+                        "Review performance before re-adding.")
+                    return
+            except ImportError:
+                pass  # Blacklist file not found, continue
+
             # Check if already exists
             existing = await self.database.get_tracked_wallet(address)
 
