@@ -41,6 +41,7 @@ class MLPipeline:
         self.model_dir = model_dir
         self.model = None
         self.feature_names = []
+        self.model_path = os.path.join(model_dir, 'xgboost_model.pkl')  # Add model_path attribute
 
         # Create models directory
         os.makedirs(self.model_dir, exist_ok=True)
