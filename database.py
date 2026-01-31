@@ -187,6 +187,11 @@ class Database:
                     ALTER TABLE signals
                     ADD COLUMN IF NOT EXISTS buy_sell_score INTEGER
                 ''')
+                # Add unique_buyers column for ML training (2026-01-31)
+                await conn.execute('''
+                    ALTER TABLE signals
+                    ADD COLUMN IF NOT EXISTS unique_buyers INTEGER
+                ''')
             except Exception as e:
                 # Columns might already exist, ignore
                 logger.debug(f"Outcome tracking columns migration: {e}")
@@ -332,8 +337,8 @@ class Database:
                 INSERT INTO signals
                 (token_address, token_name, token_symbol, signal_type, signal_source, bonding_curve_pct,
                  conviction_score, entry_price, liquidity, volume_24h, market_cap,
-                 buys_24h, sells_24h, buy_percentage, buy_sell_score)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+                 buys_24h, sells_24h, buy_percentage, buy_sell_score, unique_buyers)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
                 ON CONFLICT (token_address) DO UPDATE SET
                     conviction_score = EXCLUDED.conviction_score,
                     bonding_curve_pct = EXCLUDED.bonding_curve_pct,
@@ -342,6 +347,7 @@ class Database:
                     sells_24h = EXCLUDED.sells_24h,
                     buy_percentage = EXCLUDED.buy_percentage,
                     buy_sell_score = EXCLUDED.buy_sell_score,
+                    unique_buyers = EXCLUDED.unique_buyers,
                     updated_at = NOW()
             ''', signal_data['token_address'], signal_data.get('token_name'),
                 signal_data.get('token_symbol'), signal_data['signal_type'],
@@ -350,7 +356,8 @@ class Database:
                 signal_data.get('entry_price'), signal_data.get('liquidity'),
                 signal_data.get('volume_24h'), signal_data.get('market_cap'),
                 signal_data.get('buys_24h'), signal_data.get('sells_24h'),
-                signal_data.get('buy_percentage'), signal_data.get('buy_sell_score'))
+                signal_data.get('buy_percentage'), signal_data.get('buy_sell_score'),
+                signal_data.get('unique_buyers'))
     
     async def mark_signal_posted(self, token_address: str, message_id: int):
         """Mark a signal as posted to Telegram"""

@@ -1366,6 +1366,7 @@ class AdminBot:
                     'outcome': s.get('outcome', ''),
                     'bonding_curve_pct': s.get('bonding_curve_pct', 0),
                     'buy_percentage': s.get('buy_percentage', 0),
+                    'unique_buyers': s.get('unique_buyers', 0),
                     'buys_24h': s.get('buys_24h', 0),
                     'sells_24h': s.get('sells_24h', 0),
                     'liquidity': s.get('liquidity', 0),

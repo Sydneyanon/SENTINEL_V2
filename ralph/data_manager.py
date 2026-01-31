@@ -125,7 +125,7 @@ class DataManager:
                 SELECT
                     token_address, token_symbol, conviction_score,
                     entry_price, max_price_reached, outcome, max_roi,
-                    bonding_curve_pct, buy_percentage,
+                    bonding_curve_pct, buy_percentage, unique_buyers,
                     buys_24h, sells_24h, volume_24h, liquidity, market_cap,
                     kol_wallets, narrative_tags, holder_pattern, created_at
                 FROM signals
