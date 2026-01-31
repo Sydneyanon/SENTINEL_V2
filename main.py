@@ -304,13 +304,131 @@ async def cleanup_task():
 # DAILY PIPELINE - Automated Data Collection + ML Retraining
 # ============================================================================
 
+async def run_ralph_analysis():
+    """
+    Ralph's conviction analysis - analyzes recent signals and makes recommendations.
+    Runs as part of daily pipeline.
+    """
+    logger.info("🤖 RALPH CONVICTION ANALYSIS")
+    logger.info("-" * 40)
+
+    try:
+        if not db or not db.pool:
+            logger.warning("   Database not available for analysis")
+            return
+
+        async with db.pool.acquire() as conn:
+            # Get signals from last 24 hours
+            signals = await conn.fetch('''
+                SELECT conviction_score, outcome, max_roi, entry_price, max_price_reached,
+                       bonding_curve_pct, buy_percentage, kol_wallets
+                FROM signals
+                WHERE signal_posted = TRUE
+                  AND created_at > NOW() - INTERVAL '24 hours'
+            ''')
+
+            if not signals:
+                logger.info("   No signals in last 24 hours to analyze")
+                return
+
+            # Analyze conviction score buckets
+            buckets = {
+                '90-100': {'wins': 0, 'rugs': 0, 'total': 0},
+                '70-89': {'wins': 0, 'rugs': 0, 'total': 0},
+                '50-69': {'wins': 0, 'rugs': 0, 'total': 0},
+                '40-49': {'wins': 0, 'rugs': 0, 'total': 0},
+                '0-39': {'wins': 0, 'rugs': 0, 'total': 0},
+            }
+
+            total_wins = 0
+            total_rugs = 0
+            total_signals = len(signals)
+
+            for s in signals:
+                score = s['conviction_score'] or 0
+                outcome = s['outcome']
+
+                # Determine bucket
+                if score >= 90:
+                    bucket = '90-100'
+                elif score >= 70:
+                    bucket = '70-89'
+                elif score >= 50:
+                    bucket = '50-69'
+                elif score >= 40:
+                    bucket = '40-49'
+                else:
+                    bucket = '0-39'
+
+                buckets[bucket]['total'] += 1
+
+                if outcome in ('2x', '5x', '10x', '50x', '100x'):
+                    buckets[bucket]['wins'] += 1
+                    total_wins += 1
+                elif outcome == 'rug':
+                    buckets[bucket]['rugs'] += 1
+                    total_rugs += 1
+
+            # Log analysis
+            logger.info(f"   📊 Last 24h: {total_signals} signals, {total_wins} wins, {total_rugs} rugs")
+
+            # Recommendations
+            recommendations = []
+
+            # Check for rug-heavy buckets
+            for bucket, data in buckets.items():
+                if data['total'] >= 3:  # Need at least 3 signals for meaningful data
+                    rug_rate = data['rugs'] / data['total'] * 100
+                    if rug_rate > 50:
+                        recommendations.append(f"⚠️ Score {bucket}: {rug_rate:.0f}% rug rate - consider raising threshold")
+
+            # Check overall rug rate
+            if total_signals >= 5:
+                overall_rug_rate = total_rugs / total_signals * 100
+                overall_win_rate = total_wins / total_signals * 100
+
+                logger.info(f"   📈 Win rate: {overall_win_rate:.0f}% | Rug rate: {overall_rug_rate:.0f}%")
+
+                if overall_rug_rate > 40:
+                    recommendations.append(f"🚨 High rug rate ({overall_rug_rate:.0f}%) - raise MIN_CONVICTION_SCORE")
+                if overall_win_rate < 25:
+                    recommendations.append(f"🚨 Low win rate ({overall_win_rate:.0f}%) - tighten filters")
+
+            # Check KOL performance
+            kol_wins = 0
+            kol_rugs = 0
+            kol_total = 0
+            for s in signals:
+                if s['kol_wallets'] and len(s['kol_wallets']) > 0:
+                    kol_total += 1
+                    if s['outcome'] in ('2x', '5x', '10x', '50x', '100x'):
+                        kol_wins += 1
+                    elif s['outcome'] == 'rug':
+                        kol_rugs += 1
+
+            if kol_total >= 3:
+                kol_rug_rate = kol_rugs / kol_total * 100
+                if kol_rug_rate > 30:
+                    recommendations.append(f"⚠️ KOL-backed signals: {kol_rug_rate:.0f}% rug rate - review tracked wallets")
+
+            # Log recommendations
+            if recommendations:
+                logger.info("   🤖 RALPH RECOMMENDATIONS:")
+                for rec in recommendations:
+                    logger.info(f"      {rec}")
+            else:
+                logger.info("   ✅ No immediate concerns detected")
+
+    except Exception as e:
+        logger.error(f"   ❌ Ralph analysis failed: {e}")
+
+
 async def run_daily_pipeline():
     """
-    Daily pipeline that runs at midnight UTC:
-    1. Collects yesterday's top 50 tokens from DexScreener/Moralis
-    2. Extracts whale wallets and saves to database
-    3. Retrains ML model if enough new data (200+ tokens, 50+ new)
-    4. Deploys new model for next conviction scoring cycle
+    Daily pipeline that runs at 2 AM UTC:
+    1. Collects yesterday's missed winners from DexScreener
+    2. Retrains ML model if enough new data
+    3. Runs Ralph conviction analysis
     """
     logger.info("=" * 80)
     logger.info("🌅 DAILY PIPELINE STARTING")
@@ -319,8 +437,8 @@ async def run_daily_pipeline():
     logger.info("")
 
     try:
-        # Step 1: Daily token collection
-        logger.info("📊 STEP 1: Collecting yesterday's top tokens...")
+        # Step 1: Daily token collection (missed winners)
+        logger.info("📊 STEP 1: Collecting yesterday's missed winners...")
         from tools.daily_token_collector import DailyTokenCollector
         collector = DailyTokenCollector()
         await collector.collect_daily()
@@ -333,6 +451,12 @@ async def run_daily_pipeline():
         retrainer = AutomatedMLRetrainer()
         await retrainer.run()
         logger.info("✅ ML retraining check complete")
+        logger.info("")
+
+        # Step 3: Ralph conviction analysis
+        logger.info("🤖 STEP 3: Running Ralph conviction analysis...")
+        await run_ralph_analysis()
+        logger.info("✅ Ralph analysis complete")
         logger.info("")
 
         logger.info("=" * 80)

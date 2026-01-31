@@ -73,8 +73,8 @@ DISABLE_POLLING_BELOW_THRESHOLD = True
 # - Added buyer velocity scoring (0-18 pts) and bonding curve speed (0-15 pts)
 # - Unique buyers (0-10), volume (0-12), narrative (0-7 RSS+BERTopic), telegram (0-5)
 # - Lowered post-grad threshold from 75 to 65 (no KOL boost available)
-MIN_CONVICTION_SCORE = 30  # Pre-grad threshold (adjusted for 100-point budget, was 45)
-POST_GRAD_THRESHOLD = 65   # Post-grad threshold (raised to 65 for tiered system - Grok 2026-01-29)
+MIN_CONVICTION_SCORE = 40  # Pre-grad threshold (raised from 30 to reduce rugs - 2026-01-31)
+POST_GRAD_THRESHOLD = 55   # Post-grad threshold (lowered from 65 to catch runners - 2026-01-31)
 
 # Base score threshold for distribution checks
 # Only check distribution if base score >= this value
@@ -194,8 +194,8 @@ EARLY_PUMP_ALERT = {
 # =============================================================================
 ORGANIC_SCANNER = {
     'enabled': True,
-    'min_unique_buyers': 30,       # Lowered from 60 — many 5-10x runners start with 30-50 early buyers
-    'min_buy_ratio': 0.55,         # Lowered from 0.70 — allows slight sell pressure if velocity is strong
+    'min_unique_buyers': 50,       # Raised from 30 to reduce rugs (2026-01-31)
+    'min_buy_ratio': 0.65,         # Raised from 0.55 to filter weak momentum (2026-01-31)
     'max_bundle_ratio': 0.20,      # Max 20% of buys from same block (anti-bundle)
     'watch_window_seconds': 300,   # Watch tokens for 5 min before deciding
     'min_bonding_pct': 20,         # Lowered from 40 — catches very early FOMO
