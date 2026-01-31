@@ -397,20 +397,67 @@ class AdminBot:
                     r += f"{emoji} {t}: {data['win_rate']:.0f}% ({data['signals']}){curr}{opt}\n"
                 r += "\n"
 
-            # KOL impact
+            # KOL impact - show actual numbers
             kol = results.get('kol_analysis', {}).get('kol_vs_organic', {})
             if kol.get('kol') and kol.get('organic'):
                 kol_wr = kol['kol'].get('win_rate', 0)
+                kol_count = kol['kol'].get('total', 0)
                 org_wr = kol['organic'].get('win_rate', 0)
+                org_count = kol['organic'].get('total', 0)
                 diff = kol_wr - org_wr
 
-                r += "<b>👑 KOL Impact:</b>\n"
+                r += "<b>👑 KOL vs ORGANIC:</b>\n"
+                r += f"   KOL: {kol_wr:.0f}% WR ({kol_count} signals)\n"
+                r += f"   Organic: {org_wr:.0f}% WR ({org_count} signals)\n"
                 if diff > 5:
-                    r += f"   ✅ KOL adds +{diff:.0f}% WR\n"
+                    r += f"   ✅ KOL adds +{diff:.0f}%\n"
                 elif diff < -5:
-                    r += f"   ⚠️ KOL hurts by {diff:.0f}% WR\n"
+                    r += f"   ⚠️ KOL hurts by {diff:.0f}%\n"
                 else:
-                    r += f"   ➖ Minimal impact ({diff:+.0f}%)\n"
+                    r += f"   ➖ Similar performance\n"
+                r += "\n"
+
+            # Metrics breakdown (strong predictors + recommendations)
+            metrics_data = results.get('metrics_breakdown', {})
+            metrics = metrics_data.get('metrics', {})
+            metrics_recs = metrics_data.get('recommendations', [])
+
+            if metrics:
+                r += "<b>🔬 METRICS BREAKDOWN:</b>\n"
+
+                # Show strong predictors
+                for key, data in metrics.items():
+                    if data.get('is_predictive') and data.get('wins_avg') and data.get('rugs_avg'):
+                        direction = "↑" if data.get('direction') == 'higher' else "↓"
+                        name = data.get('name', key.replace('_', ' ').title())
+                        r += f"✅ <b>{name}</b>\n"
+                        r += f"   Wins: {data['wins_avg']:.1f} | Rugs: {data['rugs_avg']:.1f} ({direction})\n"
+
+                        # Show best threshold if available
+                        if data.get('best_threshold'):
+                            best = data['best_threshold']
+                            thresh_data = data.get('thresholds', {}).get(best, {})
+                            op = "≥" if data.get('direction') == 'higher' else "≤"
+                            r += f"   Best: {op}{best} → {thresh_data.get('win_rate', 0):.0f}% WR\n"
+
+                        # Show recommendation if available
+                        if data.get('recommendation'):
+                            rec = data['recommendation']
+                            r += f"   💡 {rec['from']} → {rec['to']} ({rec['impact']})\n"
+                        r += "\n"
+
+                # Summary
+                summary = metrics_data.get('summary', {})
+                if summary:
+                    strong = len(summary.get('strong_predictors', []))
+                    weak = len(summary.get('weak_predictors', []))
+                    r += f"<i>{strong} strong, {weak} weak predictors</i>\n\n"
+
+            # Metrics recommendations section
+            if metrics_recs:
+                r += "<b>📋 FILTER RECOMMENDATIONS:</b>\n"
+                for rec in metrics_recs[:5]:
+                    r += f"• {rec['name']}: {rec['from']} → {rec['to']} ({rec['impact']})\n"
                 r += "\n"
 
             # Recommendations

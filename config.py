@@ -49,6 +49,11 @@ TELEGRAM_PHONE = os.getenv('TELEGRAM_PHONE')  # Your phone number (optional, for
 # CREDIT OPTIMIZATION (CRITICAL!)
 # =============================================================================
 
+# KOL TRACKING - DISABLED (2026-01-31)
+# Analysis shows KOLs have 18% WR vs Organic 29% WR (-11% difference)
+# Going pure organic until we can find consistently good wallets
+ENABLE_KOL_TRACKING = False  # ← DISABLED: KOLs underperforming organic by 11%
+
 # STRICT MODE: Only track tokens bought by KOLs (saves massive API credits)
 # When True: Only tracks tokens from /webhook/smart-wallet (KOL buys)
 # When False: Also processes PumpPortal organic discoveries
@@ -97,11 +102,11 @@ DISTRIBUTION_CHECK_THRESHOLD = 30
 
 # Combined WEIGHTS dictionary (required by conviction engine)
 WEIGHTS = {
-    # Smart Wallet Activity - ENABLED (Dune leaderboard wallets)
-    'smart_wallet_elite': 15,       # Elite wallet bought ($10M+ PnL)
-    'smart_wallet_kol': 10,         # Top KOL bought ($1M+ PnL)
-    'smart_wallet_verified': 7,     # Verified wallet bought ($100K+ PnL)
-    'smart_wallet_emerging': 4,     # Emerging wallet bought (from 7-day)
+    # Smart Wallet Activity - DISABLED (2026-01-31: KOLs underperform organic by 11%)
+    'smart_wallet_elite': 0,        # DISABLED - was 15
+    'smart_wallet_kol': 0,          # DISABLED - was 10
+    'smart_wallet_verified': 0,     # DISABLED - was 7
+    'smart_wallet_emerging': 0,     # DISABLED - was 4
 
     # Narrative Detection (max 7 points — RSS+BERTopic matching)
     'narrative_hot': 5,             # Hot/trending narrative (RSS+BERTopic cluster match)
@@ -126,12 +131,12 @@ WEIGHTS = {
 # DETAILED SCORING WEIGHTS (for specific calculations)
 # =============================================================================
 
-# Smart Wallet Activity (ENABLED - Dune leaderboard wallets)
+# Smart Wallet Activity - DISABLED (2026-01-31: KOLs underperform organic by 11%)
 SMART_WALLET_WEIGHTS = {
-    'per_kol': 10,           # Base points per tracked wallet
-    'max_score': 40,         # Cap total smart wallet score
-    'multi_kol_bonus': 15,   # Bonus for 3+ wallets buying same token
-    'kol_time_window': 300   # 5 minutes for multi-KOL bonus
+    'per_kol': 0,            # DISABLED - was 10
+    'max_score': 0,          # DISABLED - was 40 (this is the key flag)
+    'multi_kol_bonus': 0,    # DISABLED - was 15
+    'kol_time_window': 300   # 5 minutes for multi-KOL bonus (kept for reference)
 }
 
 # =============================================================================
@@ -355,9 +360,9 @@ RUG_DETECTION = {
             'medium': 40
         },
         'kol_bonus': {
-            'enabled': True,
-            'per_kol': 10,           # +10 pts per KOL in top 10
-            'penalty_reduction': 5    # Reduce penalty by 5 per KOL
+            'enabled': False,         # DISABLED (2026-01-31: KOLs underperform organic)
+            'per_kol': 0,             # DISABLED - was 10
+            'penalty_reduction': 0    # DISABLED - was 5
         },
         'improvement_bonus': {
             'enabled': True,         # GROK: Reward improving distribution
@@ -520,23 +525,13 @@ SIGNAL_LOGGING = {
 #     "8BnEgHoWFysVcuFFX7QztDmzuH8r5ZFvyP3sYwn1XTh6",
 # ]
 
-# Option 2: Detailed tracking (RECOMMENDED) - addresses + metadata
+# Option 2: Detailed tracking - DISABLED (2026-01-31)
+# KOLs have 18% WR vs Organic 29% WR (-11% difference)
+# Cleared until we find consistently good wallets
 SMART_WALLETS = [
-    # Top 10 KOL wallets from gmgn.ai
-    # Bot will auto-discover: names, win rates, tiers, specialties on startup!
-    
-    "CyaE1VxvBrahnPWkqm5VsdCvyS2QmNht2UFrKJHga54o",
-    "5zCkbcD74hFPeBHwYdwJLJAoLVgHX45AFeR7RzC8vFiD",
-    "5TcyQLh8ojBf81DKeRC4vocTbNKJpJCsR9Kei16kLqDM",
-    "2wHHnAmdhFaAAsayWAeqKe3snK3KkbRQkRgLwTtz7iCi",
-    "DNfuF1L62WWyW3pNakVkyGGFzVVhj4Yr52jSmdTyeBHm",
-    "4BdKaxN8G6ka4GYtQQWk4G4dZRUTX2vQH9GcXdBREFUk",
-    "DYAn4XpAkN5mhiXkRB7dGq4Jadnx6XYgu8L5b3WGhbrt",
-    "DP7G43VPwR5Ab5rcjrCnvJ8UgvRXRHTWscMjRD1eSdGC",
-    "EvGpkcSBfhp5K9SNP48wVtfNXdKYRBiK3kvMkB66kU3Q",
-    "7uyGRgoCRKfynPbB35kWQwEGz9pmRvUyNFunV939mXpN",
-    
-    # Add 10-20 more for optimal coverage!
+    # KOL TRACKING DISABLED
+    # Previous wallets archived - can be re-added after finding better performers
+    # Run /ralph to analyze wallet performance before re-enabling
 ]
 
 # If using simple list format, convert to detailed internally

@@ -968,11 +968,15 @@ async def smart_wallet_webhook(request: Request):
     """
     Helius webhook for smart wallet transactions
 
-    NEW BEHAVIOR:
-    1. Process webhook to save KOL activity
-    2. Extract tokens that were bought
-    3. Start real-time tracking for those tokens
+    DISABLED (2026-01-31): KOLs have 18% WR vs Organic 29% WR
+    Going pure organic until we find consistently good wallets.
+    Delete webhook from Helius dashboard with /syncwebhook or run:
+    python tools/kill_webhooks.py
     """
+    # Early exit when KOL tracking is disabled
+    if not getattr(config, 'ENABLE_KOL_TRACKING', True):
+        return {"status": "disabled", "reason": "KOL tracking disabled - organic only mode"}
+
     try:
         data = await request.json()
 
