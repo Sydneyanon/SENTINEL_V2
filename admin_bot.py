@@ -998,14 +998,14 @@ class AdminBot:
             await update.message.reply_text(f"❌ Error: {str(e)}")
 
     async def _cmd_collect(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Manually trigger Helius backfill token collection"""
+        """Collect yesterday's winners we missed - the most valuable training data"""
         try:
             await self._send_response(update, context,
-                "📅 <b>Starting Helius backfill collection...</b>\n\n"
-                "Discovering pump.fun tokens via Helius searchAssets,\n"
-                "collecting 30+ ML features per token (DexScreener + Helius),\n"
-                "and building ML training data.\n\n"
-                "This may take a few minutes. Check Railway logs for progress.")
+                "🎯 <b>Starting Missed Winners Collection...</b>\n\n"
+                "Finding yesterday's top pump.fun gainers,\n"
+                "checking which ones we DIDN'T signal,\n"
+                "and learning from our blind spots.\n\n"
+                "This is the most valuable ML training data!")
 
             # Run in background so the bot stays responsive
             asyncio.create_task(self._run_collect_background(update, context))
@@ -1015,43 +1015,61 @@ class AdminBot:
             await update.message.reply_text(f"❌ Error: {str(e)}")
 
     async def _run_collect_background(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Run Helius backfill collection in background and report result"""
+        """Run missed winners collection in background and report result"""
         try:
-            from tools.helius_backfill_collector import HeliusBackfillCollector
+            from tools.missed_winners_collector import MissedWinnersCollector
 
-            collector = HeliusBackfillCollector(database=self.database)
-            await collector.run()
+            collector = MissedWinnersCollector(database=self.database)
+            result = await collector.run()
 
-            # Report results
-            stats = collector.stats
-            enriched = stats.get('enriched', 0)
-            discovered = stats.get('discovered', 0)
-            no_dex = stats.get('skipped_no_dex', 0)
-            filtered = stats.get('skipped_filters', 0)
-            existing = stats.get('skipped_existing', 0)
-            credits = stats.get('credits_used_estimate', 0)
+            if result.get('action') == 'failed':
+                await self._send_response(update, context,
+                    f"❌ <b>Collection failed</b>\n\n"
+                    f"Reason: {result.get('reason', 'Unknown')}")
+                return
 
-            # Get total dataset size (from DB first, then file fallback)
+            # Get stats
+            missed = result.get('missed_winners', 0)
+            signaled = result.get('already_signaled', 0)
+            collected = result.get('collected', 0)
+            checked = result.get('total_checked', 0)
+
+            # Get total dataset size
             total = 0
             try:
-                if self.database:
-                    total = await self.database.get_training_token_count()
-                if total == 0:
-                    import json
-                    with open('data/historical_training_data.json', 'r') as f:
-                        data = json.load(f)
-                        total = data.get('total_tokens', 0)
+                import json
+                with open('data/historical_training_data.json', 'r') as f:
+                    data = json.load(f)
+                    total = data.get('total_tokens', 0)
             except Exception:
                 pass
 
-            await self._send_response(update, context,
-                f"✅ <b>Helius backfill complete!</b>\n\n"
-                f"<b>Discovered:</b> {discovered} tokens\n"
-                f"<b>Added:</b> +{enriched} new tokens\n"
-                f"<b>Skipped:</b> {existing} existing, {no_dex} no DEX pair, {filtered} filtered\n"
-                f"<b>Dataset total:</b> {total} tokens\n"
-                f"<b>Credits used:</b> ~{credits}\n\n"
-                f"{'✅ Ready for ML training!' if total >= 75 else f'Need {75 - total} more tokens for ML training.'}")
+            # Build response
+            if missed > 0:
+                msg = f"🎯 <b>Missed Winners Found!</b>\n\n"
+                msg += f"<b>Winners checked:</b> {checked}\n"
+                msg += f"<b>We signaled:</b> {signaled} ✅\n"
+                msg += f"<b>We MISSED:</b> {missed} ❌\n"
+                msg += f"<b>New data added:</b> +{collected}\n\n"
+                msg += f"<b>Dataset total:</b> {total} tokens\n\n"
+
+                if signaled > 0 and checked > 0:
+                    catch_rate = (signaled / checked) * 100
+                    msg += f"📊 <b>Catch rate:</b> {catch_rate:.0f}%\n"
+                    if catch_rate < 30:
+                        msg += "⚠️ We're missing a lot of winners!\n"
+                    elif catch_rate > 70:
+                        msg += "✅ Good catch rate!\n"
+
+                msg += f"\n{'✅ Ready for ML training!' if total >= 75 else f'Need {75 - total} more tokens.'}"
+            else:
+                msg = f"✅ <b>Collection complete</b>\n\n"
+                msg += f"<b>Winners checked:</b> {checked}\n"
+                msg += f"<b>We signaled:</b> {signaled}\n"
+                msg += f"<b>Missed:</b> 0 (we caught them all!)\n\n"
+                msg += f"<b>Dataset total:</b> {total} tokens"
+
+            await self._send_response(update, context, msg)
         except Exception as e:
             logger.error(f"❌ Background collection failed: {e}")
             await self._send_response(update, context, f"❌ Collection failed: {str(e)}")
