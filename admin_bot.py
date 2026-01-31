@@ -1516,6 +1516,66 @@ class AdminBot:
 
             await self._send_response(update, context, msg4)
 
+            # Build Part 5: Actionable Recommendations
+            msg5 = "🎯 <b>RECOMMENDED CHANGES</b>\n\n"
+
+            # Current threshold (assume 60 if not set)
+            current_threshold = getattr(config, 'MIN_CONVICTION_SCORE', 60)
+
+            # Recommendation 1: Conviction threshold
+            if best_threshold > current_threshold:
+                msg5 += f"1️⃣ <b>RAISE CONVICTION THRESHOLD</b>\n"
+                msg5 += f"   Current: {current_threshold} → Recommended: <b>{best_threshold}</b>\n"
+                msg5 += f"   This would improve WR to {best_wr:.0f}%\n\n"
+            elif best_threshold < current_threshold:
+                msg5 += f"1️⃣ <b>LOWER CONVICTION THRESHOLD</b>\n"
+                msg5 += f"   Current: {current_threshold} → Recommended: <b>{best_threshold}</b>\n"
+                msg5 += f"   You're being too strict, missing winners\n\n"
+            else:
+                msg5 += f"1️⃣ <b>CONVICTION THRESHOLD OK</b>\n"
+                msg5 += f"   Current {current_threshold} is optimal\n\n"
+
+            # Recommendation 2: KOL requirement
+            if kol_data["total"] > 0 and non_kol_data["total"] > 0:
+                kol_wr = (kol_data["wins"] / kol_data["total"]) * 100 if kol_data["total"] > 0 else 0
+                org_wr = (non_kol_data["wins"] / non_kol_data["total"]) * 100 if non_kol_data["total"] > 0 else 0
+
+                if kol_wr > org_wr * 1.5:
+                    msg5 += f"2️⃣ <b>REQUIRE KOL BACKING</b>\n"
+                    msg5 += f"   KOL signals are {kol_wr/org_wr:.1f}x more likely to win\n"
+                    msg5 += f"   Consider: Only signal if KOL-backed OR score 80+\n\n"
+                elif kol_wr > org_wr:
+                    msg5 += f"2️⃣ <b>BOOST KOL WEIGHT</b>\n"
+                    msg5 += f"   KOL signals perform better but not dramatically\n"
+                    msg5 += f"   Consider: Add +10 conviction for KOL backing\n\n"
+                else:
+                    msg5 += f"2️⃣ <b>KOL WEIGHT OK</b>\n"
+                    msg5 += f"   KOLs not outperforming organic significantly\n\n"
+
+            # Recommendation 3: Based on rug analysis
+            if rugs:
+                avg_rug_score = sum(r['score'] for r in rugs) / len(rugs)
+                if avg_rug_score >= 60:
+                    msg5 += f"3️⃣ <b>SCORING ISSUE DETECTED</b>\n"
+                    msg5 += f"   Rugs have avg score of {avg_rug_score:.0f}\n"
+                    msg5 += f"   High scores are not filtering rugs properly\n"
+                    msg5 += f"   Review: buy/sell ratio, holder distribution\n\n"
+                else:
+                    msg5 += f"3️⃣ <b>SCORING WORKING</b>\n"
+                    msg5 += f"   Rugs have low avg score ({avg_rug_score:.0f})\n"
+                    msg5 += f"   Just need to enforce threshold strictly\n\n"
+
+            # Summary action
+            msg5 += "━━━━━━━━━━━━━━━━━━━━━\n"
+            msg5 += f"<b>TL;DR:</b> Set MIN_CONVICTION_SCORE={best_threshold}"
+            if kol_data["total"] > 0 and non_kol_data["total"] > 0:
+                kol_wr = (kol_data["wins"] / kol_data["total"]) * 100
+                org_wr = (non_kol_data["wins"] / non_kol_data["total"]) * 100
+                if kol_wr > org_wr * 1.3:
+                    msg5 += f"\nOR require KOL backing for scores under 75"
+
+            await self._send_response(update, context, msg5)
+
         except Exception as e:
             logger.error(f"❌ Error in /analyze: {e}")
             import traceback
