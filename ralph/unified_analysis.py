@@ -121,7 +121,11 @@ class RalphAnalysis:
             score_dist = self._analyze_score_distribution(data)
             results['score_distribution'] = score_dist
 
-            # 5. Summary & Recommendations
+            # 5. Metrics Breakdown (What Actually Predicts Wins?)
+            metrics_breakdown = self._analyze_metrics_breakdown(data)
+            results['metrics_breakdown'] = metrics_breakdown
+
+            # 6. Summary & Recommendations
             logger.info("")
             logger.info("=" * 60)
             logger.info("🎯 RECOMMENDATIONS")
@@ -399,6 +403,101 @@ class RalphAnalysis:
                 stats['rug_rate'] = 0
 
         return buckets
+
+    def _analyze_metrics_breakdown(self, data: List[Dict]) -> Dict:
+        """
+        Analyze which metrics correlate with wins vs rugs.
+        Shows what thresholds work and which don't.
+        """
+        results = {
+            'metrics': {},
+            'recommendations': []
+        }
+
+        # Define metrics to analyze
+        metrics_config = [
+            ('conviction_score', 'Conviction Score', [30, 40, 50, 60, 70]),
+            ('buy_percentage', 'Buy %', [50, 55, 60, 65, 70, 75]),
+            ('unique_buyers', 'Unique Buyers', [20, 50, 100, 150, 200]),
+            ('bonding_curve_pct', 'Bonding %', [20, 40, 60, 80]),
+            ('volume_24h', 'Volume 24h', [1000, 5000, 10000, 50000]),
+            ('market_cap', 'Market Cap', [10000, 25000, 50000, 100000]),
+        ]
+
+        logger.info("")
+        logger.info("━" * 50)
+        logger.info("🔬 METRICS BREAKDOWN (What Predicts Wins?)")
+        logger.info("━" * 50)
+
+        # Analyze wins vs rugs for each metric
+        wins = [d for d in data if d['is_win']]
+        rugs = [d for d in data if d['is_rug']]
+        losses = [d for d in data if d['is_loss']]
+
+        for metric_key, metric_name, thresholds in metrics_config:
+            metric_data = {
+                'wins_avg': None,
+                'rugs_avg': None,
+                'losses_avg': None,
+                'thresholds': {},
+                'best_threshold': None,
+                'recommendation': None
+            }
+
+            # Calculate averages
+            win_values = [d.get(metric_key) for d in wins if d.get(metric_key) is not None]
+            rug_values = [d.get(metric_key) for d in rugs if d.get(metric_key) is not None]
+            loss_values = [d.get(metric_key) for d in losses if d.get(metric_key) is not None]
+
+            if win_values:
+                metric_data['wins_avg'] = sum(win_values) / len(win_values)
+            if rug_values:
+                metric_data['rugs_avg'] = sum(rug_values) / len(rug_values)
+            if loss_values:
+                metric_data['losses_avg'] = sum(loss_values) / len(loss_values)
+
+            # Test thresholds
+            best_wr = 0
+            best_thresh = None
+
+            for threshold in thresholds:
+                passing = [d for d in data if (d.get(metric_key) or 0) >= threshold]
+                if len(passing) >= 5:
+                    thresh_wins = sum(1 for d in passing if d['is_win'])
+                    thresh_rugs = sum(1 for d in passing if d['is_rug'])
+                    thresh_wr = (thresh_wins / len(passing) * 100)
+                    thresh_rr = (thresh_rugs / len(passing) * 100)
+
+                    metric_data['thresholds'][threshold] = {
+                        'signals': len(passing),
+                        'win_rate': round(thresh_wr, 1),
+                        'rug_rate': round(thresh_rr, 1)
+                    }
+
+                    if thresh_wr > best_wr:
+                        best_wr = thresh_wr
+                        best_thresh = threshold
+
+            metric_data['best_threshold'] = best_thresh
+            results['metrics'][metric_key] = metric_data
+
+            # Log findings
+            if metric_data['wins_avg'] is not None and metric_data['rugs_avg'] is not None:
+                diff = metric_data['wins_avg'] - metric_data['rugs_avg']
+                direction = "higher" if diff > 0 else "lower"
+
+                # Determine if this metric is predictive
+                if abs(diff) > 0.1 * max(metric_data['wins_avg'], metric_data['rugs_avg'], 1):
+                    indicator = "✅" if diff > 0 else "⚠️"
+                    logger.info(f"   {indicator} {metric_name}: Wins avg {metric_data['wins_avg']:.1f} vs Rugs {metric_data['rugs_avg']:.1f} ({direction} is better)")
+
+                    if best_thresh:
+                        best_data = metric_data['thresholds'].get(best_thresh, {})
+                        logger.info(f"      Best threshold ≥{best_thresh}: {best_data.get('win_rate', 0):.0f}% WR ({best_data.get('signals', 0)} signals)")
+                else:
+                    logger.info(f"   ➖ {metric_name}: No strong correlation (Wins: {metric_data['wins_avg']:.1f}, Rugs: {metric_data['rugs_avg']:.1f})")
+
+        return results
 
     def _calculate_health_score(self, results: Dict) -> Dict:
         """Calculate overall system health score."""
