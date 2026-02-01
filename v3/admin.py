@@ -302,7 +302,7 @@ class AdminBot:
             )
             return
 
-        webhook_url = f"{WEBHOOK_URL}/webhook/wallet"
+        webhook_url = f"{WEBHOOK_URL.strip().rstrip('/')}/webhook/wallet"
 
         # Get wallet addresses
         addresses = [w['address'] for w in wallets]
