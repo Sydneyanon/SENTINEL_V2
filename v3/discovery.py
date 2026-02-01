@@ -145,52 +145,61 @@ class SmartMoneyDiscovery:
                     }
 
                 # Extract wallets from tokens (dedupe by address)
-                wallets = {}
+                wallet_addresses = set()
                 for token in tokens:
                     token_wallets = token.get('wallets', [])
                     if isinstance(token_wallets, list):
                         for w in token_wallets:
                             if isinstance(w, dict):
                                 addr = w.get('address') or w.get('wallet_address') or w.get('walletAddress')
-                                if addr and addr not in wallets:
-                                    wallets[addr] = w
+                                if addr:
+                                    wallet_addresses.add(addr)
 
-                logger.info(f"Extracted {len(wallets)} unique wallets from {len(tokens)} tokens")
+                logger.info(f"Extracted {len(wallet_addresses)} unique wallet addresses from {len(tokens)} tokens")
 
-                if not wallets:
-                    # Log sample token to debug
-                    if tokens:
-                        sample = tokens[0]
-                        logger.info(f"Sample token keys: {list(sample.keys())}")
-                        logger.info(f"Sample token 'wallets' field: {sample.get('wallets', 'NOT FOUND')}")
+                if not wallet_addresses:
                     return {
                         'success': False,
                         'discovered': 0,
                         'added_to_tracking': 0,
-                        'message': 'No wallets found in token data'
+                        'message': 'No wallet addresses found in token data'
                     }
 
-                # Log sample wallet data to help diagnose field names
-                sample_wallet = list(wallets.values())[0]
-                logger.info(f"Sample wallet keys: {list(sample_wallet.keys())}")
-                addr = sample_wallet.get('address') or sample_wallet.get('wallet_address') or 'N/A'
-                wr = sample_wallet.get('winRate') or sample_wallet.get('win_rate') or sample_wallet.get('winrate') or 'N/A'
-                trades = sample_wallet.get('totalTrades') or sample_wallet.get('total_trades') or sample_wallet.get('buy_30d') or 'N/A'
-                pnl = sample_wallet.get('pnl30d') or sample_wallet.get('pnl_30d') or sample_wallet.get('realized_profit_30d') or 'N/A'
-                logger.info(f"Sample wallet: addr={addr[:8] if isinstance(addr, str) else addr}..., WR={wr}, trades={trades}, pnl30d={pnl}")
+                # Fetch actual wallet stats from GMGN API for each address
+                logger.info(f"Fetching wallet stats from GMGN for {len(wallet_addresses)} wallets...")
+                wallets_with_stats = []
+                for addr in list(wallet_addresses)[:config.DISCOVERY_LIMIT]:
+                    stats = await self._fetch_wallet_stats(addr)
+                    if stats:
+                        wallets_with_stats.append(stats)
+                    await asyncio.sleep(0.2)  # Rate limit
+
+                logger.info(f"Got stats for {len(wallets_with_stats)} wallets")
+
+                if not wallets_with_stats:
+                    return {
+                        'success': False,
+                        'discovered': 0,
+                        'added_to_tracking': 0,
+                        'message': 'Could not fetch wallet stats from GMGN'
+                    }
+
+                # Log sample wallet stats
+                sample = wallets_with_stats[0]
+                logger.info(f"Sample wallet stats: addr={sample.get('address', 'N/A')[:8]}..., WR={sample.get('winrate', 'N/A')}, trades={sample.get('buy_30d', 'N/A')}, pnl={sample.get('realized_profit_30d', 'N/A')}")
 
                 # Filter and store wallets
                 stored = 0
                 filter_reasons = {'no_address': 0, 'win_rate': 0, 'trades': 0, 'honeypot': 0, 'pnl': 0}
-                for w in wallets.values():
+                for w in wallets_with_stats:
                     result = await self._store_wallet_with_reason(w)
                     if result == 'stored':
                         stored += 1
                     elif result in filter_reasons:
                         filter_reasons[result] += 1
 
-                logger.info(f"Stored {stored}/{len(wallets)} wallets")
-                if stored < len(wallets):
+                logger.info(f"Stored {stored}/{len(wallets_with_stats)} wallets")
+                if stored < len(wallets_with_stats):
                     logger.info(f"Filtered out: {filter_reasons}")
 
                 # Auto-enable tracking for top performers
@@ -302,6 +311,36 @@ class SmartMoneyDiscovery:
                 logger.debug(f"Sample wallet data: {sample}")
 
             return results
+
+    async def _fetch_wallet_stats(self, address: str) -> Optional[Dict]:
+        """Fetch wallet stats from GMGN API."""
+        url = f"https://gmgn.ai/defi/quotation/v1/smartmoney/sol/walletNew/{address}?period=30d"
+
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Accept': 'application/json',
+        }
+
+        try:
+            async with self.session.get(url, headers=headers) as resp:
+                if resp.status != 200:
+                    return None
+
+                data = await resp.json()
+                if data.get('code') != 0:
+                    return None
+
+                wallet_data = data.get('data', {})
+                if not wallet_data:
+                    return None
+
+                # Add address to the data
+                wallet_data['address'] = address
+                return wallet_data
+
+        except Exception as e:
+            logger.debug(f"Failed to fetch stats for {address[:8]}: {e}")
+            return None
 
     async def _store_wallet_with_reason(self, data: Dict) -> str:
         """Store a wallet in the smart_money table if it passes filters.
