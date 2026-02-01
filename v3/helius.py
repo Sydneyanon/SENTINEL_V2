@@ -88,6 +88,8 @@ async def update_webhook(
         payload = {
             "webhookURL": webhook_url,
             "accountAddresses": wallet_addresses,
+            "transactionTypes": ["ANY"],
+            "webhookType": "enhanced",
         }
 
         async with aiohttp.ClientSession() as session:
