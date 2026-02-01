@@ -103,8 +103,12 @@ async def fetch_pumpportal(token_address: str) -> Optional[Dict]:
                     return None
 
                 # Calculate price from bonding curve
-                virtual_sol = float(data.get('vSolInBondingCurve', 0) or 0)
-                virtual_tokens = float(data.get('vTokensInBondingCurve', 0) or 0)
+                # Handle lamports vs SOL (V2 fix: values > 1000 are lamports)
+                v_sol_raw = float(data.get('vSolInBondingCurve', 0) or 0)
+                virtual_sol = v_sol_raw / 1e9 if v_sol_raw > 1000 else v_sol_raw
+
+                v_tokens_raw = float(data.get('vTokensInBondingCurve', 0) or 0)
+                virtual_tokens = v_tokens_raw / 1e6 if v_tokens_raw > 1e9 else v_tokens_raw  # 6 decimals
 
                 if virtual_tokens > 0:
                     price_sol = virtual_sol / virtual_tokens
@@ -115,10 +119,8 @@ async def fetch_pumpportal(token_address: str) -> Optional[Dict]:
                 sol_price = await get_sol_price()
                 price_usd = price_sol * sol_price
 
-                # Calculate bonding curve percentage
-                total_supply = 1_000_000_000  # 1B standard pump.fun supply
-                tokens_sold = total_supply - virtual_tokens
-                bonding_pct = (tokens_sold / total_supply) * 100 if total_supply > 0 else 0
+                # Calculate bonding curve percentage (85 SOL = graduation)
+                bonding_pct = min((virtual_sol / 85) * 100, 100) if virtual_sol > 0 else 0
 
                 # Estimate MCAP (virtual_sol * 2 is approximate fully diluted)
                 mcap = virtual_sol * sol_price * 2
