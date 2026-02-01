@@ -230,6 +230,7 @@ async def process_wallet_transaction(tx: dict):
 
 async def process_potential_signal(token_address: str, wallet: dict):
     """Process a potential signal from a wallet buy."""
+    global pumpportal
 
     # Check if we already have a recent signal for this token
     existing = await db.get_signal_by_token(token_address)
@@ -237,16 +238,28 @@ async def process_potential_signal(token_address: str, wallet: dict):
         logger.debug(f"Already signaled {token_address[:8]}")
         return
 
-    # Fetch token data from DexScreener
+    # Fetch token data from DexScreener/PumpPortal
     data = await fetch_token_data(token_address)
     if not data:
-        logger.debug(f"No DexScreener data for {token_address[:8]}")
+        logger.debug(f"No data for {token_address[:8]}")
         return
 
     symbol = data.get('symbol', 'UNKNOWN')
     name = data.get('name', 'Unknown')
+    graduated = data.get('graduated', True)
 
     logger.info(f"Wallet {wallet['name'] or wallet['address'][:8]} bought ${symbol}")
+
+    # Get real-time buy/sell data from WebSocket (much better than REST API zeros)
+    buys = data.get('buys_1h', 0)
+    sells = data.get('sells_1h', 0)
+
+    if pumpportal and not graduated:
+        ws_stats = pumpportal.get_token_stats(token_address)
+        if ws_stats:
+            buys = ws_stats.get('buys', buys)
+            sells = ws_stats.get('sells', sells)
+            logger.debug(f"WebSocket data for ${symbol}: {buys} buys, {sells} sells")
 
     # Calculate score
     score, breakdown, should_signal, skip_reason = calculate_score(
@@ -256,8 +269,9 @@ async def process_potential_signal(token_address: str, wallet: dict):
         price_change_1h=data.get('price_change_1h', 0),
         holders=data.get('holders', 0),
         mcap=data.get('mcap', 0),
-        buys_1h=data.get('buys_1h', 0),
-        sells_1h=data.get('sells_1h', 0)
+        buys_1h=buys,
+        sells_1h=sells,
+        graduated=graduated
     )
 
     if not should_signal:

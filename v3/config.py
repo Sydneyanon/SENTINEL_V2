@@ -31,7 +31,7 @@ MAX_MCAP = 100000
 MIN_HOLDERS = 20
 
 # Buy/Sell Ratio: Wins avg 1.1 vs Rugs avg 0.5. Best ≥2.0 = 29% WR
-MIN_BUY_SELL_RATIO = 2.0
+# NOTE: No hard filter - use scoring instead (pre-grad has 0/0 from REST API)
 
 # =============================================================================
 # TIME FILTERS (Optional - based on hourly analysis)

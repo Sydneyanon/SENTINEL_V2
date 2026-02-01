@@ -9,7 +9,7 @@ from typing import Dict, Any, Tuple, Optional
 
 from config import (
     SCORING, MIN_SCORE, MIN_LIQUIDITY, MIN_HOLDERS, MAX_MCAP,
-    MIN_BUY_SELL_RATIO, AVOID_HOURS_UTC
+    AVOID_HOURS_UTC
 )
 
 
@@ -21,7 +21,8 @@ def calculate_score(
     holders: int,
     mcap: float,
     buys_1h: int = 0,
-    sells_1h: int = 0
+    sells_1h: int = 0,
+    graduated: bool = True
 ) -> Tuple[int, Dict[str, Any], bool, str]:
     """
     Calculate conviction score for a token.
@@ -36,22 +37,26 @@ def calculate_score(
     # PRE-CHECKS (hard filters - based on Ralph data analysis)
     # ==========================================================================
 
-    # MCAP filter - KEY FILTER! Wins avg $32K vs Rugs avg $72K
-    if mcap > MAX_MCAP:
+    # MCAP filter - only apply to GRADUATED tokens (pre-grad MCAP is unreliable)
+    # Pre-grad tokens use bonding curve math which doesn't reflect true MCAP
+    if graduated and mcap > MAX_MCAP:
         return 0, {}, False, f"MCAP ${mcap:,.0f} > ${MAX_MCAP:,.0f}"
 
-    # Liquidity filter - Wins avg $10K vs Rugs avg $20K
-    if liquidity < MIN_LIQUIDITY:
-        return 0, {}, False, f"Liquidity ${liquidity:,.0f} < ${MIN_LIQUIDITY:,.0f}"
+    # Liquidity filter - lower threshold for pre-grad (bonding curve starts at ~$1-2K)
+    # Graduated tokens: $8K min | Pre-grad: $1K min (5 SOL * $200)
+    min_liq = MIN_LIQUIDITY if graduated else 1000
+    if liquidity < min_liq:
+        return 0, {}, False, f"Liquidity ${liquidity:,.0f} < ${min_liq:,.0f}"
 
-    # Holders filter
-    if holders < MIN_HOLDERS:
-        return 0, {}, False, f"Holders {holders} < {MIN_HOLDERS}"
+    # Holders filter - lower for pre-grad (estimated from bonding curve)
+    # Graduated: 20 min | Pre-grad: 10 min (estimated)
+    min_holders = MIN_HOLDERS if graduated else 10
+    if holders < min_holders:
+        return 0, {}, False, f"Holders {holders} < {min_holders}"
 
-    # Buy/Sell ratio filter - Strong predictor! Wins avg 1.1 vs Rugs avg 0.5
+    # Buy/Sell ratio - NO HARD FILTER (was blocking all pre-grad with 0/0 data)
+    # Use scoring instead (lines 117-137)
     buy_sell_ratio = buys_1h / max(sells_1h, 1)
-    if buy_sell_ratio < MIN_BUY_SELL_RATIO:
-        return 0, {}, False, f"Buy/Sell ratio {buy_sell_ratio:.1f} < {MIN_BUY_SELL_RATIO}"
 
     # Time filter - avoid worst hours (optional)
     if AVOID_HOURS_UTC:
