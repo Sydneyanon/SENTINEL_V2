@@ -143,13 +143,30 @@ class SmartMoneyDiscovery:
                         'message': 'No wallets found from Apify'
                     }
 
+                # Log sample data at INFO level to help diagnose issues
+                if wallets:
+                    sample = wallets[0]
+                    logger.info(f"Sample wallet keys: {list(sample.keys())}")
+                    # Log first wallet's values to verify field names
+                    addr = sample.get('address') or sample.get('wallet_address') or sample.get('walletAddress') or 'N/A'
+                    wr = sample.get('winRate') or sample.get('win_rate') or 'N/A'
+                    trades = sample.get('totalTrades') or sample.get('total_trades') or sample.get('trades') or 'N/A'
+                    pnl = sample.get('pnl30d') or sample.get('pnl_30d') or sample.get('pnl') or 'N/A'
+                    logger.info(f"Sample: addr={addr[:8] if isinstance(addr, str) else addr}..., WR={wr}, trades={trades}, pnl30d={pnl}")
+
                 # Filter and store wallets
                 stored = 0
+                filter_reasons = {'no_address': 0, 'win_rate': 0, 'trades': 0, 'honeypot': 0, 'pnl': 0}
                 for w in wallets:
-                    if await self._store_wallet(w):
+                    result = await self._store_wallet_with_reason(w)
+                    if result == 'stored':
                         stored += 1
+                    elif result in filter_reasons:
+                        filter_reasons[result] += 1
 
-                logger.info(f"Stored {stored} smart money wallets")
+                logger.info(f"Stored {stored}/{len(wallets)} wallets")
+                if stored < len(wallets):
+                    logger.info(f"Filtered out: {filter_reasons}")
 
                 # Auto-enable tracking for top performers
                 added, new_wallet_details = await db.auto_enable_top_smart_money_with_details(
@@ -252,15 +269,27 @@ class SmartMoneyDiscovery:
 
             results = await resp.json()
             logger.info(f"Got {len(results)} wallets from Apify")
+
+            # Debug: Log sample data to see actual field names
+            if results and len(results) > 0:
+                sample = results[0]
+                logger.debug(f"Sample wallet data keys: {list(sample.keys())}")
+                logger.debug(f"Sample wallet data: {sample}")
+
             return results
 
-    async def _store_wallet(self, data: Dict) -> bool:
-        """Store a wallet in the smart_money table if it passes filters."""
+    async def _store_wallet_with_reason(self, data: Dict) -> str:
+        """Store a wallet in the smart_money table if it passes filters.
+
+        Returns:
+            'stored' if successful, or filter reason ('no_address', 'win_rate', 'trades', 'honeypot', 'pnl')
+        """
 
         # Extract address (field names may vary)
         address = data.get('address') or data.get('wallet_address') or data.get('walletAddress')
         if not address:
-            return False
+            logger.debug(f"Wallet skipped: no address found in data")
+            return 'no_address'
 
         # Extract metrics
         win_rate = float(data.get('winRate') or data.get('win_rate') or 0)
@@ -269,18 +298,25 @@ class SmartMoneyDiscovery:
         pnl_30d = float(data.get('pnl30d') or data.get('pnl_30d') or data.get('pnl') or 0)
         honeypot_ratio = float(data.get('honeypotRatio') or data.get('honeypot_ratio') or 0)
 
+        # Debug: Log extracted values
+        logger.debug(f"Wallet {address[:8]}: WR={win_rate}, trades={total_trades}, pnl30d={pnl_30d}, honeypot={honeypot_ratio}")
+
         # Hard filters - must pass ALL (tightened for quality)
         if win_rate < config.DISCOVERY_MIN_WIN_RATE:
-            return False
+            logger.debug(f"Wallet {address[:8]} filtered: win_rate {win_rate} < {config.DISCOVERY_MIN_WIN_RATE}")
+            return 'win_rate'
         if total_trades < config.DISCOVERY_MIN_TRADES:
-            return False
+            logger.debug(f"Wallet {address[:8]} filtered: trades {total_trades} < {config.DISCOVERY_MIN_TRADES}")
+            return 'trades'
         if honeypot_ratio > config.DISCOVERY_MAX_HONEYPOT:
-            return False
+            logger.debug(f"Wallet {address[:8]} filtered: honeypot {honeypot_ratio} > {config.DISCOVERY_MAX_HONEYPOT}")
+            return 'honeypot'
 
         # PNL filter - must be profitable
         min_pnl = getattr(config, 'DISCOVERY_MIN_PNL_30D', 5000)
         if pnl_30d < min_pnl:
-            return False
+            logger.debug(f"Wallet {address[:8]} filtered: pnl30d {pnl_30d} < {min_pnl}")
+            return 'pnl'
 
         # Determine tier using config thresholds
         elite_wr = getattr(config, 'DISCOVERY_ELITE_WIN_RATE', 65.0)
@@ -307,7 +343,7 @@ class SmartMoneyDiscovery:
             tier=tier
         )
 
-        return True
+        return 'stored'
 
     async def _sync_helius(self):
         """Sync all tracked wallets with Helius."""
