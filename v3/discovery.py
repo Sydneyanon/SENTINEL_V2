@@ -133,31 +133,56 @@ class SmartMoneyDiscovery:
                 self.session = session
 
                 # Fetch smart degens from GMGN
-                wallets = await self._fetch_smart_degens()
+                # Note: Apify returns tokens, each with a 'wallets' array of smart money
+                tokens = await self._fetch_smart_degens()
 
-                if not wallets:
+                if not tokens:
                     return {
                         'success': False,
                         'discovered': 0,
                         'added_to_tracking': 0,
-                        'message': 'No wallets found from Apify'
+                        'message': 'No tokens found from Apify'
                     }
 
-                # Log sample data at INFO level to help diagnose issues
-                if wallets:
-                    sample = wallets[0]
-                    logger.info(f"Sample wallet keys: {list(sample.keys())}")
-                    # Log first wallet's values to verify field names
-                    addr = sample.get('address') or sample.get('wallet_address') or sample.get('walletAddress') or 'N/A'
-                    wr = sample.get('winRate') or sample.get('win_rate') or 'N/A'
-                    trades = sample.get('totalTrades') or sample.get('total_trades') or sample.get('trades') or 'N/A'
-                    pnl = sample.get('pnl30d') or sample.get('pnl_30d') or sample.get('pnl') or 'N/A'
-                    logger.info(f"Sample: addr={addr[:8] if isinstance(addr, str) else addr}..., WR={wr}, trades={trades}, pnl30d={pnl}")
+                # Extract wallets from tokens (dedupe by address)
+                wallets = {}
+                for token in tokens:
+                    token_wallets = token.get('wallets', [])
+                    if isinstance(token_wallets, list):
+                        for w in token_wallets:
+                            if isinstance(w, dict):
+                                addr = w.get('address') or w.get('wallet_address') or w.get('walletAddress')
+                                if addr and addr not in wallets:
+                                    wallets[addr] = w
+
+                logger.info(f"Extracted {len(wallets)} unique wallets from {len(tokens)} tokens")
+
+                if not wallets:
+                    # Log sample token to debug
+                    if tokens:
+                        sample = tokens[0]
+                        logger.info(f"Sample token keys: {list(sample.keys())}")
+                        logger.info(f"Sample token 'wallets' field: {sample.get('wallets', 'NOT FOUND')}")
+                    return {
+                        'success': False,
+                        'discovered': 0,
+                        'added_to_tracking': 0,
+                        'message': 'No wallets found in token data'
+                    }
+
+                # Log sample wallet data to help diagnose field names
+                sample_wallet = list(wallets.values())[0]
+                logger.info(f"Sample wallet keys: {list(sample_wallet.keys())}")
+                addr = sample_wallet.get('address') or sample_wallet.get('wallet_address') or 'N/A'
+                wr = sample_wallet.get('winRate') or sample_wallet.get('win_rate') or sample_wallet.get('winrate') or 'N/A'
+                trades = sample_wallet.get('totalTrades') or sample_wallet.get('total_trades') or sample_wallet.get('buy_30d') or 'N/A'
+                pnl = sample_wallet.get('pnl30d') or sample_wallet.get('pnl_30d') or sample_wallet.get('realized_profit_30d') or 'N/A'
+                logger.info(f"Sample wallet: addr={addr[:8] if isinstance(addr, str) else addr}..., WR={wr}, trades={trades}, pnl30d={pnl}")
 
                 # Filter and store wallets
                 stored = 0
                 filter_reasons = {'no_address': 0, 'win_rate': 0, 'trades': 0, 'honeypot': 0, 'pnl': 0}
-                for w in wallets:
+                for w in wallets.values():
                     result = await self._store_wallet_with_reason(w)
                     if result == 'stored':
                         stored += 1
@@ -291,12 +316,28 @@ class SmartMoneyDiscovery:
             logger.debug(f"Wallet skipped: no address found in data")
             return 'no_address'
 
-        # Extract metrics
-        win_rate = float(data.get('winRate') or data.get('win_rate') or 0)
-        total_trades = int(data.get('totalTrades') or data.get('total_trades') or data.get('trades') or 0)
-        pnl_7d = float(data.get('pnl7d') or data.get('pnl_7d') or 0)
-        pnl_30d = float(data.get('pnl30d') or data.get('pnl_30d') or data.get('pnl') or 0)
-        honeypot_ratio = float(data.get('honeypotRatio') or data.get('honeypot_ratio') or 0)
+        # Extract metrics (GMGN uses: winrate, buy_30d, realized_profit_30d)
+        win_rate = float(
+            data.get('winrate') or data.get('winRate') or data.get('win_rate') or 0
+        )
+        # GMGN may return winrate as decimal (0.65) or percentage (65)
+        if 0 < win_rate < 1:
+            win_rate = win_rate * 100
+
+        total_trades = int(
+            data.get('buy_30d') or data.get('totalTrades') or
+            data.get('total_trades') or data.get('trades') or 0
+        )
+        pnl_7d = float(
+            data.get('realized_profit_7d') or data.get('pnl7d') or data.get('pnl_7d') or 0
+        )
+        pnl_30d = float(
+            data.get('realized_profit_30d') or data.get('pnl30d') or
+            data.get('pnl_30d') or data.get('pnl') or 0
+        )
+        honeypot_ratio = float(
+            data.get('honeypotRatio') or data.get('honeypot_ratio') or 0
+        )
 
         # Debug: Log extracted values
         logger.debug(f"Wallet {address[:8]}: WR={win_rate}, trades={total_trades}, pnl30d={pnl_30d}, honeypot={honeypot_ratio}")
