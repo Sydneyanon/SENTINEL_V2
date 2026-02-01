@@ -58,7 +58,7 @@ async def create_webhook(
 
         async with aiohttp.ClientSession() as session:
             async with session.post(url, json=payload, timeout=30) as resp:
-                if resp.status == 200:
+                if resp.status in (200, 201):
                     data = await resp.json()
                     webhook_id = data.get('webhookID')
                     logger.info(f"Created webhook: {webhook_id}")
