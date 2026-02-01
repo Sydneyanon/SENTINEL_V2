@@ -269,25 +269,31 @@ class SmartMoneyDiscovery:
         pnl_30d = float(data.get('pnl30d') or data.get('pnl_30d') or data.get('pnl') or 0)
         honeypot_ratio = float(data.get('honeypotRatio') or data.get('honeypot_ratio') or 0)
 
-        # Apply filters
+        # Hard filters - must pass ALL (tightened for quality)
         if win_rate < config.DISCOVERY_MIN_WIN_RATE:
             return False
         if total_trades < config.DISCOVERY_MIN_TRADES:
             return False
         if honeypot_ratio > config.DISCOVERY_MAX_HONEYPOT:
             return False
-        if pnl_30d <= 0:
+
+        # PNL filter - must be profitable
+        min_pnl = getattr(config, 'DISCOVERY_MIN_PNL_30D', 5000)
+        if pnl_30d < min_pnl:
             return False
 
-        # Determine tier
-        if win_rate >= 60 and pnl_30d > 10000:
+        # Determine tier using config thresholds
+        elite_wr = getattr(config, 'DISCOVERY_ELITE_WIN_RATE', 65.0)
+        elite_pnl = getattr(config, 'DISCOVERY_ELITE_MIN_PNL', 15000)
+        sm_wr = getattr(config, 'DISCOVERY_SMART_MONEY_WIN_RATE', 55.0)
+        sm_pnl = getattr(config, 'DISCOVERY_SMART_MONEY_MIN_PNL', 7500)
+
+        if win_rate >= elite_wr and pnl_30d >= elite_pnl:
             tier = 'elite'
-        elif win_rate >= 50 and pnl_30d > 5000:
+        elif win_rate >= sm_wr and pnl_30d >= sm_pnl:
             tier = 'smart_money'
-        elif win_rate >= 40:
-            tier = 'verified'
         else:
-            tier = 'new'
+            tier = 'verified'
 
         # Store in database
         await db.add_smart_money(

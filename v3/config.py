@@ -128,9 +128,20 @@ SEED_WALLETS = {
 # SMART MONEY DISCOVERY (via GMGN/Apify)
 # =============================================================================
 DISCOVERY_INTERVAL_HOURS = 168  # Run weekly (7 days) to save Apify credits
-DISCOVERY_MIN_WIN_RATE = 40.0   # Minimum win rate %
-DISCOVERY_MIN_TRADES = 20       # Minimum trade count
-DISCOVERY_MAX_HONEYPOT = 30.0   # Max honeypot ratio %
+
+# Hard filters - must pass all (tightened based on analysis)
+DISCOVERY_MIN_WIN_RATE = 55.0   # 55%+ WR captures real edge (was 40%)
+DISCOVERY_MIN_TRADES = 35       # 35+ trades reduces luck variance (was 20)
+DISCOVERY_MAX_HONEYPOT = 20.0   # Lower = safer, catches fewer but higher quality (was 30%)
+DISCOVERY_MIN_PNL_30D = 5000    # Must have made at least $5k profit
+
+# Tier thresholds (for classification)
+DISCOVERY_ELITE_WIN_RATE = 65.0      # Elite tier: 65%+ WR
+DISCOVERY_ELITE_MIN_PNL = 15000      # Elite tier: $15k+ PNL
+DISCOVERY_SMART_MONEY_WIN_RATE = 55.0  # Smart money: 55%+ WR
+DISCOVERY_SMART_MONEY_MIN_PNL = 7500   # Smart money: $7.5k+ PNL
+
+# Limits
 DISCOVERY_LIMIT = 50            # Max wallets per scan
 DISCOVERY_AUTO_TRACK_TOP = 5    # Auto-add top N wallets to tracking
 
