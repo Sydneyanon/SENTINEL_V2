@@ -13,7 +13,7 @@ import database as db
 from scoring import calculate_score, format_breakdown
 from tracker import TokenTracker
 from fetchers import fetch_token_data
-from telegram import TelegramPoster
+from tg_poster import TelegramPoster
 from admin import AdminBot
 from pumpportal_ws import PumpPortalWS
 
@@ -249,4 +249,6 @@ async def test_webhook(request: Request):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8080)
+    import os
+    port = int(os.environ.get("PORT", 8080))
+    uvicorn.run(app, host="0.0.0.0", port=port)
