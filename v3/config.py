@@ -13,6 +13,7 @@ TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 TELEGRAM_CHANNEL_ID = os.getenv('TELEGRAM_CHANNEL_ID')
 ADMIN_USER_ID = int(os.getenv('ADMIN_TELEGRAM_USER_ID', 0)) or None
 WEBHOOK_URL = os.getenv('WEBHOOK_URL')  # Your Railway URL (e.g., https://xxx.railway.app)
+APIFY_API_TOKEN = os.getenv('APIFY_API_TOKEN')  # For GMGN smart money discovery
 
 # =============================================================================
 # SIGNAL THRESHOLDS (Data-driven from Ralph analysis)
@@ -122,6 +123,16 @@ SEED_WALLETS = {
     '5sNnKuWKUtZkdC1eFNyqz3XHpNoCRQ1D1DfHcNHMV7gn': {'tier': 'verified'},
     '39q2g5tTQn9n7KnuapzwS2smSx3NGYqBoea11tBjsGEt': {'tier': 'verified'},
 }
+
+# =============================================================================
+# SMART MONEY DISCOVERY (via GMGN/Apify)
+# =============================================================================
+DISCOVERY_INTERVAL_HOURS = 168  # Run weekly (7 days) to save Apify credits
+DISCOVERY_MIN_WIN_RATE = 40.0   # Minimum win rate %
+DISCOVERY_MIN_TRADES = 20       # Minimum trade count
+DISCOVERY_MAX_HONEYPOT = 30.0   # Max honeypot ratio %
+DISCOVERY_LIMIT = 50            # Max wallets per scan
+DISCOVERY_AUTO_TRACK_TOP = 5    # Auto-add top N wallets to tracking
 
 # =============================================================================
 # LOGGING

@@ -17,6 +17,7 @@ from tg_poster import TelegramPoster
 from admin import AdminBot
 from pumpportal_ws import PumpPortalWS
 from rugcheck import get_rugcheck, cleanup_rugcheck
+from discovery import get_discovery
 
 
 # Configure logging
@@ -32,6 +33,7 @@ telegram_poster = TelegramPoster()
 token_tracker = TokenTracker(telegram_poster)
 admin_bot = AdminBot()
 pumpportal = None  # Initialized in lifespan
+smart_money_discovery = None  # Initialized in lifespan
 
 
 async def on_kol_buy(token_address: str, wallet_address: str, symbol: str,
@@ -47,10 +49,17 @@ async def on_kol_buy(token_address: str, wallet_address: str, symbol: str,
     await process_potential_signal(token_address, wallet)
 
 
+async def on_smart_money_added(wallet_addresses: list):
+    """Callback when new smart money wallets are added to tracking."""
+    global pumpportal
+    if pumpportal:
+        await pumpportal.update_wallets(wallet_addresses)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup and shutdown."""
-    global pumpportal
+    global pumpportal, smart_money_discovery
 
     # Startup
     logger.info("=" * 50)
@@ -71,17 +80,28 @@ async def lifespan(app: FastAPI):
     pumpportal = PumpPortalWS(on_kol_buy=on_kol_buy)
     await pumpportal.start(tracked_wallets=wallet_addresses)
 
+    # Start smart money discovery scheduler
+    smart_money_discovery = get_discovery()
+    smart_money_discovery.on_wallets_added = on_smart_money_added
+    await smart_money_discovery.start()
+
     logger.info(f"Tracking {len(wallets)} wallets")
 
     stats = await db.get_stats()
     logger.info(f"Total signals: {stats['total_signals']} | Win rate: {stats['win_rate']:.1f}%")
 
-    logger.info("Ready! (Helius webhooks + PumpPortal WebSocket)")
+    sm_stats = await db.get_smart_money_stats()
+    if sm_stats['total_discovered'] > 0:
+        logger.info(f"Smart Money: {sm_stats['total_discovered']} discovered, {sm_stats['tracking']} tracking")
+
+    logger.info("Ready! (Helius webhooks + PumpPortal WebSocket + Smart Money Discovery)")
 
     yield
 
     # Shutdown
     logger.info("Shutting down...")
+    if smart_money_discovery:
+        await smart_money_discovery.stop()
     if pumpportal:
         await pumpportal.stop()
     await token_tracker.stop()

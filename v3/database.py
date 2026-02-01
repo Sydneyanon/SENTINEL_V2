@@ -101,11 +101,33 @@ async def init_db():
             )
         ''')
 
+        # Smart Money Discovery table - wallets discovered via GMGN/Apify
+        await conn.execute('''
+            CREATE TABLE IF NOT EXISTS smart_money (
+                address TEXT PRIMARY KEY,
+                source TEXT,  -- 'smart_degen', 'copytrade', 'manual'
+                win_rate REAL,
+                total_trades INTEGER,
+                pnl_7d REAL,
+                pnl_30d REAL,
+                honeypot_ratio REAL,
+                tier TEXT,  -- 'elite', 'smart_money', 'verified'
+                is_tracking BOOLEAN DEFAULT FALSE,  -- Added to main wallets?
+                signals INTEGER DEFAULT 0,
+                wins INTEGER DEFAULT 0,
+                discovered_at TIMESTAMP DEFAULT NOW(),
+                last_checked TIMESTAMP DEFAULT NOW(),
+                notes TEXT
+            )
+        ''')
+
         # Create indexes
         await conn.execute('CREATE INDEX IF NOT EXISTS idx_signals_token ON signals(token_address)')
         await conn.execute('CREATE INDEX IF NOT EXISTS idx_signals_wallet ON signals(wallet_address)')
         await conn.execute('CREATE INDEX IF NOT EXISTS idx_signals_outcome ON signals(outcome)')
         await conn.execute('CREATE INDEX IF NOT EXISTS idx_milestones_signal ON milestones(signal_id)')
+        await conn.execute('CREATE INDEX IF NOT EXISTS idx_smart_money_tier ON smart_money(tier)')
+        await conn.execute('CREATE INDEX IF NOT EXISTS idx_smart_money_tracking ON smart_money(is_tracking)')
 
         # Seed wallets if empty
         count = await conn.fetchval('SELECT COUNT(*) FROM wallets')
@@ -428,3 +450,145 @@ async def get_daily_stats(days: int = 7) -> List[Dict]:
             ORDER BY date DESC
         ''', days)
         return [dict(row) for row in rows]
+
+
+# =============================================================================
+# SMART MONEY OPERATIONS
+# =============================================================================
+
+async def add_smart_money(
+    address: str,
+    source: str,
+    win_rate: float,
+    total_trades: int,
+    pnl_7d: float,
+    pnl_30d: float,
+    honeypot_ratio: float,
+    tier: str
+) -> bool:
+    """Add or update a discovered smart money wallet."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute('''
+            INSERT INTO smart_money (address, source, win_rate, total_trades, pnl_7d, pnl_30d, honeypot_ratio, tier)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            ON CONFLICT (address) DO UPDATE SET
+                win_rate = $3,
+                total_trades = $4,
+                pnl_7d = $5,
+                pnl_30d = $6,
+                honeypot_ratio = $7,
+                tier = $8,
+                last_checked = NOW()
+        ''', address, source, win_rate, total_trades, pnl_7d, pnl_30d, honeypot_ratio, tier)
+        return True
+
+
+async def get_smart_money_wallets(tier: str = None, tracking_only: bool = False) -> List[Dict]:
+    """Get discovered smart money wallets."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        query = 'SELECT * FROM smart_money WHERE 1=1'
+        params = []
+
+        if tier:
+            params.append(tier)
+            query += f' AND tier = ${len(params)}'
+
+        if tracking_only:
+            query += ' AND is_tracking = TRUE'
+
+        query += ' ORDER BY win_rate DESC, pnl_30d DESC'
+
+        rows = await conn.fetch(query, *params)
+        return [dict(row) for row in rows]
+
+
+async def get_smart_money_stats() -> Dict:
+    """Get smart money discovery stats."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        total = await conn.fetchval('SELECT COUNT(*) FROM smart_money')
+        tracking = await conn.fetchval('SELECT COUNT(*) FROM smart_money WHERE is_tracking = TRUE')
+        elite = await conn.fetchval("SELECT COUNT(*) FROM smart_money WHERE tier = 'elite'")
+        smart = await conn.fetchval("SELECT COUNT(*) FROM smart_money WHERE tier = 'smart_money'")
+        verified = await conn.fetchval("SELECT COUNT(*) FROM smart_money WHERE tier = 'verified'")
+
+        # Performance of tracked smart money
+        perf = await conn.fetchrow('''
+            SELECT
+                COUNT(*) as signals,
+                COUNT(*) FILTER (WHERE s.outcome = 'win') as wins
+            FROM signals s
+            JOIN smart_money sm ON s.wallet_address = sm.address
+            WHERE sm.is_tracking = TRUE
+        ''')
+
+        return {
+            'total_discovered': total or 0,
+            'tracking': tracking or 0,
+            'by_tier': {
+                'elite': elite or 0,
+                'smart_money': smart or 0,
+                'verified': verified or 0,
+            },
+            'signals': perf['signals'] if perf else 0,
+            'wins': perf['wins'] if perf else 0,
+            'win_rate': (perf['wins'] / perf['signals'] * 100) if perf and perf['signals'] else 0,
+        }
+
+
+async def enable_smart_money_tracking(address: str) -> bool:
+    """Enable tracking for a smart money wallet (add to main wallets)."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        # Get the smart money wallet
+        sm = await conn.fetchrow('SELECT * FROM smart_money WHERE address = $1', address)
+        if not sm:
+            return False
+
+        # Add to main wallets table
+        await conn.execute('''
+            INSERT INTO wallets (address, name, tier)
+            VALUES ($1, $2, $3)
+            ON CONFLICT (address) DO NOTHING
+        ''', address, f"SM_{address[:6]}", sm['tier'])
+
+        # Mark as tracking
+        await conn.execute('''
+            UPDATE smart_money SET is_tracking = TRUE WHERE address = $1
+        ''', address)
+
+        return True
+
+
+async def auto_enable_top_smart_money(max_wallets: int = 10, min_win_rate: float = 50.0) -> int:
+    """Automatically enable tracking for top smart money wallets."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        # Get top performers not yet tracking
+        rows = await conn.fetch('''
+            SELECT address, tier FROM smart_money
+            WHERE is_tracking = FALSE
+            AND win_rate >= $1
+            ORDER BY win_rate DESC, pnl_30d DESC
+            LIMIT $2
+        ''', min_win_rate, max_wallets)
+
+        count = 0
+        for row in rows:
+            # Add to wallets
+            await conn.execute('''
+                INSERT INTO wallets (address, name, tier)
+                VALUES ($1, $2, $3)
+                ON CONFLICT (address) DO NOTHING
+            ''', row['address'], f"SM_{row['address'][:6]}", row['tier'])
+
+            # Mark as tracking
+            await conn.execute('''
+                UPDATE smart_money SET is_tracking = TRUE WHERE address = $1
+            ''', row['address'])
+
+            count += 1
+
+        return count
