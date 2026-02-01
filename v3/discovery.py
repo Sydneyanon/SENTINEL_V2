@@ -184,10 +184,17 @@ class SmartMoneyDiscovery:
                         'message': 'Could not fetch wallet stats from GMGN'
                     }
 
-                # Log sample wallet stats - show ALL keys to find correct field names
+                # Log sample wallet stats - check winrate fields
                 sample = wallets_with_stats[0]
-                logger.info(f"Sample wallet ALL keys: {list(sample.keys())}")
-                logger.info(f"Sample wallet stats: addr={sample.get('address', 'N/A')[:8]}..., WR={sample.get('winrate')}, trades={sample.get('buy_30d')}, pnl={sample.get('realized_profit_30d')}")
+                logger.info(f"Sample: winrate={sample.get('winrate')}, profit_num={sample.get('profit_num')}, token_num={sample.get('token_num')}")
+                logger.info(f"Sample: addr={sample.get('address', 'N/A')[:8]}..., trades={sample.get('buy_30d')}, pnl={sample.get('realized_profit_30d')}")
+
+                # Calculate winrate from profit_num/token_num if available
+                profit_num = sample.get('profit_num')
+                token_num = sample.get('token_num')
+                if profit_num and token_num and token_num > 0:
+                    calc_wr = (profit_num / token_num) * 100
+                    logger.info(f"Sample calculated winrate: {calc_wr:.1f}% ({profit_num}/{token_num})")
 
                 # Filter and store wallets
                 stored = 0
