@@ -197,7 +197,7 @@ class SmartMoneyDiscovery:
     async def _fetch_smart_degens(self) -> List[Dict]:
         """Fetch smart money wallets from Apify GMGN scraper."""
 
-        actor_id = "muhammetakkurtt/gmgn-smart-degen-monitor-scraper"
+        actor_id = "muhammetakkurtt~gmgn-smart-degen-monitor-scraper"
         url = f"{self.APIFY_BASE_URL}/acts/{actor_id}/runs?token={config.APIFY_API_TOKEN}"
 
         input_data = {
