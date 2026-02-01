@@ -160,6 +160,202 @@ def calculate_score(
     return total_score, breakdown, should_signal, skip_reason
 
 
+# =============================================================================
+# V2-STYLE SCORING (for ActiveTokenTracker continuous analysis)
+# =============================================================================
+# Uses accumulated WebSocket data instead of one-shot REST API data
+
+V2_MIN_SCORE = 45  # Threshold for V2 scoring (accumulates over time)
+
+
+def calculate_score_v2(
+    wallet_tier: str,
+    liquidity: float,
+    mcap: float,
+    holders: int,
+    graduated: bool,
+    buys: int,
+    sells: int,
+    unique_buyers: int,
+    kol_count: int,
+    bonding_pct: float,
+    tracking_seconds: float
+) -> Tuple[int, Dict[str, Any], bool, str]:
+    """
+    V2-style scoring with accumulated WebSocket data.
+
+    Scoring factors (0-100):
+    - Wallet Tier: 0-25 pts
+    - Buyer Velocity: 0-20 pts (buys per minute)
+    - Unique Buyers: 0-15 pts
+    - Buy/Sell Ratio: 0-15 pts
+    - Bonding Progress: 0-15 pts (pre-grad only)
+    - Multi-KOL Bonus: 0-10 pts
+
+    Returns:
+        (score, breakdown, should_signal, skip_reason)
+    """
+    breakdown = {}
+    skip_reason = None
+
+    # ==========================================================================
+    # PRE-CHECKS (minimal - let scoring decide)
+    # ==========================================================================
+
+    # Only check liquidity for pre-grad (graduated checked elsewhere)
+    min_liq = 1000 if not graduated else MIN_LIQUIDITY
+    if liquidity < min_liq:
+        return 0, {}, False, f"Liquidity ${liquidity:,.0f} < ${min_liq:,.0f}"
+
+    # ==========================================================================
+    # FACTOR 1: Wallet Tier (0-25 points)
+    # ==========================================================================
+
+    tier_scores = {'elite': 25, 'top_kol': 20, 'verified': 15, 'new': 10, 'smart_money': 20}
+    wallet_score = tier_scores.get(wallet_tier, 10)
+    breakdown['wallet'] = {'tier': wallet_tier, 'score': wallet_score, 'max': 25}
+
+    # ==========================================================================
+    # FACTOR 2: Buyer Velocity (0-20 points)
+    # ==========================================================================
+    # Buys per minute - indicates FOMO/momentum
+
+    tracking_minutes = max(tracking_seconds / 60, 0.5)  # Min 30 seconds
+    buys_per_minute = buys / tracking_minutes
+
+    if buys_per_minute >= 5:
+        velocity_score = 20  # Very high velocity
+    elif buys_per_minute >= 3:
+        velocity_score = 15
+    elif buys_per_minute >= 1.5:
+        velocity_score = 10
+    elif buys_per_minute >= 0.5:
+        velocity_score = 5
+    else:
+        velocity_score = 0
+
+    breakdown['buyer_velocity'] = {
+        'buys': buys,
+        'minutes': round(tracking_minutes, 1),
+        'per_minute': round(buys_per_minute, 2),
+        'score': velocity_score,
+        'max': 20
+    }
+
+    # ==========================================================================
+    # FACTOR 3: Unique Buyers (0-15 points)
+    # ==========================================================================
+    # More unique buyers = more organic interest
+
+    if unique_buyers >= 20:
+        unique_score = 15
+    elif unique_buyers >= 12:
+        unique_score = 12
+    elif unique_buyers >= 8:
+        unique_score = 8
+    elif unique_buyers >= 5:
+        unique_score = 5
+    else:
+        unique_score = 0
+
+    breakdown['unique_buyers'] = {
+        'count': unique_buyers,
+        'score': unique_score,
+        'max': 15
+    }
+
+    # ==========================================================================
+    # FACTOR 4: Buy/Sell Ratio (0-15 points)
+    # ==========================================================================
+
+    buy_sell_ratio = buys / max(sells, 1)
+
+    if buy_sell_ratio >= 5.0:
+        bs_score = 15  # Very bullish
+    elif buy_sell_ratio >= 3.0:
+        bs_score = 12
+    elif buy_sell_ratio >= 2.0:
+        bs_score = 8
+    elif buy_sell_ratio >= 1.0:
+        bs_score = 4
+    else:
+        bs_score = 0
+
+    breakdown['buy_sell_ratio'] = {
+        'buys': buys,
+        'sells': sells,
+        'ratio': round(buy_sell_ratio, 2),
+        'score': bs_score,
+        'max': 15
+    }
+
+    # ==========================================================================
+    # FACTOR 5: Bonding Progress (0-15 points) - Pre-grad only
+    # ==========================================================================
+
+    bonding_score = 0
+    if not graduated and bonding_pct > 0:
+        if bonding_pct >= 80:
+            bonding_score = 15  # Near graduation!
+        elif bonding_pct >= 60:
+            bonding_score = 12
+        elif bonding_pct >= 40:
+            bonding_score = 8
+        elif bonding_pct >= 20:
+            bonding_score = 4
+
+    breakdown['bonding'] = {
+        'pct': round(bonding_pct, 1),
+        'graduated': graduated,
+        'score': bonding_score,
+        'max': 15
+    }
+
+    # ==========================================================================
+    # FACTOR 6: Multi-KOL Bonus (0-10 points)
+    # ==========================================================================
+    # Multiple KOLs buying = strong signal
+
+    if kol_count >= 3:
+        kol_bonus = 10
+    elif kol_count >= 2:
+        kol_bonus = 6
+    else:
+        kol_bonus = 0
+
+    breakdown['multi_kol'] = {
+        'count': kol_count,
+        'score': kol_bonus,
+        'max': 10
+    }
+
+    # ==========================================================================
+    # TOTAL (max 100)
+    # ==========================================================================
+
+    total_score = (
+        wallet_score +
+        velocity_score +
+        unique_score +
+        bs_score +
+        bonding_score +
+        kol_bonus
+    )
+
+    breakdown['total'] = {
+        'score': total_score,
+        'max': 100,
+        'threshold': V2_MIN_SCORE
+    }
+
+    should_signal = total_score >= V2_MIN_SCORE
+
+    if not should_signal:
+        skip_reason = f"Score {total_score} < {V2_MIN_SCORE}"
+
+    return total_score, breakdown, should_signal, skip_reason
+
+
 def format_breakdown(breakdown: Dict) -> str:
     """Format score breakdown for logging/display."""
     lines = []

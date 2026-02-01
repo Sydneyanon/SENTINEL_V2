@@ -23,15 +23,17 @@ class PumpPortalWS:
 
     WS_URL = "wss://pumpportal.fun/api/data"
 
-    def __init__(self, on_kol_buy: Optional[Callable] = None):
+    def __init__(self, on_kol_buy: Optional[Callable] = None, on_trade: Optional[Callable] = None):
         self.ws = None
         self.running = False
         self._task = None
         self.on_kol_buy = on_kol_buy  # Callback when tracked wallet buys
+        self.on_trade = on_trade  # Callback for ALL trades on tracked tokens
 
         # Track tokens we're watching
         self.watched_tokens: Dict[str, dict] = {}  # token_address -> data
         self.tracked_wallets: Set[str] = set()  # Wallet addresses to watch
+        self.actively_tracking: Set[str] = set()  # Tokens being actively tracked
 
         # Buyer tracking per token
         self.token_buyers: Dict[str, Set[str]] = {}  # token -> set of buyer addresses
@@ -68,6 +70,14 @@ class PumpPortalWS:
     def remove_wallet(self, address: str):
         """Remove a wallet from tracking."""
         self.tracked_wallets.discard(address)
+
+    def add_token_tracking(self, token_address: str):
+        """Mark a token for active tracking (will receive trade events)."""
+        self.actively_tracking.add(token_address)
+
+    def remove_token_tracking(self, token_address: str):
+        """Stop tracking a token."""
+        self.actively_tracking.discard(token_address)
 
     async def update_wallets(self, addresses: list):
         """Update the tracked wallets list."""
@@ -179,6 +189,7 @@ class PumpPortalWS:
 
         # Track the trade
         token_data = self.watched_tokens[token_address]
+        bonding_pct = token_data['bonding_pct']
 
         if tx_type == 'buy':
             token_data['buys'] += 1
@@ -189,7 +200,7 @@ class PumpPortalWS:
             if 'vSolInBondingCurve' in data:
                 v_sol = float(data.get('vSolInBondingCurve', 0) or 0) / 1e9
                 # Bonding curve: starts at ~30 SOL, graduates at ~85 SOL
-                bonding_pct = max(0, min(100, ((85 - v_sol) / 55) * 100))
+                bonding_pct = max(0, min(100, ((v_sol - 30) / 55) * 100))
                 token_data['bonding_pct'] = bonding_pct
 
             # Check if this is a tracked wallet (KOL)
@@ -206,12 +217,22 @@ class PumpPortalWS:
                         wallet_address=trader,
                         symbol=symbol,
                         unique_buyers=unique_buyers,
-                        bonding_pct=token_data['bonding_pct'],
+                        bonding_pct=bonding_pct,
                         volume_sol=token_data['volume_sol'],
                     )
 
         elif tx_type == 'sell':
             token_data['sells'] += 1
+
+        # Send trade event to active tracker for actively tracked tokens
+        if self.on_trade and token_address in self.actively_tracking:
+            await self.on_trade(
+                token_address=token_address,
+                tx_type=tx_type,
+                trader=trader,
+                sol_amount=sol_amount,
+                bonding_pct=bonding_pct
+            )
 
     def get_token_stats(self, token_address: str) -> Optional[dict]:
         """Get current stats for a token."""
