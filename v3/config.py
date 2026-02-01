@@ -13,6 +13,7 @@ TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 TELEGRAM_CHANNEL_ID = os.getenv('TELEGRAM_CHANNEL_ID')
 ADMIN_USER_ID = int(os.getenv('ADMIN_TELEGRAM_USER_ID', 0)) or None
 WEBHOOK_URL = os.getenv('WEBHOOK_URL')  # Your Railway URL (e.g., https://xxx.railway.app)
+APIFY_API_TOKEN = os.getenv('APIFY_API_TOKEN')  # For GMGN smart money discovery
 
 # =============================================================================
 # SIGNAL THRESHOLDS (Data-driven from Ralph analysis)
@@ -122,6 +123,28 @@ SEED_WALLETS = {
     '5sNnKuWKUtZkdC1eFNyqz3XHpNoCRQ1D1DfHcNHMV7gn': {'tier': 'verified'},
     '39q2g5tTQn9n7KnuapzwS2smSx3NGYqBoea11tBjsGEt': {'tier': 'verified'},
 }
+
+# =============================================================================
+# SMART MONEY DISCOVERY (via GMGN/Apify)
+# =============================================================================
+DISCOVERY_INTERVAL_HOURS = 168  # Run weekly (7 days) to save Apify credits
+
+# Hard filters - must pass all
+# NOTE: Loosened for initial testing - tighten after first week of data
+DISCOVERY_MIN_WIN_RATE = 45.0   # 45%+ WR (tighten to 55% later)
+DISCOVERY_MIN_TRADES = 25       # 25+ trades (tighten to 35 later)
+DISCOVERY_MAX_HONEYPOT = 25.0   # 25% max (tighten to 20% later)
+DISCOVERY_MIN_PNL_30D = 2000    # $2k min (tighten to $5k later)
+
+# Tier thresholds (for classification)
+DISCOVERY_ELITE_WIN_RATE = 65.0      # Elite tier: 65%+ WR
+DISCOVERY_ELITE_MIN_PNL = 15000      # Elite tier: $15k+ PNL
+DISCOVERY_SMART_MONEY_WIN_RATE = 55.0  # Smart money: 55%+ WR
+DISCOVERY_SMART_MONEY_MIN_PNL = 7500   # Smart money: $7.5k+ PNL
+
+# Limits
+DISCOVERY_LIMIT = 100           # Fetch more for initial testing
+DISCOVERY_AUTO_TRACK_TOP = 15   # Track more initially to gather data
 
 # =============================================================================
 # LOGGING

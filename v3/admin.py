@@ -12,6 +12,7 @@ from config import TELEGRAM_BOT_TOKEN, ADMIN_USER_ID, WEBHOOK_URL
 import config
 import database as db
 import helius
+from discovery import get_discovery
 
 
 class AdminBot:
@@ -42,6 +43,9 @@ class AdminBot:
         self.app.add_handler(CommandHandler("syncwebhook", self._cmd_sync_webhook))
         self.app.add_handler(CommandHandler("setbanner", self._cmd_setbanner))
         self.app.add_handler(CommandHandler("setmultiplier", self._cmd_setmultiplier))
+        self.app.add_handler(CommandHandler("smartmoney", self._cmd_smartmoney))
+        self.app.add_handler(CommandHandler("discover", self._cmd_discover))
+        self.app.add_handler(CommandHandler("cleanup", self._cmd_cleanup))
 
         # Media upload handler
         self.app.add_handler(MessageHandler(
@@ -63,6 +67,8 @@ class AdminBot:
             BotCommand("wallets", "Wallet performance"),
             BotCommand("active", "Currently tracking"),
             BotCommand("history", "Daily win rates"),
+            BotCommand("smartmoney", "Smart money stats"),
+            BotCommand("discover", "Run wallet discovery"),
             BotCommand("addwallet", "Add a wallet"),
             BotCommand("rmwallet", "Remove a wallet"),
             BotCommand("syncwebhook", "Sync wallets with Helius"),
@@ -112,6 +118,10 @@ class AdminBot:
 /wallets - Wallet performance
 /active - Currently tracking
 /history - Daily win rates
+
+<b>Smart Money:</b>
+/smartmoney - View discovered wallets
+/discover - Run discovery now
 
 <b>Management:</b>
 /addwallet &lt;address&gt; [name] - Add wallet
@@ -456,3 +466,122 @@ class AdminBot:
             f"<code>{env_var}={file_id}</code>",
             parse_mode=ParseMode.HTML
         )
+
+    async def _cmd_smartmoney(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /smartmoney command - view discovered wallets."""
+        if not self._is_admin(update):
+            return
+
+        # Get smart money stats
+        stats = await db.get_smart_money_stats()
+
+        lines = ["<b>🔍 Smart Money Discovery</b>\n"]
+        lines.append(f"<b>Discovered:</b> {stats['total_discovered']} wallets")
+        lines.append(f"<b>Tracking:</b> {stats['tracking']} wallets\n")
+
+        lines.append("<b>By Tier:</b>")
+        lines.append(f"├ Elite: {stats['by_tier']['elite']}")
+        lines.append(f"├ Smart Money: {stats['by_tier']['smart_money']}")
+        lines.append(f"└ Verified: {stats['by_tier']['verified']}\n")
+
+        if stats['signals'] > 0:
+            lines.append("<b>Performance (tracked):</b>")
+            lines.append(f"├ Signals: {stats['signals']}")
+            lines.append(f"├ Wins: {stats['wins']}")
+            lines.append(f"└ Win Rate: {stats['win_rate']:.1f}%")
+
+        # Show top wallets if requested with 'list'
+        if context.args and context.args[0].lower() == 'list':
+            wallets = await db.get_smart_money_wallets()
+            if wallets:
+                lines.append("\n<b>Top Discovered:</b>")
+                for w in wallets[:10]:
+                    tracking = "✅" if w['is_tracking'] else "⏸"
+                    lines.append(
+                        f"{tracking} <code>{w['address'][:8]}...</code> "
+                        f"WR:{w['win_rate']:.0f}% PNL:${w['pnl_30d']:,.0f}"
+                    )
+
+        lines.append("\n<i>Use /smartmoney list for wallet list</i>")
+        lines.append("<i>Use /discover to run discovery now</i>")
+
+        await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
+
+    async def _cmd_discover(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /discover command - manually trigger wallet discovery."""
+        if not self._is_admin(update):
+            return
+
+        if not config.APIFY_API_TOKEN:
+            await update.message.reply_text(
+                "❌ <b>APIFY_API_TOKEN not set</b>\n\n"
+                "Set it in Railway env vars to enable discovery.\n"
+                "Get your token from: https://console.apify.com/account/integrations",
+                parse_mode=ParseMode.HTML
+            )
+            return
+
+        await update.message.reply_text(
+            "🔍 <b>Starting Discovery...</b>\n\n"
+            "This may take 1-2 minutes.\n"
+            "Using GMGN Smart Degen scraper via Apify.",
+            parse_mode=ParseMode.HTML
+        )
+
+        # Run discovery
+        discovery = get_discovery()
+        result = await discovery.run_discovery()
+
+        if result['success']:
+            # Show new wallets in the response
+            new_wallets = result.get('new_wallets', [])
+            wallet_lines = ""
+            if new_wallets:
+                wallet_lines = "\n<b>New wallets:</b>\n"
+                for w in new_wallets[:5]:
+                    wallet_lines += (
+                        f"• <code>{w['address'][:8]}...</code> "
+                        f"({w['win_rate']:.0f}% WR)\n"
+                    )
+
+            await update.message.reply_text(
+                f"✅ <b>Discovery Complete!</b>\n\n"
+                f"Discovered: {result['discovered']} wallets\n"
+                f"Added to tracking: {result['added_to_tracking']}"
+                f"{wallet_lines}\n"
+                f"Use /smartmoney to view stats.",
+                parse_mode=ParseMode.HTML
+            )
+        else:
+            await update.message.reply_text(
+                f"❌ <b>Discovery Failed</b>\n\n"
+                f"{result['message']}",
+                parse_mode=ParseMode.HTML
+            )
+
+    async def _cmd_cleanup(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /cleanup command - remove underperforming wallets."""
+        if not self._is_admin(update):
+            return
+
+        await update.message.reply_text(
+            "🧹 <b>Running Cleanup...</b>\n\n"
+            "Removing wallets with <30% WR after 30 days.",
+            parse_mode=ParseMode.HTML
+        )
+
+        removed = await db.cleanup_stale_smart_money(days_inactive=30, min_signals=3)
+
+        if removed > 0:
+            await update.message.reply_text(
+                f"✅ <b>Cleanup Complete</b>\n\n"
+                f"Removed {removed} underperforming wallets.\n\n"
+                f"Run /syncwebhook to update Helius.",
+                parse_mode=ParseMode.HTML
+            )
+        else:
+            await update.message.reply_text(
+                "✅ No stale wallets found.\n\n"
+                "All tracked wallets are performing well!",
+                parse_mode=ParseMode.HTML
+            )

@@ -69,6 +69,14 @@ class PumpPortalWS:
         """Remove a wallet from tracking."""
         self.tracked_wallets.discard(address)
 
+    async def update_wallets(self, addresses: list):
+        """Update the tracked wallets list."""
+        old_count = len(self.tracked_wallets)
+        self.tracked_wallets = set(addresses)
+        new_count = len(self.tracked_wallets)
+        if new_count != old_count:
+            logger.info(f"PumpPortal wallets updated: {old_count} -> {new_count}")
+
     async def _connection_loop(self):
         """Main connection loop with auto-reconnect."""
         while self.running:

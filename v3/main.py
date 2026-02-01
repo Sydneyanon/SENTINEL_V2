@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, HTTPException
 from loguru import logger
 
-from config import HELIUS_API_KEY, LOG_LEVEL
+from config import HELIUS_API_KEY, LOG_LEVEL, ADMIN_USER_ID
 import database as db
 from scoring import calculate_score, format_breakdown
 from tracker import TokenTracker
@@ -17,6 +17,7 @@ from tg_poster import TelegramPoster
 from admin import AdminBot
 from pumpportal_ws import PumpPortalWS
 from rugcheck import get_rugcheck, cleanup_rugcheck
+from discovery import get_discovery
 
 
 # Configure logging
@@ -32,6 +33,7 @@ telegram_poster = TelegramPoster()
 token_tracker = TokenTracker(telegram_poster)
 admin_bot = AdminBot()
 pumpportal = None  # Initialized in lifespan
+smart_money_discovery = None  # Initialized in lifespan
 
 
 async def on_kol_buy(token_address: str, wallet_address: str, symbol: str,
@@ -47,10 +49,55 @@ async def on_kol_buy(token_address: str, wallet_address: str, symbol: str,
     await process_potential_signal(token_address, wallet)
 
 
+async def on_smart_money_added(wallet_addresses: list):
+    """Callback when new smart money wallets are added to tracking."""
+    global pumpportal
+    if pumpportal:
+        await pumpportal.update_wallets(wallet_addresses)
+
+
+async def on_discovery_complete(result: dict):
+    """Callback when smart money discovery completes - send Telegram notification."""
+    if not result.get('success') or result.get('added_to_tracking', 0) == 0:
+        return
+
+    new_wallets = result.get('new_wallets', [])
+    if not new_wallets:
+        return
+
+    # Build notification message
+    lines = ["<b>🔍 Weekly Discovery Complete</b>\n"]
+    lines.append(f"New wallets found: {result['discovered']}")
+    lines.append(f"Auto-added to tracking: {result['added_to_tracking']}\n")
+
+    lines.append("<b>New Smart Money:</b>")
+    for w in new_wallets[:5]:  # Top 5
+        lines.append(
+            f"• <code>{w['address'][:8]}...</code> "
+            f"({w['win_rate']:.0f}% WR, {w['total_trades']} trades)"
+        )
+
+    lines.append("\n<i>View full list: /smartmoney list</i>")
+
+    # Send to admin via Telegram
+    try:
+        if admin_bot.app and admin_bot.running and ADMIN_USER_ID:
+            await admin_bot.app.bot.send_message(
+                chat_id=ADMIN_USER_ID,
+                text="\n".join(lines),
+                parse_mode="HTML"
+            )
+            logger.info(f"Sent discovery notification to admin")
+    except Exception as e:
+        # Fall back to logging if Telegram fails
+        logger.warning(f"Failed to send discovery notification: {e}")
+        logger.info(f"Discovery complete: {result['message']}")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup and shutdown."""
-    global pumpportal
+    global pumpportal, smart_money_discovery
 
     # Startup
     logger.info("=" * 50)
@@ -71,17 +118,29 @@ async def lifespan(app: FastAPI):
     pumpportal = PumpPortalWS(on_kol_buy=on_kol_buy)
     await pumpportal.start(tracked_wallets=wallet_addresses)
 
+    # Start smart money discovery scheduler
+    smart_money_discovery = get_discovery()
+    smart_money_discovery.on_wallets_added = on_smart_money_added
+    smart_money_discovery.on_discovery_complete = on_discovery_complete
+    await smart_money_discovery.start()
+
     logger.info(f"Tracking {len(wallets)} wallets")
 
     stats = await db.get_stats()
     logger.info(f"Total signals: {stats['total_signals']} | Win rate: {stats['win_rate']:.1f}%")
 
-    logger.info("Ready! (Helius webhooks + PumpPortal WebSocket)")
+    sm_stats = await db.get_smart_money_stats()
+    if sm_stats['total_discovered'] > 0:
+        logger.info(f"Smart Money: {sm_stats['total_discovered']} discovered, {sm_stats['tracking']} tracking")
+
+    logger.info("Ready! (Helius webhooks + PumpPortal WebSocket + Smart Money Discovery)")
 
     yield
 
     # Shutdown
     logger.info("Shutting down...")
+    if smart_money_discovery:
+        await smart_money_discovery.stop()
     if pumpportal:
         await pumpportal.stop()
     await token_tracker.stop()

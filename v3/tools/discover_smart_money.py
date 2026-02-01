@@ -34,15 +34,13 @@ class WalletCandidate:
         return True
 
     def get_tier(self) -> str:
-        """Assign tier based on performance."""
-        if self.win_rate >= 60 and self.pnl_30d > 10000:
+        """Assign tier based on performance (tightened thresholds)."""
+        if self.win_rate >= 65 and self.pnl_30d >= 15000:
             return 'elite'
-        elif self.win_rate >= 50 and self.pnl_30d > 5000:
+        elif self.win_rate >= 55 and self.pnl_30d >= 7500:
             return 'smart_money'
-        elif self.win_rate >= 40:
-            return 'verified'
         else:
-            return 'new'
+            return 'verified'
 
 
 class ApifyGMGNScraper:
@@ -183,9 +181,10 @@ class ApifyGMGNScraper:
 async def discover_smart_money(
     api_token: str,
     chain: str = "sol",
-    min_win_rate: float = 40.0,
-    min_trades: int = 20,
-    max_honeypot_ratio: float = 30.0,
+    min_win_rate: float = 55.0,      # Tightened: 55%+ WR captures real edge
+    min_trades: int = 35,             # Tightened: reduces luck variance
+    max_honeypot_ratio: float = 20.0, # Tightened: safer, higher quality
+    min_pnl_30d: float = 5000.0,      # NEW: must have made $5k+ profit
     source: str = "smart_degen",  # 'smart_degen', 'copytrade', or 'both'
     limit: int = 50  # Reduce default to save API calls
 ) -> List[WalletCandidate]:
@@ -259,14 +258,14 @@ async def discover_smart_money(
                 source=data['source']
             )
 
-            # Apply filters
+            # Apply filters (tightened for quality)
             if candidate.win_rate < min_win_rate:
                 continue
             if candidate.total_trades < min_trades:
                 continue
             if candidate.honeypot_ratio > max_honeypot_ratio:
                 continue
-            if candidate.pnl_30d <= 0:
+            if candidate.pnl_30d < min_pnl_30d:
                 continue
 
             candidates.append(candidate)
@@ -320,10 +319,12 @@ if __name__ == "__main__":
                         help="Which scraper to use (default: smart_degen = 1 API call)")
     parser.add_argument("--limit", type=int, default=50,
                         help="Max wallets to fetch (default: 50)")
-    parser.add_argument("--min-wr", type=float, default=40.0,
-                        help="Minimum win rate %% (default: 40)")
-    parser.add_argument("--min-trades", type=int, default=20,
-                        help="Minimum trades (default: 20)")
+    parser.add_argument("--min-wr", type=float, default=55.0,
+                        help="Minimum win rate %% (default: 55)")
+    parser.add_argument("--min-trades", type=int, default=35,
+                        help="Minimum trades (default: 35)")
+    parser.add_argument("--min-pnl", type=float, default=5000.0,
+                        help="Minimum 30d PNL in $ (default: 5000)")
     args = parser.parse_args()
 
     api_token = os.environ.get("APIFY_API_TOKEN")
@@ -336,7 +337,8 @@ if __name__ == "__main__":
     print("=" * 50)
     print("GMGN Smart Money Discovery")
     print("=" * 50)
-    print(f"Source: {args.source} | Limit: {args.limit} | Min WR: {args.min_wr}%")
+    print(f"Source: {args.source} | Limit: {args.limit}")
+    print(f"Filters: WR≥{args.min_wr}% | Trades≥{args.min_trades} | PNL≥${args.min_pnl:,.0f}")
     print(f"Estimated cost: {'~$0.05' if args.source != 'both' else '~$0.10'}")
     print()
 
@@ -347,7 +349,8 @@ if __name__ == "__main__":
         limit=args.limit,
         min_win_rate=args.min_wr,
         min_trades=args.min_trades,
-        max_honeypot_ratio=30.0
+        max_honeypot_ratio=20.0,
+        min_pnl_30d=args.min_pnl
     ))
 
     if not candidates:
