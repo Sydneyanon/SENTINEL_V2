@@ -147,6 +147,26 @@ DISCOVERY_LIMIT = 100           # Fetch more for initial testing
 DISCOVERY_AUTO_TRACK_TOP = 15   # Track more initially to gather data
 
 # =============================================================================
+# SKIP TOKENS (stablecoins, major tokens - never signal these)
+# =============================================================================
+SKIP_TOKENS = {
+    # USDC
+    'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
+    # USDT
+    'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB',
+    # Wrapped SOL
+    'So11111111111111111111111111111111111111112',
+    # BONK (too big)
+    'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263',
+    # JUP
+    'JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN',
+    # RAY
+    '4k3Dyjzvzp8eMZWUXbBCjEvwSkkk59S5iCNLY3QrkX6R',
+    # PYTH
+    'HZ1JovNiVvGrGNiiYvEozEVgZ58xaU3RKwX8eACQBCt3',
+}
+
+# =============================================================================
 # LOGGING
 # =============================================================================
 LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO')

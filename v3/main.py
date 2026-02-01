@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, HTTPException
 from loguru import logger
 
-from config import HELIUS_API_KEY, LOG_LEVEL, ADMIN_USER_ID
+from config import HELIUS_API_KEY, LOG_LEVEL, ADMIN_USER_ID, SKIP_TOKENS
 import database as db
 from scoring import calculate_score, format_breakdown
 from tracker import TokenTracker
@@ -206,13 +206,26 @@ async def process_wallet_transaction(tx: dict):
     if not token_transfers:
         return
 
+    # Debug: log all token transfers
+    wallet_name = wallet.get('name') or fee_payer[:8]
+    logger.debug(f"Tx from {wallet_name}: {len(token_transfers)} token transfers")
+
     # Find the token being bought (received by wallet)
+    # Skip stablecoins and major tokens
     for transfer in token_transfers:
         if transfer.get('toUserAccount') == fee_payer:
             token_address = transfer.get('mint')
-            if token_address:
-                await process_potential_signal(token_address, wallet)
-                break
+            if not token_address:
+                continue
+
+            # Skip known stablecoins/major tokens
+            if token_address in SKIP_TOKENS:
+                logger.debug(f"Skip stablecoin/major token: {token_address[:8]}")
+                continue
+
+            # Found a potential meme token buy
+            await process_potential_signal(token_address, wallet)
+            return  # Process first non-stablecoin token only
 
 
 async def process_potential_signal(token_address: str, wallet: dict):
