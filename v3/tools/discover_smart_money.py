@@ -185,10 +185,14 @@ async def discover_smart_money(
     chain: str = "sol",
     min_win_rate: float = 40.0,
     min_trades: int = 20,
-    max_honeypot_ratio: float = 30.0
+    max_honeypot_ratio: float = 30.0,
+    source: str = "smart_degen",  # 'smart_degen', 'copytrade', or 'both'
+    limit: int = 50  # Reduce default to save API calls
 ) -> List[WalletCandidate]:
     """
     Discover smart money wallets using Apify GMGN scrapers.
+
+    Cost optimization: Use source='smart_degen' (1 API call) instead of 'both' (2 calls)
 
     Args:
         api_token: Apify API token
@@ -196,6 +200,8 @@ async def discover_smart_money(
         min_win_rate: Minimum win rate %
         min_trades: Minimum trade count
         max_honeypot_ratio: Maximum honeypot %
+        source: Which scraper to use ('smart_degen', 'copytrade', or 'both')
+        limit: Max wallets to fetch (lower = fewer credits)
 
     Returns:
         List of quality wallet candidates
@@ -204,13 +210,19 @@ async def discover_smart_money(
     candidates = []
 
     try:
-        print(f"[1/3] Fetching smart degens from GMGN...")
-        smart_degens = await scraper.get_smart_degens(chain=chain, limit=100)
-        print(f"      Found {len(smart_degens)} wallets")
+        smart_degens = []
+        copytrade = []
 
-        print(f"[2/3] Fetching copytrade wallets...")
-        copytrade = await scraper.get_copytrade_wallets(chain=chain, limit=50)
-        print(f"      Found {len(copytrade)} wallets")
+        # Only call the scrapers we need (saves API credits)
+        if source in ('smart_degen', 'both'):
+            print(f"[1/2] Fetching smart degens from GMGN (limit={limit})...")
+            smart_degens = await scraper.get_smart_degens(chain=chain, limit=limit)
+            print(f"      Found {len(smart_degens)} wallets")
+
+        if source in ('copytrade', 'both'):
+            print(f"[{'2' if source == 'both' else '1'}/2] Fetching copytrade wallets...")
+            copytrade = await scraper.get_copytrade_wallets(chain=chain, limit=limit)
+            print(f"      Found {len(copytrade)} wallets")
 
         # Combine and dedupe
         all_wallets = {}
@@ -299,6 +311,20 @@ def format_as_commands(candidates: List[WalletCandidate]) -> str:
 if __name__ == "__main__":
     import sys
     import os
+    import argparse
+    from datetime import datetime
+    from pathlib import Path
+
+    parser = argparse.ArgumentParser(description="Discover smart money wallets via GMGN/Apify")
+    parser.add_argument("--source", choices=["smart_degen", "copytrade", "both"], default="smart_degen",
+                        help="Which scraper to use (default: smart_degen = 1 API call)")
+    parser.add_argument("--limit", type=int, default=50,
+                        help="Max wallets to fetch (default: 50)")
+    parser.add_argument("--min-wr", type=float, default=40.0,
+                        help="Minimum win rate %% (default: 40)")
+    parser.add_argument("--min-trades", type=int, default=20,
+                        help="Minimum trades (default: 20)")
+    args = parser.parse_args()
 
     api_token = os.environ.get("APIFY_API_TOKEN")
 
@@ -310,13 +336,17 @@ if __name__ == "__main__":
     print("=" * 50)
     print("GMGN Smart Money Discovery")
     print("=" * 50)
+    print(f"Source: {args.source} | Limit: {args.limit} | Min WR: {args.min_wr}%")
+    print(f"Estimated cost: {'~$0.05' if args.source != 'both' else '~$0.10'}")
     print()
 
     candidates = asyncio.run(discover_smart_money(
         api_token=api_token,
         chain="sol",
-        min_win_rate=40.0,
-        min_trades=20,
+        source=args.source,
+        limit=args.limit,
+        min_win_rate=args.min_wr,
+        min_trades=args.min_trades,
         max_honeypot_ratio=30.0
     ))
 
