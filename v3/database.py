@@ -564,11 +564,23 @@ async def enable_smart_money_tracking(address: str) -> bool:
 
 async def auto_enable_top_smart_money(max_wallets: int = 10, min_win_rate: float = 50.0) -> int:
     """Automatically enable tracking for top smart money wallets."""
+    count, _ = await auto_enable_top_smart_money_with_details(max_wallets, min_win_rate)
+    return count
+
+
+async def auto_enable_top_smart_money_with_details(
+    max_wallets: int = 10,
+    min_win_rate: float = 50.0
+) -> tuple:
+    """
+    Automatically enable tracking for top smart money wallets.
+    Returns tuple of (count, wallet_details_list).
+    """
     pool = await get_pool()
     async with pool.acquire() as conn:
         # Get top performers not yet tracking
         rows = await conn.fetch('''
-            SELECT address, tier FROM smart_money
+            SELECT address, tier, win_rate, total_trades, pnl_30d FROM smart_money
             WHERE is_tracking = FALSE
             AND win_rate >= $1
             ORDER BY win_rate DESC, pnl_30d DESC
@@ -576,6 +588,8 @@ async def auto_enable_top_smart_money(max_wallets: int = 10, min_win_rate: float
         ''', min_win_rate, max_wallets)
 
         count = 0
+        wallet_details = []
+
         for row in rows:
             # Add to wallets
             await conn.execute('''
@@ -588,6 +602,58 @@ async def auto_enable_top_smart_money(max_wallets: int = 10, min_win_rate: float
             await conn.execute('''
                 UPDATE smart_money SET is_tracking = TRUE WHERE address = $1
             ''', row['address'])
+
+            wallet_details.append({
+                'address': row['address'],
+                'tier': row['tier'],
+                'win_rate': row['win_rate'],
+                'total_trades': row['total_trades'],
+                'pnl_30d': row['pnl_30d'],
+            })
+
+            count += 1
+
+        return count, wallet_details
+
+
+async def cleanup_stale_smart_money(days_inactive: int = 30, min_signals: int = 3) -> int:
+    """
+    Remove underperforming smart money wallets from tracking.
+
+    Removes wallets that:
+    - Have been tracking for at least `days_inactive` days
+    - Have at least `min_signals` signals
+    - Have a win rate below 30%
+
+    Returns number of wallets removed from tracking.
+    """
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        # Find underperforming tracked wallets
+        rows = await conn.fetch('''
+            SELECT sm.address, w.signals, w.wins
+            FROM smart_money sm
+            JOIN wallets w ON sm.address = w.address
+            WHERE sm.is_tracking = TRUE
+            AND sm.discovered_at < NOW() - make_interval(days => $1)
+            AND w.signals >= $2
+            AND (w.wins::float / w.signals) < 0.30
+        ''', days_inactive, min_signals)
+
+        count = 0
+        for row in rows:
+            # Remove from main wallets
+            await conn.execute('DELETE FROM wallets WHERE address = $1', row['address'])
+
+            # Mark as not tracking
+            await conn.execute('''
+                UPDATE smart_money SET is_tracking = FALSE WHERE address = $1
+            ''', row['address'])
+
+            logger.info(
+                f"Removed stale wallet {row['address'][:8]}... "
+                f"({row['wins']}/{row['signals']} = {row['wins']/row['signals']*100:.0f}% WR)"
+            )
 
             count += 1
 

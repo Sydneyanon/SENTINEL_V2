@@ -45,6 +45,7 @@ class AdminBot:
         self.app.add_handler(CommandHandler("setmultiplier", self._cmd_setmultiplier))
         self.app.add_handler(CommandHandler("smartmoney", self._cmd_smartmoney))
         self.app.add_handler(CommandHandler("discover", self._cmd_discover))
+        self.app.add_handler(CommandHandler("cleanup", self._cmd_cleanup))
 
         # Media upload handler
         self.app.add_handler(MessageHandler(
@@ -532,10 +533,22 @@ class AdminBot:
         result = await discovery.run_discovery()
 
         if result['success']:
+            # Show new wallets in the response
+            new_wallets = result.get('new_wallets', [])
+            wallet_lines = ""
+            if new_wallets:
+                wallet_lines = "\n<b>New wallets:</b>\n"
+                for w in new_wallets[:5]:
+                    wallet_lines += (
+                        f"• <code>{w['address'][:8]}...</code> "
+                        f"({w['win_rate']:.0f}% WR)\n"
+                    )
+
             await update.message.reply_text(
                 f"✅ <b>Discovery Complete!</b>\n\n"
                 f"Discovered: {result['discovered']} wallets\n"
-                f"Added to tracking: {result['added_to_tracking']}\n\n"
+                f"Added to tracking: {result['added_to_tracking']}"
+                f"{wallet_lines}\n"
                 f"Use /smartmoney to view stats.",
                 parse_mode=ParseMode.HTML
             )
@@ -543,5 +556,32 @@ class AdminBot:
             await update.message.reply_text(
                 f"❌ <b>Discovery Failed</b>\n\n"
                 f"{result['message']}",
+                parse_mode=ParseMode.HTML
+            )
+
+    async def _cmd_cleanup(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /cleanup command - remove underperforming wallets."""
+        if not self._is_admin(update):
+            return
+
+        await update.message.reply_text(
+            "🧹 <b>Running Cleanup...</b>\n\n"
+            "Removing wallets with <30% WR after 30 days.",
+            parse_mode=ParseMode.HTML
+        )
+
+        removed = await db.cleanup_stale_smart_money(days_inactive=30, min_signals=3)
+
+        if removed > 0:
+            await update.message.reply_text(
+                f"✅ <b>Cleanup Complete</b>\n\n"
+                f"Removed {removed} underperforming wallets.\n\n"
+                f"Run /syncwebhook to update Helius.",
+                parse_mode=ParseMode.HTML
+            )
+        else:
+            await update.message.reply_text(
+                "✅ No stale wallets found.\n\n"
+                "All tracked wallets are performing well!",
                 parse_mode=ParseMode.HTML
             )

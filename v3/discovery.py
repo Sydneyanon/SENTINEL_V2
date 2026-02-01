@@ -21,19 +21,23 @@ class SmartMoneyDiscovery:
     - Stores wallets in database with performance metrics
     - Auto-enables tracking for top performers
     - Syncs with Helius webhooks
+    - Telegram notifications for discovery results
     """
 
     APIFY_BASE_URL = "https://api.apify.com/v2"
 
-    def __init__(self, on_wallets_added=None):
+    def __init__(self, on_wallets_added=None, on_discovery_complete=None):
         """
         Args:
             on_wallets_added: Callback when new wallets are added to tracking.
                              Called with list of wallet addresses.
+            on_discovery_complete: Callback when discovery completes.
+                                  Called with result dict including 'new_wallets' list.
         """
         self.running = False
         self.session = None
         self.on_wallets_added = on_wallets_added
+        self.on_discovery_complete = on_discovery_complete
         self.last_discovery = None
         self._task = None
 
@@ -85,6 +89,11 @@ class SmartMoneyDiscovery:
 
                 if should_run:
                     await self.run_discovery()
+
+                    # Also run stale wallet cleanup after discovery
+                    removed = await db.cleanup_stale_smart_money(days_inactive=30, min_signals=3)
+                    if removed > 0:
+                        logger.info(f"Cleaned up {removed} stale smart money wallets")
 
                 # Sleep for 1 hour then check again
                 await asyncio.sleep(3600)
@@ -143,7 +152,7 @@ class SmartMoneyDiscovery:
                 logger.info(f"Stored {stored} smart money wallets")
 
                 # Auto-enable tracking for top performers
-                added = await db.auto_enable_top_smart_money(
+                added, new_wallet_details = await db.auto_enable_top_smart_money_with_details(
                     max_wallets=config.DISCOVERY_AUTO_TRACK_TOP,
                     min_win_rate=config.DISCOVERY_MIN_WIN_RATE
                 )
@@ -156,18 +165,25 @@ class SmartMoneyDiscovery:
 
                     # Callback for new wallets
                     if self.on_wallets_added:
-                        new_wallets = await db.get_smart_money_wallets(tracking_only=True)
-                        addresses = [w['address'] for w in new_wallets]
+                        all_wallets = await db.get_all_wallets()
+                        addresses = [w['address'] for w in all_wallets]
                         await self.on_wallets_added(addresses)
 
                 self.last_discovery = datetime.now()
 
-                return {
+                result = {
                     'success': True,
                     'discovered': stored,
                     'added_to_tracking': added,
+                    'new_wallets': new_wallet_details,
                     'message': f'Discovered {stored} wallets, added {added} to tracking'
                 }
+
+                # Notify via callback (for Telegram)
+                if self.on_discovery_complete:
+                    await self.on_discovery_complete(result)
+
+                return result
 
         except Exception as e:
             logger.error(f"Discovery error: {e}")

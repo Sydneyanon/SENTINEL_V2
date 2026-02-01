@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, HTTPException
 from loguru import logger
 
-from config import HELIUS_API_KEY, LOG_LEVEL
+from config import HELIUS_API_KEY, LOG_LEVEL, ADMIN_USER_ID
 import database as db
 from scoring import calculate_score, format_breakdown
 from tracker import TokenTracker
@@ -56,6 +56,44 @@ async def on_smart_money_added(wallet_addresses: list):
         await pumpportal.update_wallets(wallet_addresses)
 
 
+async def on_discovery_complete(result: dict):
+    """Callback when smart money discovery completes - send Telegram notification."""
+    if not result.get('success') or result.get('added_to_tracking', 0) == 0:
+        return
+
+    new_wallets = result.get('new_wallets', [])
+    if not new_wallets:
+        return
+
+    # Build notification message
+    lines = ["<b>🔍 Weekly Discovery Complete</b>\n"]
+    lines.append(f"New wallets found: {result['discovered']}")
+    lines.append(f"Auto-added to tracking: {result['added_to_tracking']}\n")
+
+    lines.append("<b>New Smart Money:</b>")
+    for w in new_wallets[:5]:  # Top 5
+        lines.append(
+            f"• <code>{w['address'][:8]}...</code> "
+            f"({w['win_rate']:.0f}% WR, {w['total_trades']} trades)"
+        )
+
+    lines.append("\n<i>View full list: /smartmoney list</i>")
+
+    # Send to admin via Telegram
+    try:
+        if admin_bot.app and admin_bot.running and ADMIN_USER_ID:
+            await admin_bot.app.bot.send_message(
+                chat_id=ADMIN_USER_ID,
+                text="\n".join(lines),
+                parse_mode="HTML"
+            )
+            logger.info(f"Sent discovery notification to admin")
+    except Exception as e:
+        # Fall back to logging if Telegram fails
+        logger.warning(f"Failed to send discovery notification: {e}")
+        logger.info(f"Discovery complete: {result['message']}")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup and shutdown."""
@@ -83,6 +121,7 @@ async def lifespan(app: FastAPI):
     # Start smart money discovery scheduler
     smart_money_discovery = get_discovery()
     smart_money_discovery.on_wallets_added = on_smart_money_added
+    smart_money_discovery.on_discovery_complete = on_discovery_complete
     await smart_money_discovery.start()
 
     logger.info(f"Tracking {len(wallets)} wallets")
