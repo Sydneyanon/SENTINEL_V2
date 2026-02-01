@@ -204,9 +204,11 @@ class SmartMoneyDiscovery:
                     logger.info(f"Filtered out: {filter_reasons}")
 
                 # Auto-enable tracking for top performers
+                # Use min_win_rate=0 since GMGN often returns null winrate
+                # We already filtered by PNL, so just take top by PNL
                 added, new_wallet_details = await db.auto_enable_top_smart_money_with_details(
                     max_wallets=config.DISCOVERY_AUTO_TRACK_TOP,
-                    min_win_rate=config.DISCOVERY_MIN_WIN_RATE
+                    min_win_rate=0  # Allow wallets with unknown winrate
                 )
 
                 if added > 0:

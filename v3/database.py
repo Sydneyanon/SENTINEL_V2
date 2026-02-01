@@ -579,11 +579,12 @@ async def auto_enable_top_smart_money_with_details(
     pool = await get_pool()
     async with pool.acquire() as conn:
         # Get top performers not yet tracking
+        # Order by PNL first (most reliable metric when winrate is unknown)
         rows = await conn.fetch('''
             SELECT address, tier, win_rate, total_trades, pnl_30d FROM smart_money
             WHERE is_tracking = FALSE
             AND win_rate >= $1
-            ORDER BY win_rate DESC, pnl_30d DESC
+            ORDER BY pnl_30d DESC, win_rate DESC
             LIMIT $2
         ''', min_win_rate, max_wallets)
 
