@@ -376,12 +376,21 @@ class SmartMoneyDiscovery:
             return 'no_address'
 
         # Extract metrics (GMGN uses: winrate, buy_30d, realized_profit_30d)
-        win_rate = float(
-            data.get('winrate') or data.get('winRate') or data.get('win_rate') or 0
-        )
-        # GMGN may return winrate as decimal (0.65) or percentage (65)
-        if 0 < win_rate < 1:
-            win_rate = win_rate * 100
+        # Winrate might be None - try to calculate from profit_num/token_num
+        raw_winrate = data.get('winrate')
+        if raw_winrate is not None:
+            win_rate = float(raw_winrate)
+            # GMGN returns winrate as decimal (0.65) - convert to percentage
+            if 0 < win_rate <= 1:
+                win_rate = win_rate * 100
+        else:
+            # Calculate from profit_num / token_num if available
+            profit_num = data.get('profit_num', 0) or 0
+            token_num = data.get('token_num', 0) or 0
+            if token_num > 0:
+                win_rate = (profit_num / token_num) * 100
+            else:
+                win_rate = None  # Cannot determine winrate
 
         total_trades = int(
             data.get('buy_30d') or data.get('totalTrades') or
@@ -402,7 +411,8 @@ class SmartMoneyDiscovery:
         logger.debug(f"Wallet {address[:8]}: WR={win_rate}, trades={total_trades}, pnl30d={pnl_30d}, honeypot={honeypot_ratio}")
 
         # Hard filters - must pass ALL (tightened for quality)
-        if win_rate < config.DISCOVERY_MIN_WIN_RATE:
+        # Skip winrate filter if we couldn't determine it - rely on PNL instead
+        if win_rate is not None and win_rate < config.DISCOVERY_MIN_WIN_RATE:
             logger.debug(f"Wallet {address[:8]} filtered: win_rate {win_rate} < {config.DISCOVERY_MIN_WIN_RATE}")
             return 'win_rate'
         if total_trades < config.DISCOVERY_MIN_TRADES:
@@ -419,23 +429,28 @@ class SmartMoneyDiscovery:
             return 'pnl'
 
         # Determine tier using config thresholds
+        # If winrate unknown, tier based on PNL only
         elite_wr = getattr(config, 'DISCOVERY_ELITE_WIN_RATE', 65.0)
         elite_pnl = getattr(config, 'DISCOVERY_ELITE_MIN_PNL', 15000)
         sm_wr = getattr(config, 'DISCOVERY_SMART_MONEY_WIN_RATE', 55.0)
         sm_pnl = getattr(config, 'DISCOVERY_SMART_MONEY_MIN_PNL', 7500)
 
-        if win_rate >= elite_wr and pnl_30d >= elite_pnl:
+        wr = win_rate if win_rate is not None else 0
+        if wr >= elite_wr and pnl_30d >= elite_pnl:
             tier = 'elite'
-        elif win_rate >= sm_wr and pnl_30d >= sm_pnl:
+        elif wr >= sm_wr and pnl_30d >= sm_pnl:
+            tier = 'smart_money'
+        elif pnl_30d >= elite_pnl:
+            # High PNL but unknown winrate - still valuable
             tier = 'smart_money'
         else:
             tier = 'verified'
 
-        # Store in database
+        # Store in database (use 0 for unknown winrate)
         await db.add_smart_money(
             address=address,
             source='smart_degen',
-            win_rate=win_rate,
+            win_rate=wr,
             total_trades=total_trades,
             pnl_7d=pnl_7d,
             pnl_30d=pnl_30d,
