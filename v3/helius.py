@@ -53,6 +53,9 @@ async def create_webhook(
             "webhookType": webhook_type,
         }
 
+        logger.info(f"Creating webhook with URL: {webhook_url}")
+        logger.info(f"Wallet count: {len(wallet_addresses)}")
+
         async with aiohttp.ClientSession() as session:
             async with session.post(url, json=payload, timeout=30) as resp:
                 if resp.status == 200:
