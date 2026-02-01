@@ -162,9 +162,10 @@ def calculate_score(
 # V2-STYLE SCORING (for ActiveTokenTracker continuous analysis)
 # =============================================================================
 # Uses accumulated WebSocket data instead of one-shot REST API data
+# STABLE MODE: Jan 22 config with 53% WR - Quality > Quantity
 
-V2_MIN_SCORE = 45  # Threshold for V2 scoring (accumulates over time)
-V2_MIN_UNIQUE_BUYERS = 5  # Minimum unique buyers (from WebSocket - reliable)
+V2_MIN_SCORE = 60  # STABLE MODE: raised from 45
+V2_MIN_UNIQUE_BUYERS = 15  # STABLE MODE: raised from 5 (matches V2's MIN_UNIQUE_BUYERS)
 
 
 def calculate_score_v2(
@@ -208,8 +209,14 @@ def calculate_score_v2(
 
     # Unique buyers check (from WebSocket - reliable unlike DexScreener holders)
     # This replaces V2's MIN_HOLDERS since WebSocket unique_buyers is more accurate
-    # Give tokens time to accumulate buyers: 2+ if tracking <30s, 5+ after 30s
-    min_buyers_required = 2 if tracking_seconds < 30 else V2_MIN_UNIQUE_BUYERS
+    # STABLE MODE: Gradual ramp-up to 15 unique buyers
+    if tracking_seconds < 60:
+        min_buyers_required = 3  # Warming up
+    elif tracking_seconds < 120:
+        min_buyers_required = 8  # Building momentum
+    else:
+        min_buyers_required = V2_MIN_UNIQUE_BUYERS  # Full STABLE MODE (15)
+
     if unique_buyers < min_buyers_required:
         return 0, {}, False, f"Unique buyers {unique_buyers} < {min_buyers_required}"
 
