@@ -59,6 +59,9 @@ async def lifespan(app: FastAPI):
 
     await db.init_db()
     await token_tracker.start()
+
+    # Delay to avoid Telegram bot conflicts during rapid restarts
+    await asyncio.sleep(2)
     await admin_bot.start()
 
     # Get tracked wallets and start PumpPortal WebSocket
