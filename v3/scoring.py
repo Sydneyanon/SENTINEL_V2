@@ -8,7 +8,7 @@ from loguru import logger
 from typing import Dict, Any, Tuple, Optional
 
 from config import (
-    SCORING, MIN_SCORE, MIN_LIQUIDITY, MIN_HOLDERS, MAX_MCAP,
+    SCORING, MIN_SCORE, MIN_LIQUIDITY, MAX_MCAP,
     AVOID_HOURS_UTC
 )
 
@@ -48,11 +48,9 @@ def calculate_score(
     if liquidity < min_liq:
         return 0, {}, False, f"Liquidity ${liquidity:,.0f} < ${min_liq:,.0f}"
 
-    # Holders filter - lower for pre-grad (estimated from bonding curve)
-    # Graduated: 20 min | Pre-grad: 10 min (estimated)
-    min_holders = MIN_HOLDERS if graduated else 10
-    if holders < min_holders:
-        return 0, {}, False, f"Holders {holders} < {min_holders}"
+    # Holders - NO HARD FILTER (V2 uses unique_buyers scoring instead)
+    # DexScreener often returns 0, pre-grad is just an estimate
+    # Let scoring decide based on unique_buyers from WebSocket
 
     # Buy/Sell ratio - NO HARD FILTER (was blocking all pre-grad with 0/0 data)
     # Use scoring instead (lines 117-137)
