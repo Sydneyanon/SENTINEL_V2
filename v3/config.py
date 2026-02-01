@@ -24,8 +24,8 @@ MIN_SCORE = 30
 # Liquidity: Wins avg $10K vs Rugs avg $20K. Best ≤$10K = 29% WR
 MIN_LIQUIDITY = 8000
 
-# MCAP: Increased to $100K to see more smart money trades
-MAX_MCAP = 100000
+# MCAP: Smart money buys in $100-200K range for graduated tokens
+MAX_MCAP = 200000
 
 # Holders: Using DexScreener holderCount or unique 24h traders as proxy
 MIN_HOLDERS = 20
