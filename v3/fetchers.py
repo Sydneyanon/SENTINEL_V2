@@ -13,18 +13,30 @@ async def fetch_token_data(token_address: str) -> Optional[Dict]:
     Tries DexScreener first (graduated), falls back to PumpPortal (pre-grad).
     """
     # Try DexScreener first (post-grad)
-    data = await fetch_dexscreener(token_address)
-    if data and data.get('price', 0) > 0:
-        data['source'] = 'dexscreener'
-        data['graduated'] = True
-        return data
+    dex_data = await fetch_dexscreener(token_address)
 
-    # Fall back to PumpPortal (pre-grad)
-    data = await fetch_pumpportal(token_address)
-    if data:
-        data['source'] = 'pumpportal'
-        data['graduated'] = False
-        return data
+    # Only use DexScreener if we have BOTH price AND liquidity
+    # Pre-grad tokens often show on DexScreener with price but $0 liquidity
+    if dex_data and dex_data.get('price', 0) > 0 and dex_data.get('liquidity', 0) > 0:
+        dex_data['source'] = 'dexscreener'
+        dex_data['graduated'] = True
+        logger.debug(f"Using DexScreener for {dex_data.get('symbol')}: ${dex_data.get('liquidity', 0):,.0f} liq")
+        return dex_data
+
+    # Fall back to PumpPortal (pre-grad / bonding curve)
+    pump_data = await fetch_pumpportal(token_address)
+    if pump_data:
+        pump_data['source'] = 'pumpportal'
+        pump_data['graduated'] = False
+        logger.debug(f"Using PumpPortal for {pump_data.get('symbol')}: ${pump_data.get('liquidity', 0):,.0f} liq")
+        return pump_data
+
+    # Last resort: use DexScreener even with $0 liquidity (better than nothing)
+    if dex_data and dex_data.get('price', 0) > 0:
+        dex_data['source'] = 'dexscreener'
+        dex_data['graduated'] = False  # Mark as not graduated if no liquidity
+        logger.debug(f"Fallback DexScreener for {dex_data.get('symbol')}: no liquidity data")
+        return dex_data
 
     return None
 
