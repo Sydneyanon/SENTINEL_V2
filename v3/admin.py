@@ -59,7 +59,19 @@ class AdminBot:
         await self.app.bot.delete_webhook(drop_pending_updates=True)
 
         await self.app.start()
-        await self.app.updater.start_polling(drop_pending_updates=True)
+
+        # Retry polling with backoff in case of conflict
+        for attempt in range(3):
+            try:
+                await self.app.updater.start_polling(drop_pending_updates=True)
+                break
+            except Exception as e:
+                if "Conflict" in str(e) and attempt < 2:
+                    wait = (attempt + 1) * 5
+                    logger.warning(f"Bot conflict, retrying in {wait}s...")
+                    await asyncio.sleep(wait)
+                else:
+                    raise
 
         # Register commands with Telegram menu
         await self.app.bot.set_my_commands([

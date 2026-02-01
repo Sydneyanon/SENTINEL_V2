@@ -107,8 +107,10 @@ async def lifespan(app: FastAPI):
     await db.init_db()
     await token_tracker.start()
 
-    # Delay to avoid Telegram bot conflicts during rapid restarts
-    await asyncio.sleep(2)
+    # Delay to avoid Telegram bot conflicts during Railway redeployments
+    # Old container may still be running for a few seconds
+    logger.info("Waiting for previous instance to shut down...")
+    await asyncio.sleep(10)
     await admin_bot.start()
 
     # Get tracked wallets and start PumpPortal WebSocket
