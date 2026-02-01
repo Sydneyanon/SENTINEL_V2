@@ -8,7 +8,7 @@ from loguru import logger
 from typing import Dict, Any, Tuple, Optional
 
 from config import (
-    SCORING, MIN_SCORE, MIN_LIQUIDITY, MIN_HOLDERS, MAX_MCAP,
+    SCORING, MIN_SCORE, MIN_LIQUIDITY, MAX_MCAP,
     AVOID_HOURS_UTC
 )
 
@@ -48,11 +48,9 @@ def calculate_score(
     if liquidity < min_liq:
         return 0, {}, False, f"Liquidity ${liquidity:,.0f} < ${min_liq:,.0f}"
 
-    # Holders filter - lower for pre-grad (estimated from bonding curve)
-    # Graduated: 20 min | Pre-grad: 10 min (estimated)
-    min_holders = MIN_HOLDERS if graduated else 10
-    if holders < min_holders:
-        return 0, {}, False, f"Holders {holders} < {min_holders}"
+    # Holders - NO HARD FILTER (V2 uses unique_buyers scoring instead)
+    # DexScreener often returns 0, pre-grad is just an estimate
+    # Let scoring decide based on unique_buyers from WebSocket
 
     # Buy/Sell ratio - NO HARD FILTER (was blocking all pre-grad with 0/0 data)
     # Use scoring instead (lines 117-137)
@@ -166,6 +164,7 @@ def calculate_score(
 # Uses accumulated WebSocket data instead of one-shot REST API data
 
 V2_MIN_SCORE = 45  # Threshold for V2 scoring (accumulates over time)
+V2_MIN_UNIQUE_BUYERS = 5  # Minimum unique buyers (from WebSocket - reliable)
 
 
 def calculate_score_v2(
@@ -206,6 +205,11 @@ def calculate_score_v2(
     min_liq = 1000 if not graduated else MIN_LIQUIDITY
     if liquidity < min_liq:
         return 0, {}, False, f"Liquidity ${liquidity:,.0f} < ${min_liq:,.0f}"
+
+    # Unique buyers check (from WebSocket - reliable unlike DexScreener holders)
+    # This replaces V2's MIN_HOLDERS since WebSocket unique_buyers is more accurate
+    if unique_buyers < V2_MIN_UNIQUE_BUYERS:
+        return 0, {}, False, f"Unique buyers {unique_buyers} < {V2_MIN_UNIQUE_BUYERS}"
 
     # ==========================================================================
     # FACTOR 1: Wallet Tier (0-25 points)
