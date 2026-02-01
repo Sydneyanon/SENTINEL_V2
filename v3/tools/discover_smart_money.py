@@ -48,8 +48,8 @@ class ApifyGMGNScraper:
     Apify client for GMGN scrapers.
 
     Required scrapers:
-    - muhammetakkurtt/gmgn-smart-degen-monitor-scraper
-    - muhammetakkurtt/gmgn-wallet-stat-scraper
+    - muhammetakkurtt~gmgn-smart-degen-monitor-scraper
+    - muhammetakkurtt~gmgn-wallet-stat-scraper
     """
 
     BASE_URL = "https://api.apify.com/v2"
@@ -71,7 +71,7 @@ class ApifyGMGNScraper:
         Run an Apify actor and wait for results.
 
         Args:
-            actor_id: Actor ID (e.g., "muhammetakkurtt/gmgn-smart-degen-monitor-scraper")
+            actor_id: Actor ID (e.g., "muhammetakkurtt~gmgn-smart-degen-monitor-scraper")
             input_data: Input parameters for the actor
             timeout: Max wait time in seconds
 
@@ -134,7 +134,7 @@ class ApifyGMGNScraper:
         }
 
         return await self.run_actor(
-            "muhammetakkurtt/gmgn-smart-degen-monitor-scraper",
+            "muhammetakkurtt~gmgn-smart-degen-monitor-scraper",
             input_data
         )
 
@@ -152,7 +152,7 @@ class ApifyGMGNScraper:
         }
 
         results = await self.run_actor(
-            "muhammetakkurtt/gmgn-wallet-stat-scraper",
+            "muhammetakkurtt~gmgn-wallet-stat-scraper",
             input_data,
             timeout=60
         )
@@ -173,7 +173,7 @@ class ApifyGMGNScraper:
         }
 
         return await self.run_actor(
-            "muhammetakkurtt/gmgn-copytrade-wallet-scraper",
+            "muhammetakkurtt~gmgn-copytrade-wallet-scraper",
             input_data
         )
 
