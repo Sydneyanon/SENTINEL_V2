@@ -40,6 +40,10 @@ class AdminBot:
         self.app.add_handler(CommandHandler("syncwebhook", self._cmd_sync_webhook))
 
         await self.app.initialize()
+
+        # Clear any existing connections before starting
+        await self.app.bot.delete_webhook(drop_pending_updates=True)
+
         await self.app.start()
         await self.app.updater.start_polling(drop_pending_updates=True)
 
