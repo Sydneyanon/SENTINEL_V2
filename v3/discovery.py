@@ -319,14 +319,33 @@ class SmartMoneyDiscovery:
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
             'Accept': 'application/json',
+            'Referer': 'https://gmgn.ai/',
+            'Origin': 'https://gmgn.ai',
         }
 
         try:
             async with self.session.get(url, headers=headers) as resp:
+                # Log first response status
+                if not hasattr(self, '_logged_first_status'):
+                    self._logged_first_status = True
+                    logger.info(f"GMGN API first response status: {resp.status}")
+
                 if resp.status != 200:
+                    if not hasattr(self, '_logged_error'):
+                        self._logged_error = True
+                        text = await resp.text()
+                        logger.warning(f"GMGN API error: {resp.status} - {text[:200]}")
                     return None
 
                 data = await resp.json()
+
+                # Log first successful response
+                if not hasattr(self, '_logged_sample'):
+                    self._logged_sample = True
+                    logger.info(f"GMGN API response: code={data.get('code')}, msg={data.get('msg')}")
+                    if data.get('data'):
+                        logger.info(f"GMGN data keys: {list(data.get('data', {}).keys())}")
+
                 if data.get('code') != 0:
                     return None
 
@@ -339,7 +358,7 @@ class SmartMoneyDiscovery:
                 return wallet_data
 
         except Exception as e:
-            logger.debug(f"Failed to fetch stats for {address[:8]}: {e}")
+            logger.warning(f"Failed to fetch stats for {address[:8]}: {e}")
             return None
 
     async def _store_wallet_with_reason(self, data: Dict) -> str:
