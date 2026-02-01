@@ -4,11 +4,12 @@ Essential commands only. Clean and focused.
 """
 import asyncio
 from telegram import Update, Bot, BotCommand
-from telegram.ext import Application, CommandHandler, ContextTypes
+from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 from telegram.constants import ParseMode
 from loguru import logger
 
 from config import TELEGRAM_BOT_TOKEN, ADMIN_USER_ID, WEBHOOK_URL
+import config
 import database as db
 import helius
 
@@ -19,6 +20,7 @@ class AdminBot:
     def __init__(self):
         self.app = None
         self.running = False
+        self.pending_media_type = None  # Tracks what media is expected (banner, multiplier_2x, etc.)
 
     async def start(self):
         """Start the admin bot."""
@@ -38,6 +40,14 @@ class AdminBot:
         self.app.add_handler(CommandHandler("addwallet", self._cmd_add_wallet))
         self.app.add_handler(CommandHandler("rmwallet", self._cmd_rm_wallet))
         self.app.add_handler(CommandHandler("syncwebhook", self._cmd_sync_webhook))
+        self.app.add_handler(CommandHandler("setbanner", self._cmd_setbanner))
+        self.app.add_handler(CommandHandler("setmultiplier", self._cmd_setmultiplier))
+
+        # Media upload handler
+        self.app.add_handler(MessageHandler(
+            filters.VIDEO | filters.ANIMATION | filters.Document.VIDEO,
+            self._handle_media_upload
+        ))
 
         await self.app.initialize()
 
@@ -56,6 +66,8 @@ class AdminBot:
             BotCommand("addwallet", "Add a wallet"),
             BotCommand("rmwallet", "Remove a wallet"),
             BotCommand("syncwebhook", "Sync wallets with Helius"),
+            BotCommand("setbanner", "Set signal banner"),
+            BotCommand("setmultiplier", "Set milestone banners"),
             BotCommand("help", "Show commands"),
         ])
 
@@ -105,6 +117,10 @@ class AdminBot:
 /addwallet &lt;address&gt; [name] - Add wallet
 /rmwallet &lt;address&gt; - Remove wallet
 /syncwebhook - Sync wallets with Helius
+
+<b>Banners:</b>
+/setbanner - Set signal banner (send video)
+/setmultiplier - Set milestone banners
 """
         await update.message.reply_text(text.strip(), parse_mode=ParseMode.HTML)
 
@@ -322,3 +338,121 @@ class AdminBot:
             await update.message.reply_text(
                 f"❌ Sync failed: {result['message']}"
             )
+
+    async def _cmd_setbanner(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Set signal banner: /setbanner then send video."""
+        if not self._is_admin(update):
+            return
+
+        self.pending_media_type = 'banner'
+        await update.message.reply_text(
+            "🎬 <b>Banner Setup Mode</b>\n\n"
+            "Send me the video/animation for signal alerts.\n\n"
+            "Supported: MP4 videos, GIFs, animations",
+            parse_mode=ParseMode.HTML
+        )
+
+    async def _cmd_setmultiplier(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Set milestone banners: /setmultiplier <tier>"""
+        if not self._is_admin(update):
+            return
+
+        valid_tiers = ['2x', '10x', '100x']
+
+        if not context.args or context.args[0].lower() not in valid_tiers:
+            # Show current status
+            current = {
+                '2x': getattr(config, 'MILESTONE_BANNER_2X', None),
+                '10x': getattr(config, 'MILESTONE_BANNER_10X', None),
+                '100x': getattr(config, 'MILESTONE_BANNER_100X', None),
+            }
+
+            lines = ["🎯 <b>Milestone Banners</b>\n"]
+            for tier, val in current.items():
+                status = "✅" if val else "❌"
+                lines.append(f"{status} <b>{tier}</b>: {'Set' if val else 'Not set'}")
+
+            lines.append("\n<b>Usage:</b>")
+            lines.append("<code>/setmultiplier 2x</code> - then send video")
+            lines.append("<code>/setmultiplier 10x</code> - then send video")
+            lines.append("<code>/setmultiplier 100x</code> - then send video")
+
+            await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
+            return
+
+        tier = context.args[0].lower()
+        self.pending_media_type = f'multiplier_{tier}'
+
+        tier_names = {
+            '2x': '🔥 2x Milestone',
+            '10x': '☄️ 10x Milestone',
+            '100x': '🌋 100x Milestone',
+        }
+
+        await update.message.reply_text(
+            f"🎯 <b>{tier_names.get(tier, tier)} Setup</b>\n\n"
+            f"Send me the video/animation for <b>{tier}</b> alerts.\n\n"
+            f"Supported: MP4 videos, GIFs, animations",
+            parse_mode=ParseMode.HTML
+        )
+
+    async def _handle_media_upload(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle uploaded media for banners."""
+        if not self._is_admin(update):
+            return
+
+        msg = update.message
+        file_id = None
+        media_type = None
+
+        if msg.animation:
+            file_id = msg.animation.file_id
+            media_type = "animation"
+        elif msg.video:
+            file_id = msg.video.file_id
+            media_type = "video"
+        elif msg.document and msg.document.mime_type and msg.document.mime_type.startswith('video/'):
+            file_id = msg.document.file_id
+            media_type = "document"
+
+        if not file_id:
+            return
+
+        logger.info(f"Admin uploaded {media_type}, file_id: {file_id}")
+
+        pending = self.pending_media_type
+        self.pending_media_type = None
+
+        if pending == 'banner' or pending is None:
+            config.BANNER_SIGNAL = file_id
+            env_var = 'TELEGRAM_BANNER_FILE_ID'
+            description = "Signal Banner"
+
+        elif pending.startswith('multiplier_'):
+            tier = pending.replace('multiplier_', '')
+            tier_map = {
+                '2x': ('MILESTONE_BANNER_2X', '2x Milestone'),
+                '10x': ('MILESTONE_BANNER_10X', '10x Milestone'),
+                '100x': ('MILESTONE_BANNER_100X', '100x Milestone'),
+            }
+            env_var, description = tier_map.get(tier, ('UNKNOWN', tier))
+
+            if tier == '2x':
+                config.MILESTONE_BANNER_2X = file_id
+            elif tier == '10x':
+                config.MILESTONE_BANNER_10X = file_id
+            elif tier == '100x':
+                config.MILESTONE_BANNER_100X = file_id
+        else:
+            env_var = 'TELEGRAM_BANNER_FILE_ID'
+            description = "Banner"
+
+        await msg.reply_text(
+            f"🎬 <b>{description} Captured!</b>\n\n"
+            f"Type: <code>{media_type}</code>\n"
+            f"File ID:\n<code>{file_id}</code>\n\n"
+            f"✅ <b>Applied in memory</b>\n\n"
+            f"For persistence, set in Railway:\n"
+            f"<code>{env_var}={file_id}</code>",
+            parse_mode=ParseMode.HTML
+        )
