@@ -24,8 +24,8 @@ MIN_SCORE = 30
 # Liquidity: Wins avg $10K vs Rugs avg $20K. Best ≤$10K = 29% WR
 MIN_LIQUIDITY = 8000
 
-# MCAP: Wins avg $32K vs Rugs avg $72K. Best ≤$15K = 31% WR (KEY FILTER!)
-MAX_MCAP = 15000
+# MCAP: Increased to $100K to see more smart money trades
+MAX_MCAP = 100000
 
 # Holders: Keep reasonable minimum
 MIN_HOLDERS = 20
