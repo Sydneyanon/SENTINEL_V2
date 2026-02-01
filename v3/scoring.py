@@ -201,15 +201,17 @@ def calculate_score_v2(
     # PRE-CHECKS (minimal - let scoring decide)
     # ==========================================================================
 
-    # Only check liquidity for pre-grad (graduated checked elsewhere)
-    min_liq = 1000 if not graduated else MIN_LIQUIDITY
-    if liquidity < min_liq:
-        return 0, {}, False, f"Liquidity ${liquidity:,.0f} < ${min_liq:,.0f}"
+    # Only check liquidity for graduated tokens
+    # Pre-grad tokens use bonding curve (no LP liquidity) - checked via bonding_pct instead
+    if graduated and liquidity < MIN_LIQUIDITY:
+        return 0, {}, False, f"Liquidity ${liquidity:,.0f} < ${MIN_LIQUIDITY:,.0f}"
 
     # Unique buyers check (from WebSocket - reliable unlike DexScreener holders)
     # This replaces V2's MIN_HOLDERS since WebSocket unique_buyers is more accurate
-    if unique_buyers < V2_MIN_UNIQUE_BUYERS:
-        return 0, {}, False, f"Unique buyers {unique_buyers} < {V2_MIN_UNIQUE_BUYERS}"
+    # Give tokens time to accumulate buyers: 2+ if tracking <30s, 5+ after 30s
+    min_buyers_required = 2 if tracking_seconds < 30 else V2_MIN_UNIQUE_BUYERS
+    if unique_buyers < min_buyers_required:
+        return 0, {}, False, f"Unique buyers {unique_buyers} < {min_buyers_required}"
 
     # ==========================================================================
     # FACTOR 1: Wallet Tier (0-25 points)

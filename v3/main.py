@@ -190,6 +190,12 @@ async def start_tracking_token(token_address: str, wallet: dict, symbol: str = N
         if state:
             state.buys = ws_buys
             state.sells = ws_sells
+            # Add triggering wallet as first unique buyer
+            state.unique_buyers.add(wallet['address'])
+            # Add any existing buyers from WebSocket
+            if pumpportal:
+                existing_buyers = pumpportal.token_buyers.get(token_address, set())
+                state.unique_buyers.update(existing_buyers)
 
         # Register for WebSocket trade events
         if pumpportal:

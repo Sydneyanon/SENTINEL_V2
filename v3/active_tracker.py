@@ -202,7 +202,7 @@ class ActiveTokenTracker:
                 if not pending:
                     continue
 
-                logger.debug(f"Reanalyzing {len(pending)} pending tokens...")
+                logger.info(f"Reanalyzing {len(pending)} pending tokens...")
 
                 for state in pending:
                     try:
@@ -229,6 +229,7 @@ class ActiveTokenTracker:
                 return
 
         state.last_analyzed = now
+        previous_score = state.last_score
 
         # Calculate score with accumulated data
         from scoring import calculate_score_v2
@@ -250,9 +251,11 @@ class ActiveTokenTracker:
         state.last_score = score
         state.skip_reason = skip_reason
 
-        # Log score changes
-        if score != state.last_score or should_signal:
-            logger.debug(f"${state.symbol}: score={score}, buys={state.buys}, unique={len(state.unique_buyers)}")
+        # Log score or skip reason
+        if skip_reason:
+            logger.info(f"${state.symbol}: SKIP - {skip_reason}")
+        elif score != previous_score or should_signal:
+            logger.info(f"${state.symbol}: score={score} (buys={state.buys}, unique={len(state.unique_buyers)}, bonding={state.bonding_pct:.0f}%)")
 
         # Check if should signal
         if should_signal and not state.signal_sent:
