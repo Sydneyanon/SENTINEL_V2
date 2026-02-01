@@ -27,8 +27,8 @@ MIN_LIQUIDITY = 8000
 # MCAP: Increased to $100K to see more smart money trades
 MAX_MCAP = 100000
 
-# Holders: Disabled - DexScreener/PumpPortal don't provide holder count
-MIN_HOLDERS = 0
+# Holders: Using DexScreener holderCount or unique 24h traders as proxy
+MIN_HOLDERS = 10
 
 # Buy/Sell Ratio: Wins avg 1.1 vs Rugs avg 0.5. Best ≥2.0 = 29% WR
 MIN_BUY_SELL_RATIO = 2.0
