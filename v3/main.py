@@ -16,6 +16,7 @@ from fetchers import fetch_token_data
 from tg_poster import TelegramPoster
 from admin import AdminBot
 from pumpportal_ws import PumpPortalWS
+from rugcheck import get_rugcheck, cleanup_rugcheck
 
 
 # Configure logging
@@ -82,6 +83,7 @@ async def lifespan(app: FastAPI):
         await pumpportal.stop()
     await token_tracker.stop()
     await admin_bot.stop()
+    await cleanup_rugcheck()
 
 
 app = FastAPI(title="SENTINEL V3", lifespan=lifespan)
@@ -185,7 +187,14 @@ async def process_potential_signal(token_address: str, wallet: dict):
         logger.info(f"Skip ${symbol}: {skip_reason}")
         return
 
-    logger.info(f"Signal ${symbol}! Score: {score}/100")
+    # RugCheck - block high risk tokens
+    rugcheck = get_rugcheck()
+    rug_result = await rugcheck.check(token_address)
+    if not rug_result.get('safe', True):
+        logger.info(f"Skip ${symbol}: RugCheck - {rug_result.get('reason', 'High risk')}")
+        return
+
+    logger.info(f"Signal ${symbol}! Score: {score}/100 | Risk: {rug_result.get('risk_level', '?')}")
     logger.debug(f"\n{format_breakdown(breakdown)}")
 
     # Create signal in database
