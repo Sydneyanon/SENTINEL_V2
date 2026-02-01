@@ -13,7 +13,7 @@ import database as db
 from scoring import calculate_score, format_breakdown
 from tracker import TokenTracker
 from fetchers import fetch_token_data
-from telegram import TelegramPoster
+from tg_poster import TelegramPoster
 from admin import AdminBot
 from pumpportal_ws import PumpPortalWS
 
