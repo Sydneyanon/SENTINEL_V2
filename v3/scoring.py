@@ -164,6 +164,7 @@ def calculate_score(
 # Uses accumulated WebSocket data instead of one-shot REST API data
 
 V2_MIN_SCORE = 45  # Threshold for V2 scoring (accumulates over time)
+V2_MIN_UNIQUE_BUYERS = 5  # Minimum unique buyers (from WebSocket - reliable)
 
 
 def calculate_score_v2(
@@ -204,6 +205,11 @@ def calculate_score_v2(
     min_liq = 1000 if not graduated else MIN_LIQUIDITY
     if liquidity < min_liq:
         return 0, {}, False, f"Liquidity ${liquidity:,.0f} < ${min_liq:,.0f}"
+
+    # Unique buyers check (from WebSocket - reliable unlike DexScreener holders)
+    # This replaces V2's MIN_HOLDERS since WebSocket unique_buyers is more accurate
+    if unique_buyers < V2_MIN_UNIQUE_BUYERS:
+        return 0, {}, False, f"Unique buyers {unique_buyers} < {V2_MIN_UNIQUE_BUYERS}"
 
     # ==========================================================================
     # FACTOR 1: Wallet Tier (0-25 points)
