@@ -161,11 +161,58 @@ def calculate_score(
 # =============================================================================
 # V2-STYLE SCORING (for ActiveTokenTracker continuous analysis)
 # =============================================================================
-# Uses accumulated WebSocket data instead of one-shot REST API data
 # STABLE MODE: Jan 22 config with 53% WR - Quality > Quantity
+# Uses accumulated WebSocket data - EXACT V2 weights
 
-V2_MIN_SCORE = 60  # STABLE MODE: raised from 45
-V2_MIN_UNIQUE_BUYERS = 15  # STABLE MODE: raised from 5 (matches V2's MIN_UNIQUE_BUYERS)
+# Thresholds
+V2_MIN_SCORE = 60  # Pre-grad threshold
+V2_POST_GRAD_THRESHOLD = 75  # Post-grad threshold (stricter)
+V2_MIN_UNIQUE_BUYERS = 15  # Minimum unique buyers
+V2_MIN_LIQUIDITY = 20000  # Minimum liquidity for graduated
+
+# Smart Wallet Weights (0-40 pts max)
+SMART_WALLET_WEIGHTS = {
+    'per_kol': 10,           # +10 per KOL buy
+    'max_score': 40,         # max 40 pts from smart wallets
+    'multi_kol_bonus': 15,   # bonus for multiple KOLs (2+)
+}
+
+# Buyer Velocity Weights (0-18 pts) - buyers in 5 min window
+BUYER_VELOCITY_WEIGHTS = {
+    'explosive': 18,         # 100+ buyers in 5 min
+    'very_fast': 14,         # 50-99 buyers in 5 min
+    'fast': 10,              # 25-49 buyers in 5 min
+    'moderate': 6,           # 15-24 buyers in 5 min
+    'slow': 3,               # 5-14 buyers in 5 min
+    'minimal': 0,            # <5 buyers in 5 min
+}
+
+# Bonding Speed Weights (0-15 pts) - bonding velocity %/min
+BONDING_SPEED_WEIGHTS = {
+    'hyper': 15,             # >7%/min
+    'rocket': 12,            # >5%/min
+    'fast': 8,               # 2-5%/min
+    'steady': 5,             # 1-2%/min
+    'slow': 2,               # 0.5-1%/min
+    'crawl': 0,              # <0.5%/min
+}
+
+# Unique Buyer Weights (0-10 pts)
+UNIQUE_BUYER_WEIGHTS = {
+    'exceptional': 10,       # 100+ unique buyers
+    'high': 7,               # 50-99 unique buyers
+    'medium': 5,             # 25-49 unique buyers
+    'low': 3,                # 10-24 unique buyers
+    'minimal': 0,            # <10 unique buyers
+}
+
+# Buy/Sell Ratio Weights (0-10 pts)
+BUY_SELL_WEIGHTS = {
+    'strong': 10,            # ratio >= 2.0
+    'good': 7,               # ratio >= 1.5
+    'weak': 3,               # ratio >= 1.0
+    'negative': 0,           # ratio < 1.0
+}
 
 
 def calculate_score_v2(
@@ -182,15 +229,24 @@ def calculate_score_v2(
     tracking_seconds: float
 ) -> Tuple[int, Dict[str, Any], bool, str]:
     """
-    V2-style scoring with accumulated WebSocket data.
+    V2-style scoring with STABLE MODE weights (Jan 22 config, 53% WR).
 
     Scoring factors (0-100):
-    - Wallet Tier: 0-25 pts
-    - Buyer Velocity: 0-20 pts (buys per minute)
-    - Unique Buyers: 0-15 pts
-    - Buy/Sell Ratio: 0-15 pts
-    - Bonding Progress: 0-15 pts (pre-grad only)
-    - Multi-KOL Bonus: 0-10 pts
+    PRE-GRAD:
+    - Smart Wallet: 0-40 pts (per KOL + multi-KOL bonus)
+    - Buyer Velocity: 0-18 pts (buyers in 5 min window)
+    - Bonding Speed: 0-15 pts (bonding velocity %/min)
+    - Unique Buyers: 0-10 pts
+    - Buy/Sell Ratio: 0-10 pts
+    - Acceleration Bonus: 0-15 pts (reserved for future)
+
+    POST-GRAD:
+    - Smart Wallet: 0-40 pts
+    - Buyer Velocity: 0-18 pts
+    - Unique Buyers: 0-10 pts
+    - Buy/Sell Ratio: 0-10 pts
+    - Volume: 0-12 pts (reserved for future)
+    - Graduation Speed: 0-10 pts (reserved for future)
 
     Returns:
         (score, breakdown, should_signal, skip_reason)
@@ -199,172 +255,187 @@ def calculate_score_v2(
     skip_reason = None
 
     # ==========================================================================
-    # PRE-CHECKS (minimal - let scoring decide)
+    # PRE-CHECKS
     # ==========================================================================
 
-    # Only check liquidity for graduated tokens
-    # Pre-grad tokens use bonding curve (no LP liquidity) - checked via bonding_pct instead
-    if graduated and liquidity < MIN_LIQUIDITY:
-        return 0, {}, False, f"Liquidity ${liquidity:,.0f} < ${MIN_LIQUIDITY:,.0f}"
+    # Liquidity check for graduated tokens only
+    if graduated and liquidity < V2_MIN_LIQUIDITY:
+        return 0, {}, False, f"Liquidity ${liquidity:,.0f} < ${V2_MIN_LIQUIDITY:,.0f}"
 
-    # Unique buyers check (from WebSocket - reliable unlike DexScreener holders)
-    # This replaces V2's MIN_HOLDERS since WebSocket unique_buyers is more accurate
-    # STABLE MODE: Gradual ramp-up to 15 unique buyers
+    # Unique buyers check with gradual ramp-up
     if tracking_seconds < 60:
         min_buyers_required = 3  # Warming up
     elif tracking_seconds < 120:
         min_buyers_required = 8  # Building momentum
     else:
-        min_buyers_required = V2_MIN_UNIQUE_BUYERS  # Full STABLE MODE (15)
+        min_buyers_required = V2_MIN_UNIQUE_BUYERS  # Full threshold (15)
 
     if unique_buyers < min_buyers_required:
         return 0, {}, False, f"Unique buyers {unique_buyers} < {min_buyers_required}"
 
     # ==========================================================================
-    # FACTOR 1: Wallet Tier (0-25 points)
+    # FACTOR 1: Smart Wallet Score (0-40 pts) - STABLE MODE
+    # ==========================================================================
+    # +10 per KOL, max 40, +15 bonus for multiple KOLs
+
+    wallet_base = min(kol_count * SMART_WALLET_WEIGHTS['per_kol'], SMART_WALLET_WEIGHTS['max_score'])
+
+    # Multi-KOL bonus (2+ KOLs buying same token)
+    multi_kol_bonus = SMART_WALLET_WEIGHTS['multi_kol_bonus'] if kol_count >= 2 else 0
+
+    # Tier bonus (on top of count)
+    tier_bonus = {'elite': 5, 'top_kol': 3, 'verified': 2, 'smart_money': 3, 'new': 0}
+    wallet_tier_bonus = tier_bonus.get(wallet_tier, 0)
+
+    wallet_score = min(wallet_base + multi_kol_bonus + wallet_tier_bonus, SMART_WALLET_WEIGHTS['max_score'])
+
+    breakdown['smart_wallet'] = {
+        'kol_count': kol_count,
+        'tier': wallet_tier,
+        'base': wallet_base,
+        'multi_kol_bonus': multi_kol_bonus,
+        'tier_bonus': wallet_tier_bonus,
+        'score': wallet_score,
+        'max': 40
+    }
+
+    # ==========================================================================
+    # FACTOR 2: Buyer Velocity (0-18 pts) - buyers in 5 min window
     # ==========================================================================
 
-    tier_scores = {'elite': 25, 'top_kol': 20, 'verified': 15, 'new': 10, 'smart_money': 20}
-    wallet_score = tier_scores.get(wallet_tier, 10)
-    breakdown['wallet'] = {'tier': wallet_tier, 'score': wallet_score, 'max': 25}
-
-    # ==========================================================================
-    # FACTOR 2: Buyer Velocity (0-20 points)
-    # ==========================================================================
-    # Buys per minute - indicates FOMO/momentum
-
-    tracking_minutes = max(tracking_seconds / 60, 0.5)  # Min 30 seconds
-    buys_per_minute = buys / tracking_minutes
-
-    if buys_per_minute >= 5:
-        velocity_score = 20  # Very high velocity
-    elif buys_per_minute >= 3:
-        velocity_score = 15
-    elif buys_per_minute >= 1.5:
-        velocity_score = 10
-    elif buys_per_minute >= 0.5:
-        velocity_score = 5
+    # Scale to 5 min window (300 seconds)
+    window_seconds = 300
+    if tracking_seconds > 0:
+        buyers_scaled = unique_buyers * (window_seconds / min(tracking_seconds, window_seconds))
     else:
-        velocity_score = 0
+        buyers_scaled = unique_buyers
+
+    if buyers_scaled >= 100:
+        velocity_score = BUYER_VELOCITY_WEIGHTS['explosive']
+    elif buyers_scaled >= 50:
+        velocity_score = BUYER_VELOCITY_WEIGHTS['very_fast']
+    elif buyers_scaled >= 25:
+        velocity_score = BUYER_VELOCITY_WEIGHTS['fast']
+    elif buyers_scaled >= 15:
+        velocity_score = BUYER_VELOCITY_WEIGHTS['moderate']
+    elif buyers_scaled >= 5:
+        velocity_score = BUYER_VELOCITY_WEIGHTS['slow']
+    else:
+        velocity_score = BUYER_VELOCITY_WEIGHTS['minimal']
 
     breakdown['buyer_velocity'] = {
-        'buys': buys,
-        'minutes': round(tracking_minutes, 1),
-        'per_minute': round(buys_per_minute, 2),
+        'unique_buyers': unique_buyers,
+        'tracking_seconds': round(tracking_seconds, 0),
+        'buyers_scaled_5min': round(buyers_scaled, 1),
         'score': velocity_score,
-        'max': 20
+        'max': 18
     }
 
     # ==========================================================================
-    # FACTOR 3: Unique Buyers (0-15 points)
-    # ==========================================================================
-    # More unique buyers = more organic interest
-
-    if unique_buyers >= 20:
-        unique_score = 15
-    elif unique_buyers >= 12:
-        unique_score = 12
-    elif unique_buyers >= 8:
-        unique_score = 8
-    elif unique_buyers >= 5:
-        unique_score = 5
-    else:
-        unique_score = 0
-
-    breakdown['unique_buyers'] = {
-        'count': unique_buyers,
-        'score': unique_score,
-        'max': 15
-    }
-
-    # ==========================================================================
-    # FACTOR 4: Buy/Sell Ratio (0-15 points)
-    # ==========================================================================
-
-    buy_sell_ratio = buys / max(sells, 1)
-
-    if buy_sell_ratio >= 5.0:
-        bs_score = 15  # Very bullish
-    elif buy_sell_ratio >= 3.0:
-        bs_score = 12
-    elif buy_sell_ratio >= 2.0:
-        bs_score = 8
-    elif buy_sell_ratio >= 1.0:
-        bs_score = 4
-    else:
-        bs_score = 0
-
-    breakdown['buy_sell_ratio'] = {
-        'buys': buys,
-        'sells': sells,
-        'ratio': round(buy_sell_ratio, 2),
-        'score': bs_score,
-        'max': 15
-    }
-
-    # ==========================================================================
-    # FACTOR 5: Bonding Progress (0-15 points) - Pre-grad only
+    # FACTOR 3: Bonding Speed (0-15 pts) - PRE-GRAD ONLY
     # ==========================================================================
 
     bonding_score = 0
-    if not graduated and bonding_pct > 0:
-        if bonding_pct >= 80:
-            bonding_score = 15  # Near graduation!
-        elif bonding_pct >= 60:
-            bonding_score = 12
-        elif bonding_pct >= 40:
-            bonding_score = 8
-        elif bonding_pct >= 20:
-            bonding_score = 4
+    bonding_velocity = 0
 
-    breakdown['bonding'] = {
-        'pct': round(bonding_pct, 1),
+    if not graduated and tracking_seconds > 0:
+        # Calculate bonding velocity (%/min)
+        tracking_minutes = tracking_seconds / 60
+        if tracking_minutes > 0:
+            bonding_velocity = bonding_pct / tracking_minutes
+
+            if bonding_velocity > 7:
+                bonding_score = BONDING_SPEED_WEIGHTS['hyper']
+            elif bonding_velocity > 5:
+                bonding_score = BONDING_SPEED_WEIGHTS['rocket']
+            elif bonding_velocity >= 2:
+                bonding_score = BONDING_SPEED_WEIGHTS['fast']
+            elif bonding_velocity >= 1:
+                bonding_score = BONDING_SPEED_WEIGHTS['steady']
+            elif bonding_velocity >= 0.5:
+                bonding_score = BONDING_SPEED_WEIGHTS['slow']
+            else:
+                bonding_score = BONDING_SPEED_WEIGHTS['crawl']
+
+    breakdown['bonding_speed'] = {
+        'bonding_pct': round(bonding_pct, 1),
+        'velocity_pct_per_min': round(bonding_velocity, 2),
         'graduated': graduated,
         'score': bonding_score,
         'max': 15
     }
 
     # ==========================================================================
-    # FACTOR 6: Multi-KOL Bonus (0-10 points)
+    # FACTOR 4: Unique Buyers (0-10 pts)
     # ==========================================================================
-    # Multiple KOLs buying = strong signal
 
-    if kol_count >= 3:
-        kol_bonus = 10
-    elif kol_count >= 2:
-        kol_bonus = 6
+    if unique_buyers >= 100:
+        unique_score = UNIQUE_BUYER_WEIGHTS['exceptional']
+    elif unique_buyers >= 50:
+        unique_score = UNIQUE_BUYER_WEIGHTS['high']
+    elif unique_buyers >= 25:
+        unique_score = UNIQUE_BUYER_WEIGHTS['medium']
+    elif unique_buyers >= 10:
+        unique_score = UNIQUE_BUYER_WEIGHTS['low']
     else:
-        kol_bonus = 0
+        unique_score = UNIQUE_BUYER_WEIGHTS['minimal']
 
-    breakdown['multi_kol'] = {
-        'count': kol_count,
-        'score': kol_bonus,
+    breakdown['unique_buyers'] = {
+        'count': unique_buyers,
+        'score': unique_score,
         'max': 10
     }
 
     # ==========================================================================
-    # TOTAL (max 100)
+    # FACTOR 5: Buy/Sell Ratio (0-10 pts)
+    # ==========================================================================
+
+    buy_sell_ratio = buys / max(sells, 1)
+
+    if buy_sell_ratio >= 2.0:
+        bs_score = BUY_SELL_WEIGHTS['strong']
+    elif buy_sell_ratio >= 1.5:
+        bs_score = BUY_SELL_WEIGHTS['good']
+    elif buy_sell_ratio >= 1.0:
+        bs_score = BUY_SELL_WEIGHTS['weak']
+    else:
+        bs_score = BUY_SELL_WEIGHTS['negative']
+
+    breakdown['buy_sell_ratio'] = {
+        'buys': buys,
+        'sells': sells,
+        'ratio': round(buy_sell_ratio, 2),
+        'score': bs_score,
+        'max': 10
+    }
+
+    # ==========================================================================
+    # TOTAL
     # ==========================================================================
 
     total_score = (
-        wallet_score +
-        velocity_score +
-        unique_score +
-        bs_score +
-        bonding_score +
-        kol_bonus
+        wallet_score +      # 0-40
+        velocity_score +    # 0-18
+        bonding_score +     # 0-15 (pre-grad only)
+        unique_score +      # 0-10
+        bs_score            # 0-10
     )
+    # Max: 93 pre-grad, 78 post-grad
+
+    # Use different threshold for pre-grad vs post-grad
+    threshold = V2_POST_GRAD_THRESHOLD if graduated else V2_MIN_SCORE
 
     breakdown['total'] = {
         'score': total_score,
-        'max': 100,
-        'threshold': V2_MIN_SCORE
+        'max': 93 if not graduated else 78,
+        'threshold': threshold,
+        'graduated': graduated
     }
 
-    should_signal = total_score >= V2_MIN_SCORE
+    should_signal = total_score >= threshold
 
     if not should_signal:
-        skip_reason = f"Score {total_score} < {V2_MIN_SCORE}"
+        skip_reason = f"Score {total_score} < {threshold}"
 
     return total_score, breakdown, should_signal, skip_reason
 
