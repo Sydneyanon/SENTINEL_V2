@@ -16,13 +16,13 @@ WEBHOOK_URL = os.getenv('WEBHOOK_URL')  # Your Railway URL (e.g., https://xxx.ra
 APIFY_API_TOKEN = os.getenv('APIFY_API_TOKEN')  # For GMGN smart money discovery
 
 # =============================================================================
-# SIGNAL THRESHOLDS (Data-driven from Ralph analysis)
+# SIGNAL THRESHOLDS (STABLE MODE - Jan 22 config with 53% WR)
 # =============================================================================
-# Score: 27% WR at all levels 30-50, doesn't predict wins
-MIN_SCORE = 30
+# Quality > Quantity: stricter thresholds, fewer but better signals
+MIN_SCORE = 60  # STABLE MODE: raised from 30
 
-# Liquidity: Wins avg $10K vs Rugs avg $20K. Best ≤$10K = 29% WR
-MIN_LIQUIDITY = 8000
+# Liquidity: STABLE MODE uses stricter $20K minimum
+MIN_LIQUIDITY = 20000  # STABLE MODE: raised from $8K
 
 # MCAP: Smart money buys in $100-200K range for graduated tokens
 MAX_MCAP = 200000
