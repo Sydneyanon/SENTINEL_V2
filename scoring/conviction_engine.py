@@ -12,7 +12,10 @@ from rug_detector import RugDetector
 # from twitter_fetcher import get_twitter_fetcher
 from credit_tracker import get_credit_tracker  # OPT-055: Track credit usage
 from rugcheck_api import get_rugcheck_api  # RugCheck.xyz API integration
-from ralph.integrate_ml import get_ml_predictor  # ML predictions for conviction scoring
+
+# ML predictor disabled (ralph removed for lean deployment)
+def get_ml_predictor():
+    return None
 
 
 class ConvictionEngine:
@@ -938,10 +941,13 @@ class ConvictionEngine:
             final_score += buyer_mcap_penalty
 
             # ML Prediction - Add conviction bonus based on predicted outcome
+            # (ML disabled - ralph removed for lean deployment)
             kol_count = smart_wallet_data.get('wallet_count', 0)
-            ml_result = self.ml_predictor.predict_for_signal(token_data, kol_count=kol_count)
+            ml_result = {'ml_enabled': False, 'ml_bonus': 0}
+            if self.ml_predictor:
+                ml_result = self.ml_predictor.predict_for_signal(token_data, kol_count=kol_count)
 
-            if ml_result['ml_enabled']:
+            if ml_result.get('ml_enabled'):
                 logger.info(f"   🤖 ML Prediction: {ml_result['class_name']} "
                            f"({ml_result['confidence']*100:.0f}% confident)")
                 logger.info(f"      Conviction bonus: {ml_result['ml_bonus']:+d} points")
